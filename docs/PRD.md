@@ -74,7 +74,7 @@ The PRD commits to two headline metrics. Both are measurable in CI and tied to t
 
 ### 5.1 In scope for v1
 
-- **Roles are an open-ended, registry-defined set.** v1 does not hard-code "four roles." Whichever roles the shipped registry advertises are the v1 roles; the current set is on-chain, off-chain, infrastructure, testing, and formal-methods.
+- **Roles are a fixed, code-defined vocabulary; tools are the open-ended part.** The set of roles is defined in code, not data — the registry *references* roles but cannot introduce them. It is *not* frozen at "four": the current set is on-chain, off-chain, infrastructure, testing, and formal-methods, and it can grow in a future version via a deliberate code change. **Tools**, by contrast, are fully data-driven — adding one is a registry + template change with no core code change (see [ARCHITECTURE.md](./ARCHITECTURE.md) §3.1).
 - **At least one working tool per advertised role.** No role is advertised with zero working tools. There is no single "golden path" combination — every shipped tool is verified individually and the interface contract guarantees that any combination composes (§7), so combinations are not tested pairwise.
 - **Whatever ships in the registry must work.** Every registered tool is held to the build/contract bar; adding a tool requires adding its tests (§7, SM-1).
 - **Three surfaces**: One-shot CLI, interactive CLI, and web (§6).
@@ -130,7 +130,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 
 ### Generation
 
-- **FR-5 (M):** Generate a monorepo containing only the directories for selected roles, a top-level orchestrating `Justfile`, a top-level README explaining the full architecture, `.env` (when infra is present), and the blueprint directory (when on-chain is present).
+- **FR-5 (M):** Generate a monorepo with role directories **only** for selected roles, plus a base layer present in every project: a top-level orchestrating `Justfile`, a top-level README explaining the full architecture, `.gitignore`, `.env` (always — it seeds `CARDANO_NETWORK` and the infra connection vars), and the `blueprint/` directory (present for every project except infrastructure-only — so every blueprint-consuming role has a stable path and a user can drop in an external `plutus.json`; the `plutus.json` file itself is produced by on-chain `build`).
 - **FR-6 (M):** Every generated project includes a **simple but complete, runnable example** that demonstrates the selected components working *together*, not in isolation.
 - **FR-7 (M):** Composition is generic. The pipeline wires components using only the set of present roles and the interface contract, with **no per-tool-pair logic**.
 - **FR-8 (M):** Top-level and per-component `Justfile`s expose standardized targets (`build`, `test`, `dev`, `clean`); the top level delegates to each component.
