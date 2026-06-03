@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`cardano-init` is a Rust CLI tool that scaffolds Cardano protocol projects. Users select tools for each functional role (on-chain, off-chain, infrastructure, testing) and the CLI generates a working monorepo. Read `REQUIREMENTS.md` and `ARCHITECTURE.md` before making any significant changes — they are authoritative.
+`cardano-init` is a Rust CLI tool that scaffolds Cardano protocol projects. Users select tools for each functional role (on-chain, off-chain, infrastructure, testing) and the CLI generates a working monorepo. The authoritative docs live in `docs/`: read `docs/PRD.md` (product), `docs/ARCHITECTURE.md` (system design), and `docs/TECH_SPEC.md` (contracts, schemas, edge cases) before making any significant changes; `docs/ADDING_A_TOOL.md` is the contributor guide.
 
 ## Commands
 
@@ -28,7 +28,7 @@ cargo clippy
 
 ## Architecture
 
-The codebase is a single Rust crate. The module structure is planned as follows (see `ARCHITECTURE.md` §1):
+The codebase is a single Rust crate. The module structure is as follows (see `docs/ARCHITECTURE.md` §2):
 
 - `src/cli/` — user interaction only (dialoguer, output formatting). No logic.
 - `src/registry/` — deserializes embedded TOML tool definitions into typed structs.

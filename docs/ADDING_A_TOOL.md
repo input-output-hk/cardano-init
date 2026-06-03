@@ -163,7 +163,7 @@ dev:
 
 ## Template variables
 
-Any file with `render = true` can reference the following variables from the template context:
+Any rendered file (one whose `source` ends in `.jinja`) can reference the following variables from the template context:
 
 ```jinja
 {{ project_name }}          {# e.g. "my-protocol" #}

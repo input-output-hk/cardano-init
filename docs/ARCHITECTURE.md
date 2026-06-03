@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Last updated:** 2026-06-01 · **Owner:** Robertino Martinez
 
-> This is the **canonical** architecture document. It supersedes the legacy root-level `REQUIREMENTS.md` and `ARCHITECTURE.md` (retained only in git history / `docs/legacy/`). Read [PRD.md](./PRD.md) for the *why* and *for whom*; this document owns the *how*. Detailed contracts, data shapes, and edge cases live in [TECH_SPEC.md](./TECH_SPEC.md); sequencing lives in [ROADMAP.md](./ROADMAP.md).
+> This is the **canonical** architecture document. It supersedes the legacy root-level `REQUIREMENTS.md` and `ARCHITECTURE.md` (now deleted; available in git history). Read [PRD.md](./PRD.md) for the *why* and *for whom*; this document owns the *how*. Detailed contracts, data shapes, and edge cases live in [TECH_SPEC.md](./TECH_SPEC.md); sequencing lives in [ROADMAP.md](./ROADMAP.md).
 
 ---
 
@@ -37,7 +37,7 @@ cardano-init/
 │   │   ├── interactive.rs      # Guided interactive flow (dialoguer)
 │   │   ├── oneshot.rs          # Flag → Selection, validation, machine-readable errors
 │   │   ├── output.rs           # Presenter: renders results/errors as human text or JSON
-│   │   └── update.rs           # (planned) async, cached, fail-silent version check (§9)
+│   │   └── update.rs           # (planned) cached, pre-generation, fail-silent update check (§9)
 │   │
 │   ├── registry/               # Pure: tool + role definitions from embedded TOML
 │   │   ├── mod.rs
@@ -188,7 +188,7 @@ name = "Aiken"
 description = "…newcomer-friendly explanation…"
 website = "https://aiken-lang.org"
 languages = ["aiken"]
-system_deps = ["aiken"]    # abstract dep ids → resolved by the doctor catalog (§8)
+system_deps = ["aiken"]    # abstract dep ids → resolved via registry/deps.toml (§8)
 nix_packages = ["aiken"]       # packages for the generated Nix dev shell
 
 [roles.on-chain]
@@ -275,71 +275,51 @@ Today output is human-styled text printed directly. To serve both humans and age
 
 ## 8. Dependency doctor (`doctor/`, planned)
 
-v1 scope is **check + advise** (auto-install and a standalone subcommand are deferred — see ROADMAP). The module is split to preserve the purity invariant:
+v1 scope is **check + advise** (auto-install and a standalone subcommand are deferred — see ROADMAP). The dependency catalog is a small **graph**, split between code and data along the purity invariant:
 
 ```
 doctor/
-├── mod.rs      Pure: fn diagnose(selected_deps, env: &Environment) -> Report
-├── catalog.rs  Pure: in-code declarative table — dep id → check + install methods
-└── probe.rs    Impure: detect OS, available package managers, PATH → Environment
+├── mod.rs         Pure: resolve(targets, catalog, env) -> Report   (recursive, cycle-safe)
+├── installers.rs  Pure (code): the closed `Installer` vocabulary — per installer: detect binaries, command template, and a `bootstrap` list of dep ids
+├── catalog.rs     Loads embedded registry/deps.toml -> DepCatalog (dep id → recipe)
+└── probe.rs       Impure: detect OS + which installers are on PATH -> Environment
 ```
 
-- **Inputs:** the `system_deps` of the selected tools (from the registry) + a detected `Environment` (OS, package managers, what's on `PATH`).
-- **The catalog is an in-code declarative table** (`catalog.rs`), not an embedded data file — see §8.1 for the rationale. Each entry maps a dep id to: presence-check binaries, a universal `docs` fallback, and an ordered list of install methods. The registry keeps declaring abstract dep ids (`aiken-cli`, `node`, `sbt`); the catalog centralizes the platform/manager quirks in one tested place rather than duplicating them across tool TOMLs.
-- **Package managers are a code-defined vocabulary** (`PackageManager` enum: `Brew`, `Apt`, `Dnf`, `Pacman`, `Winget`, `Nix`, plus tool-specific installers like `Aikup` and `CardanoUp`, and a `Curl` script escape hatch). The catalog references managers as enum values (compile-time checked); `probe.rs` owns detecting which are present. Adding a manager is a deliberate code change (a variant + its detection + command formatting).
-- **Selection logic (`diagnose`, pure):** a dep is present iff any of its `binaries` is on `PATH`. For each missing dep, recommend the **first install method whose manager is detected** in the `Environment`, list the rest as alternatives, and always show `docs` as the fallback so advice is never empty (FR-20). Version constraints are out of scope for v1 (presence only).
-- **Infrastructure deps** are advised via `cardano-up` (an ordinary `PackageManager::CardanoUp` method); `cardano-up` itself is a catalog entry. v1 instructs the user to install it if absent; auto-installing `cardano-up` is deferred to post-v1.
-- **Output:** a structured `Report` (missing deps + exact install commands, or "all present") handed to the presenter (§7.2). If a dep can't be satisfied, the doctor states what to install manually and affirms the template is otherwise ready.
-- **Boundary:** `mod.rs`/`catalog.rs` are pure and unit-tested by feeding synthetic `Environment`s; only `probe.rs` touches the system. `doctor` depends on `registry`/`contract`, never on `cli`.
+- **Two-tier inputs.** The selection yields **required** deps = `{just}` (universal task runner) ∪ the `system_deps` of all selected tools (unioned, deduped); and **recommended** deps = `{process-compose}` **if  two or more infrastructure tools are selected** (improves multi-service `just dev`, never required — TECH_SPEC §7.2/§9.1). `just`/`process-compose` are base/derived deps owned by no tool. Missing recommended deps are soft notes, never blocking.
+- **Installers vs deps — the key model.** An **installer** is just another dependency. Code owns a *closed* `Installer` vocabulary (`Brew`, `Apt`, `Dnf`, `Pacman`, `Winget`, `Nix`, `Go`, `Cargo`, `Npm`, `Aikup`, `CardanoUp`, `Curl`, `PowerShell`); each declares its detect-binaries, a command template (`brew install {arg}`, `npm install -g {arg}`, `curl -sSfL {arg} | sh`, …), and a **`bootstrap` list of dep ids**. An **empty `bootstrap` list ⇒ terminal** (we detect it, never install it — system package managers, `nix`, the OS shells); a **non-empty list ⇒ bootstrappable** by installing any one of those deps in order (`npm`→`["node"]`, `aikup`→`["aikup"]`, `cargo`→`["rustup","rust"]`). This is what makes the catalog a graph rather than a flat list.
+- **Recipes live in data.** Per-dep recipes are an embedded TOML file (`registry/deps.toml`), keyed by dep id: `binaries` (presence check), `docs` (universal fallback), and an ordered `install` list of `{ installer = arg }` methods. Installer names are validated against the code enum at load (unknown installer → load error, like an unknown `Role`). See §8.1 for why code/data split this way.
+- **Resolver (`resolve`, pure, recursive).** A dep is present if  any of its `binaries` is on `PATH`. For a missing dep, walk its `install` methods in order: the first method whose installer is **detected** yields a one-step command; otherwise, if the installer is **bootstrappable**, recurse to satisfy one of its `bootstrap` deps and prepend those steps. The result is an ordered, possibly multi-step **plan** (e.g. `aiken` missing with no `nix`/`aikup` → install `aikup` via `npm`, then `aikup install latest`). Picking a single method per dep is exactly why the `nix` path needs no `aikup`. Cycle detection guards the walk; `docs` is the fallback when nothing resolves (advice never empty, FR-20). Version constraints are out of scope for v1 (presence only); doctor output is **host-dependent by design** (not part of the byte-identical generation contract).
+- **Infrastructure deps** install via `cardano-up` (the `CardanoUp` installer); `cardano-up` is itself a dep in `registry/deps.toml` (bootstrappable via its own installer methods). Auto-installing it is deferred to post-v1.
+- **Boundary:** `mod.rs`/`installers.rs`/`catalog.rs` are pure and unit-tested with synthetic `Environment`s; only `probe.rs` touches the system. `doctor` depends on `registry`/`contract`, never on `cli`.
 
-### 8.1 Why an in-code table, not an embedded data file
+### 8.1 The code/data split
 
-The catalog looks like registry data but differs in the property that matters: it is
-bound to the closed `PackageManager` vocabulary and is maintained by core maintainers,
-not contributed by the ecosystem.
+The catalog is a graph with two kinds of node, split by what each kind *is*:
 
-- **Edits rarely stay data-only.** Adding a *tool* is pure data (reference an existing
-  role + a template). Adding catalog knowledge for a genuinely new dep usually arrives
-  with a new installer/manager (`aikup`, `ghcup`, `cardano-up`, a `curl|sh` script),
-  which needs probe detection + a `PackageManager` variant + command formatting anyway.
-  When the data can't change without code changing in lockstep, a separate TOML adds
-  parse/validate/keep-in-sync indirection without the registry's payoff.
-- **Compile-time safety.** Manager references are enum values — un-typo-able, and a
-  renamed/removed manager fails to compile. A TOML catalog would push all of that to
-  runtime validation code.
-- **Locality & audience.** The entry, the manager it references, the probe that detects
-  it, and the formatter that consumes it all live in `doctor/` and co-evolve. Unlike the
-  tool registry (the ecosystem contribution surface), the catalog is internal
-  maintainer knowledge, so a low-Rust-barrier data file serves no real author.
+- **Installers are code** (`installers.rs`). Detection, command templating, and the `bootstrap` edges are *logic*, and the set is a closed vocabulary — so it earns compile-time safety (installer references are un-typo-able; a removed installer fails to compile) and one tested home for platform quirks. Adding an installer is a deliberate code change, done only when a real recipe needs it on a supported platform.
+- **Recipes are data** (`registry/deps.toml`). This is what honors the project's extensibility promise: a tool author adds a tool by writing `system_deps = [...]` and, if a dep is new, a `registry/deps.toml` entry that *chooses from* the existing installer vocabulary — **no Rust**. Recipes are deduplicated by dep id (shared deps like `node`/`jvm` are defined once and referenced by many tools), and installer names are validated against the enum at load.
 
-The table is kept **declarative** (a `static &[DepEntry]`) so it reads like data while
-retaining type safety:
+This split is the reversal of the earlier "in-code catalog" : the common case — a new tool whose deps install via existing installers — becomes pure data, which is the whole point of the registry model. The narrow case that still needs code (a brand-new installer) is rare and benefits from maintainer review anyway. Safety is preserved because data only ever names a closed, code-defined installer plus an `arg`; it never carries free-form command logic.
 
-```rust
-static CATALOG: &[DepEntry] = &[
-    DepEntry {
-        id: "node", name: "Node.js", binaries: &["node"],
-        docs: "https://nodejs.org/en/download",
-        install: &[
-            Method::Pkg { manager: Brew,   package: "node" },
-            Method::Pkg { manager: Apt,    package: "nodejs" },
-            Method::Pkg { manager: Winget, package: "OpenJS.NodeJS" },
-        ],
-    },
-    DepEntry {
-        id: "aiken-cli", name: "Aiken CLI", binaries: &["aiken"],
-        docs: "https://aiken-lang.org/installation-instructions",
-        install: &[
-            Method::Cmd { manager: Aikup, command: "aikup install" },
-            Method::Pkg { manager: Nix,   package: "aiken" },
-        ],
-    },
-];
+```toml
+# registry/deps.toml — keyed by dep id; install = ordered [{ installer = arg }]
+[node]
+binaries = ["node"]
+docs     = "https://nodejs.org/en/download"
+install  = [ { brew = "node" }, { apt = "nodejs" }, { winget = "OpenJS.NodeJS" }, { nix = "nodejs" } ]
+
+[aikup]
+binaries = ["aikup"]
+docs     = "https://aiken-lang.org/installation-instructions"
+install  = [ { npm = "@aiken-lang/aikup" }, { curl = "https://install.aiken-lang.org" }, { powershell = "https://windows.aiken-lang.org" } ]
+
+[aiken]
+binaries = ["aiken"]
+docs     = "https://aiken-lang.org/installation-instructions"
+install  = [ { aikup = "latest" }, { nix = "aiken" } ]
 ```
 
-The one remaining runtime check is **referential integrity**: a test asserts every
-`system_deps` id used by any tool has a `CATALOG` entry (this would be required with a
-data file too).
+**Referential integrity (tests):** every `system_deps` id (plus base deps `just` / `process-compose`) has a `registry/deps.toml` entry; every installer named in the data exists in the `Installer` enum; every dep id in an installer's `bootstrap` list exists. The full field-by-field schema and the resolver algorithm are in TECH_SPEC §9.
 
 ---
 
@@ -347,9 +327,10 @@ data file too).
 
 The chosen mechanism for template freshness without runtime template fetching (PRD A-3/FR-24). It is a **thin `cli/` concern** (UX, network — never core):
 
-- Best-effort check against the GitHub releases API on a **background thread** with a short timeout; the notice (if any) prints at the **end**, never gating generation.
-- **Cached** (e.g. once/day) to avoid repeated network calls.
-- **Fail-silent**: offline, timeout, or error → no-op. It never affects generated output and never blocks. This preserves both offline operation and determinism.
+- Best-effort check against the GitHub releases API; the notice (if any) is surfaced **before the write phase**, so the user can update and regenerate rather than discovering it post-write. It informs, never gates (the user may Ctrl-C to update first); it never alters generated output.
+- **Latency is hidden, not added.** In **interactive** mode the check fires async at startup and completes during tool selection — zero added latency. In **human one-shot** there's no think-time to hide it, so the result is joined with a **≤1s deadline** behind a spinner before writing (worst case +1s, once/day).
+- **Cached once/day** (small file in the OS cache dir): already-checked-today → zero network, zero latency.
+- **Gated and fail-silent**: only when stdout is a TTY and not `--format json` (agents/CI: no network, no spinner, no notice). Offline/timeout/parse error → no-op. Preserves offline operation and determinism (A-3).
 
 ---
 
@@ -379,7 +360,7 @@ The local `serve` path (10.1) ships regardless; the hosted page is additive. If 
 
 ## 11. Testing strategy
 
-- **Unit (pure core):** registry loading (every TOML parses, fields present); context building; planning (exact file set + order); rendering (context + template → expected output); doctor `diagnose` over synthetic environments.
+- **Unit (pure core):** registry loading (every TOML parses, fields present); context building; planning (exact file set + order); rendering (context + template → expected output); doctor `resolve` over synthetic environments (incl. multi-step bootstrap chains and the cycle guard).
 - **Contract compliance (mechanical):** for each template, assert the Justfile exposes `build`/`test`/`dev`/`clean`; for on-chain, assert `just build` produces `blueprint/plutus.json`. This is what lets us avoid testing tool combinations.
 - **Per-tool build smoke tests:** scaffold each tool in isolation and, where CI has the toolchain (or via Nix), run `just build && just test`. New tools must add these (PRD SM-1).
 - **Determinism / snapshot tests:** `--dry-run` and rendered output compared against committed snapshots for a set of selections; guards §6.4.
@@ -391,7 +372,7 @@ The local `serve` path (10.1) ships regardless; the hosted page is additive. If 
 
 1. Add `registry/tools/<tool>.toml` with metadata, `system_deps`, `nix_packages`, and a `[roles.<role>]` block per supported role.
 2. Add `templates/<tool>/<role>/` with a `manifest.toml` and template files (conforming to the contract, §4).
-3. If the tool introduces a new `system_deps` id, add a `doctor` catalog entry (§8).
+3. If the tool introduces a new `system_deps` id, add a `registry/deps.toml` entry (pure data; code is needed only if the dep requires a brand-new installer — §8).
 4. Add the per-tool tests (§11).
 5. Recompile (assets are embedded at compile time).
 

@@ -164,7 +164,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 
 ### Versioning & updates
 
-- **FR-24 (S):** On startup, the tool performs a best-effort, non-blocking check for a newer `cardano-init` release and, if one exists, notifies the user and suggests updating before proceeding. This never blocks or alters generation and degrades silently when offline. It is the chosen mechanism for keeping templates fresh without runtime template fetching (see A-3).
+- **FR-24 (S):** On startup, the tool performs a best-effort check for a newer `cardano-init` release and, if one exists, notifies the user and suggests updating **before generation** (so they can update and regenerate rather than discovering it post-write). It is cached once/day, gated to interactive/human-TTY runs (skipped for `--format json`/non-TTY), and bounded — latency is hidden behind interactive selection, or capped at a short deadline (~1s) for human one-shot. It never blocks beyond that deadline, never alters generated output, and degrades silently when offline. It is the chosen mechanism for keeping templates fresh without runtime template fetching (see A-3; details in TECH_SPEC §10).
 
 ---
 
