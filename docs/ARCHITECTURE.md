@@ -275,7 +275,7 @@ Today output is human-styled text printed directly. To serve both humans and age
 
 ## 8. Dependency doctor (`doctor/`, planned)
 
-v1 scope is **check + advise** (auto-install and a standalone subcommand are deferred — see ROADMAP). The dependency catalog is a small **graph**, split between code and data along the purity invariant:
+Scope: **check + advise**, plus the standalone **`cardano-init doctor`** command — both targeted for DX.02. **Auto-install** (running the resolved plan with consent) is a later nice-to-have install command (DX.05) — see ROADMAP. The dependency catalog is a small **graph**, split between code and data along the purity invariant:
 
 ```
 doctor/
@@ -289,7 +289,7 @@ doctor/
 - **Installers vs deps — the key model.** An **installer** is just another dependency. Code owns a *closed* `Installer` vocabulary (`Brew`, `Apt`, `Dnf`, `Pacman`, `Winget`, `Nix`, `Go`, `Cargo`, `Npm`, `Aikup`, `CardanoUp`, `Curl`, `PowerShell`); each declares its detect-binaries, a command template (`brew install {arg}`, `npm install -g {arg}`, `curl -sSfL {arg} | sh`, …), and a **`bootstrap` list of dep ids**. An **empty `bootstrap` list ⇒ terminal** (we detect it, never install it — system package managers, `nix`, the OS shells); a **non-empty list ⇒ bootstrappable** by installing any one of those deps in order (`npm`→`["node"]`, `aikup`→`["aikup"]`, `cargo`→`["rustup","rust"]`). This is what makes the catalog a graph rather than a flat list.
 - **Recipes live in data.** Per-dep recipes are an embedded TOML file (`registry/deps.toml`), keyed by dep id: `binaries` (presence check), `docs` (universal fallback), and an ordered `install` list of `{ installer = arg }` methods. Installer names are validated against the code enum at load (unknown installer → load error, like an unknown `Role`). See §8.1 for why code/data split this way.
 - **Resolver (`resolve`, pure, recursive).** A dep is present if  any of its `binaries` is on `PATH`. For a missing dep, walk its `install` methods in order: the first method whose installer is **detected** yields a one-step command; otherwise, if the installer is **bootstrappable**, recurse to satisfy one of its `bootstrap` deps and prepend those steps. The result is an ordered, possibly multi-step **plan** (e.g. `aiken` missing with no `nix`/`aikup` → install `aikup` via `npm`, then `aikup install latest`). Picking a single method per dep is exactly why the `nix` path needs no `aikup`. Cycle detection guards the walk; `docs` is the fallback when nothing resolves (advice never empty, FR-20). Version constraints are out of scope for v1 (presence only); doctor output is **host-dependent by design** (not part of the byte-identical generation contract).
-- **Infrastructure deps** install via `cardano-up` (the `CardanoUp` installer); `cardano-up` is itself a dep in `registry/deps.toml` (bootstrappable via its own installer methods). Auto-installing it is deferred to post-v1.
+- **Infrastructure deps** install via `cardano-up` (the `CardanoUp` installer); `cardano-up` is itself a dep in `registry/deps.toml` (bootstrappable via its own installer methods). Auto-installing it arrives with the DX.05 install command; bootstrapping `cardano-up` when absent may follow post-RC (ROADMAP).
 - **Boundary:** `mod.rs`/`installers.rs`/`catalog.rs` are pure and unit-tested with synthetic `Environment`s; only `probe.rs` touches the system. `doctor` depends on `registry`/`contract`, never on `cli`.
 
 ### 8.1 The code/data split
@@ -347,14 +347,14 @@ A hand-rolled, zero-dependency HTTP/1.1 server (`TcpListener` + threads) chosen 
 
 Because `/api/plan` calls `scaffold::planner`, the local server's preview is guaranteed to match real generation — no duplicated logic.
 
-### 10.2 Hosted page — **open decision**
+### 10.2 Hosted page
 
-A hosted page has no binary behind it, so it needs another way to derive the preview + command string while honoring "no duplicated generation logic." Two candidates, to be decided in TECH_SPEC:
+A hosted page has no binary behind it. The key observation: the **command string** is trivial to assemble in JS (concatenate flags) and needs *no* planner — only the live *file-tree preview* needs planner logic. So the resolution is staged:
 
-- **(A) WASM core.** Compile the pure registry+planner to WASM; the same Rust logic runs in-browser and natively. Zero duplication; realizes the "future extraction" goal. Cost: a WASM build target + JS bindings.
-- **(B) Static registry JSON + JS preview.** Ship the registry as static JSON and reimplement the lightweight tree preview + command assembly in JS. Trivial to host (pure static site) but duplicates preview logic in a second language (drift risk).
+- **RC (DX.05): static builder.** Ship the registry as **static JSON** and assemble the `cardano-init …` command in plain JS. No binary, no planner, no drift on the command string. The planner-backed **live tree preview is dropped** for the RC (the command output is the deliverable). Hostable as a pure static site.
+- **Post-RC: WASM live-preview.** Compile the pure registry+planner to WASM so the hosted builder shows the exact file tree with zero logic duplication (realizes the "future extraction" goal). Deferred to Phase 2 (ROADMAP) — adds a WASM build/bindings workstream not worth the RC-deadline risk.
 
-The local `serve` path (10.1) ships regardless; the hosted page is additive. If (B) is chosen, the JS preview must be covered by tests that compare it against the planner's output to bound drift.
+The local `serve` path (10.1) ships regardless and keeps its planner-backed preview. If a JS tree-preview approximation is ever added before WASM, it must be tested against the planner's output to bound drift.
 
 ---
 
@@ -382,4 +382,4 @@ No CLI/core code changes are required for a new tool. Contract conformance guara
 
 ## 13. Open architectural decisions
 
-- **OD-1 — Hosted web strategy:** WASM core (A) vs. static JSON + JS preview (B) (§10.2). Local `serve` is unaffected.
+*None currently open.* 

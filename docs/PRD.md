@@ -94,7 +94,7 @@ These are things users might reasonably expect that we deliberately will **not**
 
 ### 5.3 Deferred (post-v1)
 
-- Dependency doctor **auto-install** (running installs with consent), and a standalone `cardano-init doctor` subcommand runnable in an existing project. `cardano-up` already manages infrastructure, so we'd install cardano-up as a dependency same as e.g., `aikup`.
+- Dependency doctor **auto-install** (running installs with consent) — a nice-to-have targeted for the RC ([ROADMAP](./ROADMAP.md) DX.05); `cardano-up` is installed as a dependency like `aikup`. (The standalone `cardano-init doctor` command is **not** deferred — it's a DX.02 deliverable.)
 - Plugin / lifecycle hooks for tools, if and when needed (e.g. "after scaffolding, run `devkit start`").
 - Config-file driven runs beyond flags, if needed.
 
@@ -155,8 +155,8 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 - **FR-18 (M):** Detect the host OS and available package manager(s) and print the **exact install commands** for the missing dependencies.
 - **FR-19 (M):** For the **infrastructure** role, the advised install path uses `cardano-up` as the primary mechanism for provisioning infra tooling. If `cardano-up` itself is absent, v1 instructs the user to install it (auto-install is deferred — §5.3).
 - **FR-20 (M):** If dependencies cannot be satisfied, clearly tell the user which to install manually and state that the generated template is otherwise correct and ready once they do.
-- **FR-21 (C):** Offer to **run** the installs with user consent (auto-install).
-- **FR-22 (C):** Expose the doctor as a standalone subcommand runnable in an existing project.
+- **FR-21 (C):** Offer to **run** the installs with user consent (auto-install). *Nice-to-have, targeted [ROADMAP](./ROADMAP.md) DX.05.*
+- **FR-22 (S):** Expose the doctor as a standalone `cardano-init doctor` subcommand runnable in an existing project. *Targeted DX.02.*
 
 ### Web UI
 
