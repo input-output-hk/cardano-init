@@ -1,6 +1,6 @@
 # Adding a Tool to cardano-init
 
-This guide is for contributors who want to integrate their own tooling into `cardano-init`. If your tool fills one of the supported roles — **on-chain**, **off-chain**, **infrastructure**, **testing**, or **formal-methods** — you can add it by providing two things:
+This guide is for contributors who want to integrate their own tooling into `cardano-init`. If your tool fills one of the supported roles (**on-chain**, **off-chain**, **infrastructure**, **testing**, or **formal-methods**) you can add it by providing two things:
 
 1. A registry entry (`registry/tools/<your-tool>.toml`)
 2. A template directory (`templates/<your-tool>/<role>/`)
@@ -205,7 +205,7 @@ Any rendered file (one whose `source` ends in `.jinja`) can reference the follow
 {% for pkg in nix_packages %}{{ pkg }}{% endfor %}
 ```
 
-Your template files only need to reference the variables relevant to them. An off-chain template does not need to reference `on_chain.*` at all — the integration is handled by the base-level Justfile template, not by individual role templates.
+Your template files only need to reference the variables relevant to them. An off-chain template does not need to reference `on_chain.*` at all. The integration is handled by the base-level Justfile template, not by individual role templates.
 
 ---
 
@@ -265,7 +265,7 @@ clean:
 `templates/mytool/off-chain/src/index.ts`:
 
 ```typescript
-// Off-chain entry point — replace with your transaction logic
+// Off-chain entry point; replace with your transaction logic
 console.log("Hello from MyTool");
 ```
 
@@ -279,20 +279,20 @@ cargo run -- --name test-project --off-chain mytool --dry-run
 
 ## Testing your integration
 
-**Dry run** — check the file plan without writing anything:
+**Dry run**: check the file plan without writing anything:
 
 ```bash
 cargo run -- --name my-project --off-chain mytool --dry-run
 ```
 
-**Full scaffold** — generate a real project and inspect it:
+**Full scaffold**: generate a real project and inspect it:
 
 ```bash
 cargo run -- --name my-project --off-chain mytool
 ls my-project/off-chain/
 ```
 
-**Unit tests** — the registry loader test `all_fields_populated` will automatically pick up your tool and verify all required fields are present:
+**Unit tests**: the registry loader test `all_fields_populated` will automatically pick up your tool and verify all required fields are present:
 
 ```bash
 cargo test

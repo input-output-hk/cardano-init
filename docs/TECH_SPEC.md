@@ -1,4 +1,4 @@
-# cardano-init — Technical Specification
+# cardano-init: Technical Specification
 
 **Status:** Draft · **Last updated:** 2026-06-01 · **Owner:** Robertino Martinez
 
@@ -24,7 +24,7 @@ cardano-init web [--port <u16>]      # local web builder (default port 3000)
 cardano-init list [--format <fmt>]   # (planned) capability discovery
 ```
 
-`--format human|json` (planned) is a global flag; default `human`. `json` **implies non-interactive** — it never prompts; if required input is missing it errors instead.
+`--format human|json` (planned) is a global flag; default `human`. `json` **implies non-interactive**: it never prompts; if required input is missing it errors instead.
 
 ### 2.2 Init flags (one-shot)
 
@@ -54,7 +54,7 @@ Mode resolution: if `--name` is present → one-shot; else → interactive. Prov
 | `1` | **Runtime** error | `dir_exists` (non-empty), registry load failure, render/IO error, web bind failure |
 
 
-The fine-grained "what" is the JSON `error.code` (§2.5); exit code is only the category. Interactive **abort** (user declines the confirmation prompt) exits `0` with no error — and never occurs in `json`/non-interactive mode.
+The fine-grained "what" is the JSON `error.code` (§2.5); exit code is only the category. Interactive **abort** (user declines the confirmation prompt) exits `0` with no error, and never occurs in `json`/non-interactive mode.
 
 ### 2.4 JSON envelope (planned)
 
@@ -130,7 +130,7 @@ nix_packages = ["aiken"]       # optional (default []); nixpkgs attrs for the de
 template = "aiken/on-chain"    # required; path under templates/
 ```
 
-`system_deps` is **per-tool, flat** (§9.1) — it applies whenever the tool is selected for any role.
+`system_deps` is **per-tool, flat** (§9.1): it applies whenever the tool is selected for any role.
 
 ```rust
 RoleConfig { template }
@@ -156,7 +156,7 @@ A `Selection` is **valid by construction** (ARCHITECTURE §3.3); there is no sep
 ### 3.4 Role multiplicity & infra duplicates
 
 - Non-infra roles: at most one tool (interactive allows one; one-shot flags are single).
-- Infrastructure: ≥1 tools. **Duplicate `--infra X --infra X` is de-duplicated** (keep first occurrence) so the plan can't emit `infra/X/` twice. (Dedupe, not error — idempotent and harmless.)
+- Infrastructure: ≥1 tools. **Duplicate `--infra X --infra X` is de-duplicated** (keep first occurrence) so the plan can't emit `infra/X/` twice. (Dedupe, not error: idempotent and harmless.)
 
 ### 3.5 Project-name rules
 
@@ -200,7 +200,7 @@ A file is rendered through MiniJinja **if its `source` ends with `.jinja`**. The
 
 MiniJinja environment (planned config):
 - **Undefined = strict**: referencing an undefined variable is a render error (caught at generation, not in the generated project). Authors guard optionals with `{% if has_* %}`.
-- **Autoescape off**: output is code/config, not HTML — no entity escaping.
+- **Autoescape off**: output is code/config, not HTML, so no entity escaping.
 - **Newlines normalized to `\n` (LF)**, UTF-8, for byte-identical cross-platform output (§11).
 
 ### 4.4 Path safety & destinations
@@ -213,7 +213,7 @@ MiniJinja environment (planned config):
 
 The writer sets **no executable bits** (and `just` doesn't need them). Templates must invoke helper scripts through an interpreter (`sh scripts/x.sh`, `node …`, `just …`), never `./x.sh`. Rationale: portability (exec bits don't exist on Windows) + trivial writer. Documented as a template-authoring rule.
 
-### 4.6 TemplateContext — the template-authoring API
+### 4.6 TemplateContext: the template-authoring API
 
 The entire surface available to templates (`scaffold/context.rs`, `Serialize`):
 
@@ -260,7 +260,7 @@ Determinism note: any consumer that emits tools/roles must sort (§11), since `b
 `planner::plan` emits `FileEntry`s in exactly this order:
 
 1. **Base layer** (always): `Justfile`, `README.md`, `.gitignore`, `.env`.
-2. **Blueprint dir**: `blueprint/.gitkeep` — **if  any non-infrastructure role is present** (§6.2). Source is `TemplateSource::Inline(empty)`.
+2. **Blueprint dir**: `blueprint/.gitkeep`, **if  any non-infrastructure role is present** (§6.2). Source is `TemplateSource::Inline(empty)`.
 3. **Role layers**: assignments processed in **`Role::ALL` order** (not flag order). For each, read the template manifest and append its files (rendered per §4.2). Infra tools nested under `infra/<tool_id>/`, **tools sorted by `tool_id`** (§11).
 4. **Optional layer**: if `nix`, `flake.nix` (rendered) + `.envrc` (`Inline "use flake\n"`).
 
@@ -308,9 +308,9 @@ Constants (`contract.rs`):
 
 ### 7.2 `just dev` semantics (the one orchestrated task)
 
-Top-level `dev` brings up **infrastructure only** — the shared services everything else talks to. App/watch `dev` for on-chain/off-chain/testing/formal are run **per component** by the developer (`just -f off-chain/Justfile dev`, etc.), documented in the README.
+Top-level `dev` brings up **infrastructure only**: the shared services everything else talks to. App/watch `dev` for on-chain/off-chain/testing/formal are run **per component** by the developer (`just -f off-chain/Justfile dev`, etc.), documented in the README.
 
-This does **not** relax §7: every component still implements its own `dev` target (a no-op that prints guidance where a tool has no watch mode), so `just dev` works in any component directory. The top level simply doesn't *aggregate* the non-infra `dev` targets — only infrastructure's.
+This does **not** relax §7: every component still implements its own `dev` target (a no-op that prints guidance where a tool has no watch mode), so `just dev` works in any component directory. The top level simply doesn't *aggregate* the non-infra `dev` targets, only infrastructure's.
 
 Behavior by infra tool count:
 
@@ -319,10 +319,10 @@ Behavior by infra tool count:
 |-------------|-----------------|
 | 0 | Prints the available per-component `dev` commands; orchestrates nothing (nothing shared/long-running). |
 | 1 | Delegates to `just -f infra/<tool>/Justfile dev`. **No orchestrator dependency.** |
-| ≥2 | A `process-compose.yaml` is generated (each infra tool's `dev`, with `depends_on`/health-checks for ordering). `just dev` runs `process-compose up` **if it is on `PATH`**; otherwise it prints how to install process-compose, or how to run each infra `dev` manually. **Recommended, not required — degrades gracefully.** |
+| ≥2 | A `process-compose.yaml` is generated (each infra tool's `dev`, with `depends_on`/health-checks for ordering). `just dev` runs `process-compose up` **if it is on `PATH`**; otherwise it prints how to install process-compose, or how to run each infra `dev` manually. **Recommended, not required: degrades gracefully.** |
 
 
-`process-compose` is a **recommended (optional) dependency**, surfaced by the doctor only in the ≥2-infra case (§9.1) — never a hard requirement, since `just dev` is outside the build/test acceptance bar. It is not owned by any tool's `system_deps`, and is **not** Nix-forced — the catalog offers go/brew/sh/nix install methods (§9). Build/test never touch it.
+`process-compose` is a **recommended (optional) dependency**, surfaced by the doctor only in the ≥2-infra case (§9.1), never a hard requirement, since `just dev` is outside the build/test acceptance bar. It is not owned by any tool's `system_deps`, and is **not** Nix-forced: the catalog offers go/brew/sh/nix install methods (§9). Build/test never touch it.
 
 ---
 
@@ -362,7 +362,7 @@ recommended_deps = {"process-compose"}  if infra_tool_count ≥ 2   else {}
 ```
 
 - **Required** deps gate the build/test acceptance bar (SM-1); their absence is reported prominently. `just` is a base/derived required dep (every project needs the task runner).
-- **Recommended** deps improve the experience but are **never required**. `process-compose` is recommended only when ≥2 infra tools are selected — it smooths multi-service `just dev`, which is *outside* the build/test acceptance bar (§7.2). Its absence is a soft note, never a blocking "missing dependency."
+- **Recommended** deps improve the experience but are **never required**. `process-compose` is recommended only when ≥2 infra tools are selected: it smooths multi-service `just dev`, which is *outside* the build/test acceptance bar (§7.2). Its absence is a soft note, never a blocking "missing dependency."
 
 `just` and `process-compose` are **base/derived deps owned by no tool**; both have entries in `registry/deps.toml` like any dep. (`cardano-up` is reached as an *installer* and is itself a dep entry, rather than added to either set directly.)
 
@@ -370,13 +370,13 @@ recommended_deps = {"process-compose"}  if infra_tool_count ≥ 2   else {}
 
 The catalog is a small **graph**. An *installer* is itself a kind of dependency, so the two node types are: code-defined installers, and data-defined dep recipes that reference them.
 
-**Installers (code, `installers.rs`)** — a closed vocabulary. Per installer: the binaries that mean "available", a command template, and a `bootstrap` list of dep ids (**empty ⇒ terminal**, i.e. detect-only/never auto-installed; **non-empty ⇒ bootstrappable** by installing any one of those deps, tried in order):
+**Installers (code, `installers.rs`)**: a closed vocabulary. Per installer: the binaries that mean "available", a command template, and a `bootstrap` list of dep ids (**empty ⇒ terminal**, i.e. detect-only/never auto-installed; **non-empty ⇒ bootstrappable** by installing any one of those deps, tried in order):
 
 ```rust
 enum Installer { Brew, Apt, Dnf, Pacman, Winget, Nix, Go, Cargo, Npm, Aikup, CardanoUp, Curl, PowerShell }
 
 struct InstallerDef {
-    detect:    &[&str],                 // ["npm"] — installer available if one is on PATH
+    detect:    &[&str],                 // ["npm"]: installer available if one is on PATH
     template:  fn(arg: &str) -> String, // Brew → "brew install {arg}"; Curl → "curl -sSfL {arg} | sh"
     bootstrap: &[&str],                 // dep ids that provide this installer; [] ⇒ terminal
 }
@@ -400,7 +400,7 @@ struct InstallerDef {
 
 The `arg`'s meaning is the installer's: a package name for managers, an installer-script URL for `Curl`/`PowerShell`, a target for `Aikup`/`CardanoUp`. Adding an installer is a deliberate code change, only when a real recipe needs it (same discipline as roles).
 
-**Recipes (data, `registry/deps.toml`)** — keyed by dep id; `install` is an ordered list of single-key `{ installer = arg }` methods (order = preference). Installer keys are validated against the `Installer` enum at load (unknown → load error):
+**Recipes (data, `registry/deps.toml`)**: keyed by dep id; `install` is an ordered list of single-key `{ installer = arg }` methods (order = preference). Installer keys are validated against the `Installer` enum at load (unknown → load error):
 
 ```toml
 [node]  
@@ -500,7 +500,7 @@ Picking a single method per dep is exactly why the `nix` path for `aiken` needs 
 
 Goal: surface "a newer `cardano-init` is available" **before generation**, so the user can update and regenerate with newer templates rather than discovering it post-write (and deleting/regenerating). Constraints: never block agents/CI, never alter generated output, bounded latency, offline-safe.
 
-- **Gating.** Runs only when stdout is a **TTY and not `--format json`** (interactive, or human one-shot). For json/non-TTY (agents/CI) it is skipped entirely — no network, no spinner, no notice.
+- **Gating.** Runs only when stdout is a **TTY and not `--format json`** (interactive, or human one-shot). For json/non-TTY (agents/CI) it is skipped entirely: no network, no spinner, no notice.
 - **Cached once/day.** A small file under the OS cache dir (e.g. `~/.cache/cardano-init/update-check`) stores last-checked date + latest-seen version. Already checked today → cached result, **zero network, zero latency**.
 - **Surfaced before the write phase; latency hidden where possible:**
   - **Interactive:** the check fires async at process start and completes during tool selection; the notice (if any) shows before generation with **no added latency**.
@@ -518,7 +518,7 @@ Identical `(binary, Selection)` ⇒ byte-identical tree. Rules:
 1. **Plan order** is fixed (§6.1): base → blueprint → roles in `Role::ALL` order → optional.
 2. **Assignments are reordered into `Role::ALL` order** for emission (user/flag order does not affect output).
 3. **Infrastructure tools sorted by `tool_id`**.
-4. **Maps emitted in sorted-key order** — `env_vars` and any `HashMap` reaching output use a sorted/canonical view (spec: back `env_vars` with `BTreeMap` or sort at the boundary).
+4. **Maps emitted in sorted-key order**: `env_vars` and any `HashMap` reaching output use a sorted/canonical view (spec: back `env_vars` with `BTreeMap` or sort at the boundary).
 5. **`nix_packages`**: dedup preserving first-seen order across assignments (already so).
 6. **Newlines LF, UTF-8, single trailing newline**; no timestamps, no absolute paths, no host-dependent content in generated files.
 7. **Snapshot tests** over `--dry-run` and rendered output for a fixed set of selections guard all of the above.
@@ -576,5 +576,5 @@ The command-string the UI emits, and the previewed tree, must equal what the CLI
 
 ## 15. Open technical decisions
 
-- **OD-1 — Hosted web strategy** (WASM core vs. static-JSON+JS preview) — ARCHITECTURE
+- **OD-1: Hosted web strategy** (WASM core vs. static-JSON+JS preview): ARCHITECTURE
   §10.2. The only open architectural decision; affects §13 hosted delivery.

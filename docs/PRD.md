@@ -1,4 +1,4 @@
-# cardano-init — Product Requirements Document
+# cardano-init: Product Requirements Document
 
 **Status:** Draft · **Last updated:** 2026-06-01 · **Owner:** Robertino Martinez
 
@@ -8,7 +8,7 @@
 
 ## 1. Summary
 
-`cardano-init` is a CLI tool (with a thin web front-end) that scaffolds a complete, runnable Cardano protocol monorepo. The user picks a tool for each functional role they need — on-chain, off-chain, infrastructure, testing, and other registry-defined roles — and the tool generates a project where every component is already wired together and a small end-to-end example builds and passes its tests out of the box.
+`cardano-init` is a CLI tool (with a thin web front-end) that scaffolds a complete, runnable Cardano protocol monorepo. The user picks a tool for each functional role they need (on-chain, off-chain, infrastructure, testing, and other registry-defined roles) and the tool generates a project where every component is already wired together and a small end-to-end example builds and passes its tests out of the box.
 
 The defining bet is the **interface contract**: every tool template conforms to a shared set of conventions (canonical blueprint path, standard Justfile tasks, standard `.env` variables) so *any* producer composes with *any* consumer without per-pair integration code. Adding a tool is a data change, not a code change.
 
@@ -28,20 +28,20 @@ Two distinct pains block people from starting a Cardano protocol project:
 
 We needed this years ago. Cardano developer experience is not great at many points of the develpment cycle, but getting started is one of the worst and most notable. Since onboarding is suffered by newcomer developers exploring Cardano, having a bad and confusing developer experience means their first impression incentivizes them to move away to other ecosystems. A tool that solve the "choosing the stack and setting up the project" problem means more people will be able to pass through those initial hurdles and get to building their own project faster.
 
-Per-tool scaffolders solve the single-tool case and stop at the role boundary. The value here is precisely the seam *between* tools — the part no single tool owns. As the Cardano tooling ecosystem fragments across languages (Aiken, Haskell/Plinth, Scala/Scalus, TypeScript) the combinatorial wiring problem gets worse, and a contract-based composer is an approach that doesn't scale as O(tools²).
+Per-tool scaffolders solve the single-tool case and stop at the role boundary. The value here is precisely the seam *between* tools: the part no single tool owns. As the Cardano tooling ecosystem fragments across languages (Aiken, Haskell/Plinth, Scala/Scalus, TypeScript) the combinatorial wiring problem gets worse, and a contract-based composer is an approach that doesn't scale as O(tools²).
 
 ---
 
 ## 3. Target users (personas)
 
-### 3.1 Primary — Cardano newcomer
+### 3.1 Primary: Cardano newcomer
 
 A competent developer (possibly new to blockchain entirely) who does not know the Cardano tooling landscape. **We optimize for this persona when tradeoffs arise:** 
 - Explanation over terseness.
 - Sane defaults over open-ended choices.
 - And a project that runs immediately so they can see the shape of a working protocol before writing anything themselves.
 
-### 3.2 Primary — Coding agents
+### 3.2 Primary: Coding agents
 
 LLM-driven agents (e.g. Claude Code) scaffolding a project on a user's behalf. Agents are a **first-class consumer end-to-end:**
 - **They drive the CLI:** One-shot mode must be rock-solid, deterministic output, stable machine-parseable flags, meaningful exit codes, no TTY assumptions.
@@ -49,7 +49,7 @@ LLM-driven agents (e.g. Claude Code) scaffolding a project on a user's behalf. A
 - **They read the generated output:** Predictable structure, self-explanatory READMEs, and the interface contract documented in-repo so the agent can keep building inside the project.
 - **They need actionable errors:** Invalid selections must produce machine-readable, corrective errors (e.g. "tool X does not fill role Y; valid tools: …") rather than dropping into an interactive re-prompt.
 
-### 3.3 Secondary — Experienced Cardano developer
+### 3.3 Secondary: Experienced Cardano developer
 
 Already ships Cardano code; wants a fast, opinionated starting point to skip boilerplate. Benefits from one-shot mode, sane defaults, and the contract, but we do not sacrifice newcomer/agent ergonomics to serve this persona.
 
@@ -74,12 +74,12 @@ The PRD commits to two headline metrics. Both are measurable in CI and tied to t
 
 ### 5.1 In scope for v1
 
-- **Roles are a fixed, code-defined vocabulary; tools are the open-ended part.** The set of roles is defined in code, not data — the registry *references* roles but cannot introduce them. It is *not* frozen at "four": the current set is on-chain, off-chain, infrastructure, testing, and formal-methods, and it can grow in a future version via a deliberate code change. **Tools**, by contrast, are fully data-driven — adding one is a registry + template change with no core code change (see [ARCHITECTURE.md](./ARCHITECTURE.md) §3.1).
-- **At least one working tool per advertised role.** No role is advertised with zero working tools. There is no single "golden path" combination — every shipped tool is verified individually and the interface contract guarantees that any combination composes (§7), so combinations are not tested pairwise.
+- **Roles are a fixed, code-defined vocabulary; tools are the open-ended part.** The set of roles is defined in code, not data: the registry *references* roles but cannot introduce them. It is *not* frozen at "four": the current set is on-chain, off-chain, infrastructure, testing, and formal-methods, and it can grow in a future version via a deliberate code change. **Tools**, by contrast, are fully data-driven: adding one is a registry + template change with no core code change (see [ARCHITECTURE.md](./ARCHITECTURE.md) §3.1).
+- **At least one working tool per advertised role.** No role is advertised with zero working tools. There is no single "golden path" combination: every shipped tool is verified individually and the interface contract guarantees that any combination composes (§7), so combinations are not tested pairwise.
 - **Whatever ships in the registry must work.** Every registered tool is held to the build/contract bar; adding a tool requires adding its tests (§7, SM-1).
 - **Three surfaces**: One-shot CLI, interactive CLI, and web (§6).
 - **Interface contract** enforced mechanically by contract-compliance tests.
-- **Target network is selectable** — `preview` / `preprod` / `mainnet`, defaulting to **`preview`** (the natural starting point for newcomers). The choice is written to `.env` as `CARDANO_NETWORK`, so it is a cheap, late-binding decision — trivially changed after generation.
+- **Target network is selectable:** `preview` / `preprod` / `mainnet`, defaulting to **`preview`** (the natural starting point for newcomers). The choice is written to `.env` as `CARDANO_NETWORK`, so it is a cheap, late-binding decision, trivially changed after generation.
 - **Dependency doctor (check + advise):** Detect which `system_deps` are missing, detect the OS and available package manager, and print exact install instructions. For the **infrastructure** role, the recommended install path delegates to `cardano-up`.
 - **User documentation:** Thorough user documentation to be used both by developers and LLM agents. Also, links and references to documentation and Discord servers based on the user chosen stack on the generated README.
 
@@ -94,7 +94,7 @@ These are things users might reasonably expect that we deliberately will **not**
 
 ### 5.3 Deferred (post-v1)
 
-- Dependency doctor **auto-install** (running installs with consent) — a nice-to-have targeted for the RC ([ROADMAP](./ROADMAP.md) DX.05); `cardano-up` is installed as a dependency like `aikup`. (The standalone `cardano-init doctor` command is **not** deferred — it's a DX.02 deliverable.)
+- Dependency doctor **auto-install** (running installs with consent): a nice-to-have targeted for the RC ([ROADMAP](./ROADMAP.md) DX.05); `cardano-up` is installed as a dependency like `aikup`. (The standalone `cardano-init doctor` command is **not** deferred: it's a DX.02 deliverable.)
 - Plugin / lifecycle hooks for tools, if and when needed (e.g. "after scaffolding, run `devkit start`").
 - Config-file driven runs beyond flags, if needed.
 
@@ -110,7 +110,7 @@ All three surfaces produce identical projects because the CLI is the **single so
 |---------|-----------------|-------------|
 | **One-shot CLI** | Agent, experienced dev | Fully flag-driven, non-interactive, deterministic. Plus capability discovery (structured registry dump), `--dry-run`, and machine-readable errors. |
 | **Interactive CLI** | Newcomer | Guided flow: explain the domain → multi-select roles → pick a tool per role (with recommendations) → set options → review summary + file tree → confirm. |
-| **Web UI** | Newcomer | A visual configurator (Spring-Initializr-style), available **both as a hosted page and as a local server (`cardano-init serve`)**. Reads the same registry, shows live validation and a previewed file tree, and **outputs a copyable CLI command** — it does not generate locally. The hosted page is the zero-install front door; the local server works offline against the exact installed binary version. |
+| **Web UI** | Newcomer | A visual configurator (Spring-Initializr-style), available **both as a hosted page and as a local server (`cardano-init serve`)**. Reads the same registry, shows live validation and a previewed file tree, and **outputs a copyable CLI command**. It does not generate locally. The hosted page is the zero-install front door; the local server works offline against the exact installed binary version. |
 
 
 In all cases, there will be extensive explanation on each tooling role, language, when (and when not) to use it, mapping of usecases and common tooling, and other to help both newcommers and LLM agents to choose the right tool for the job without them having to do reasearch on the side.
@@ -130,13 +130,13 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 
 ### Generation
 
-- **FR-5 (M):** Generate a monorepo with role directories **only** for selected roles, plus a base layer present in every project: a top-level orchestrating `Justfile`, a top-level README explaining the full architecture, `.gitignore`, `.env` (always — it seeds `CARDANO_NETWORK` and the infra connection vars), and the `blueprint/` directory (present for every project except infrastructure-only — so every blueprint-consuming role has a stable path and a user can drop in an external `plutus.json`; the `plutus.json` file itself is produced by on-chain `build`).
+- **FR-5 (M):** Generate a monorepo with role directories **only** for selected roles, plus a base layer present in every project: a top-level orchestrating `Justfile`, a top-level README explaining the full architecture, `.gitignore`, `.env` (always: it seeds `CARDANO_NETWORK` and the infra connection vars), and the `blueprint/` directory (present for every project except infrastructure-only: so every blueprint-consuming role has a stable path and a user can drop in an external `plutus.json`; the `plutus.json` file itself is produced by on-chain `build`).
 - **FR-6 (M):** Every generated project includes a **simple but complete, runnable example** that demonstrates the selected components working *together*, not in isolation.
 - **FR-7 (M):** Composition is generic. The pipeline wires components using only the set of present roles and the interface contract, with **no per-tool-pair logic**.
 - **FR-8 (M):** Top-level and per-component `Justfile`s expose standardized targets (`build`, `test`, `dev`, `clean`); the top level delegates to each component.
 - **FR-9 (S):** Optional Nix flake (`flake.nix`) providing a dev shell with all required toolchains, opt-in at selection time. Without Nix, prerequisites are documented in the README.
 
-### Interface contract (mechanically enforced — see TECH_SPEC)
+### Interface contract (mechanically enforced, see TECH_SPEC)
 
 - **FR-10 (M):** On-chain templates produce the CIP-57 blueprint at the canonical path (`blueprint/plutus.json`) during `build` and other roles (e.g. off-chain, testing, formal-methods) read it from the same path.
 - **FR-11 (M):** Infrastructure templates write standardized connection details to `.env` (e.g. `INDEXER_URL`) during `dev`; consumers read from there.
@@ -153,7 +153,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 
 - **FR-17 (M):** After (or before) generation, detect which required `system_deps` are missing on the user's machine.
 - **FR-18 (M):** Detect the host OS and available package manager(s) and print the **exact install commands** for the missing dependencies.
-- **FR-19 (M):** For the **infrastructure** role, the advised install path uses `cardano-up` as the primary mechanism for provisioning infra tooling. If `cardano-up` itself is absent, v1 instructs the user to install it (auto-install is deferred — §5.3).
+- **FR-19 (M):** For the **infrastructure** role, the advised install path uses `cardano-up` as the primary mechanism for provisioning infra tooling. If `cardano-up` itself is absent, v1 instructs the user to install it (auto-install is deferred, §5.3).
 - **FR-20 (M):** If dependencies cannot be satisfied, clearly tell the user which to install manually and state that the generated template is otherwise correct and ready once they do.
 - **FR-21 (C):** Offer to **run** the installs with user consent (auto-install). *Nice-to-have, targeted [ROADMAP](./ROADMAP.md) DX.05.*
 - **FR-22 (S):** Expose the doctor as a standalone `cardano-init doctor` subcommand runnable in an existing project. *Targeted DX.02.*
@@ -164,7 +164,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 
 ### Versioning & updates
 
-- **FR-24 (S):** On startup, the tool performs a best-effort check for a newer `cardano-init` release and, if one exists, notifies the user and suggests updating **before generation** (so they can update and regenerate rather than discovering it post-write). It is cached once/day, gated to interactive/human-TTY runs (skipped for `--format json`/non-TTY), and bounded — latency is hidden behind interactive selection, or capped at a short deadline (~1s) for human one-shot. It never blocks beyond that deadline, never alters generated output, and degrades silently when offline. It is the chosen mechanism for keeping templates fresh without runtime template fetching (see A-3; details in TECH_SPEC §10).
+- **FR-24 (S):** On startup, the tool performs a best-effort check for a newer `cardano-init` release and, if one exists, notifies the user and suggests updating **before generation** (so they can update and regenerate rather than discovering it post-write). It is cached once/day, gated to interactive/human-TTY runs (skipped for `--format json`/non-TTY), and bounded: latency is hidden behind interactive selection, or capped at a short deadline (~1s) for human one-shot. It never blocks beyond that deadline, never alters generated output, and degrades silently when offline. It is the chosen mechanism for keeping templates fresh without runtime template fetching (see A-3; details in TECH_SPEC §10).
 
 ---
 
@@ -172,7 +172,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 
 > Format: **As a … I want … so that …**, followed by acceptance criteria.
 
-### US-1 — Newcomer, guided setup
+### US-1: Newcomer, guided setup
 
 *As a developer new to Cardano, I want a guided flow that explains the roles and recommends tools, so that I can create a working project without already knowing the ecosystem.*
 
@@ -182,7 +182,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 - A summary screen shows the full selection and the exact directory tree before anything is written; the user must confirm.
 - On confirmation, the project is generated and the next steps (`cd …`, `just build`) are printed.
 
-### US-2 — Newcomer, it just works
+### US-2: Newcomer, it just works
 
 *As a newcomer, I want the generated project to build and pass tests immediately, so that I know my setup is correct and can see a working protocol.*
 
@@ -191,7 +191,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 - The end-to-end example demonstrates the selected roles working together.
 - TTFP is < 5 minutes for any selection.
 
-### US-3 — Newcomer, missing toolchains
+### US-3: Newcomer, missing toolchains
 
 *As a newcomer who doesn't have the toolchains installed, I want the tool to tell me exactly what's missing and how to install it, so that I'm not stuck deciphering errors.*
 
@@ -201,7 +201,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 - For infrastructure deps, it advises the `cardano-up` path.
 - If it cannot help, it lists what to install manually and confirms the template is otherwise ready.
 
-### US-4 — Agent drives the CLI
+### US-4: Agent drives the CLI
 
 *As a coding agent, I want to discover available tools/roles as structured data and then generate a project non-interactively, so that I can scaffold on a user's behalf reliably.*
 
@@ -212,7 +212,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 - An invalid invocation exits non-zero with a machine-readable message naming the problem and the valid options, without prompting.
 - `--dry-run` reports the plan and writes nothing.
 
-### US-5 — Agent continues in the project
+### US-5: Agent continues in the project
 
 *As a coding agent, after scaffolding I want predictable structure and the contract documented in-repo, so that I can keep building without guessing conventions.*
 
@@ -221,7 +221,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 - The interface contract (canonical paths, env vars, Justfile tasks) is discoverable from within the generated project.
 - There are documentation and tools (README.md, AGENT.md, skills directory, MCPs, etc.) to provide the best support possible for the agent to iterate over the code.
 
-### US-6 — Single-role project
+### US-6: Single-role project
 
 *As a developer who only needs validators, I want to scaffold an on-chain-only project, so that I'm not forced into components I don't need.*
 
@@ -229,7 +229,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 - Selecting only one role (e.g. on-chain) generates only the role's directory (e.g., on-chain) plus base files.
 - `just *` succeeds with no other roles present.
 
-### US-7 — Web visual builder
+### US-7: Web visual builder
 
 *As a newcomer who prefers a UI, I want to configure my project visually and copy a command, so that I get the same result as the CLI without memorizing flags.*
 
@@ -238,7 +238,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 - Invalid combinations are flagged live.
 - The user can preview the file tree and copy a `cardano-init …` command that, run locally, produces the project.
 
-### US-8 — Extending with a new tool
+### US-8: Extending with a new tool
 
 *As a tool author, I want to add support for my tool by writing data and a template, so that it composes with every existing tool without combinatorial work.*
 
@@ -253,5 +253,5 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 
 - **A-1:** Users have, or are willing to install, the native toolchains for their chosen tools (the tool advises but, in v1, does not install them automatically; Nix is the supported turnkey path).
 - **A-2:** `cardano-up` is the intended primary mechanism for provisioning infrastructure tooling; v1 assumes the user can install `cardano-up` when advised.
-- **A-3:** Generation is **offline and deterministic** — the registry and all templates are embedded in the binary at compile time and are the single source of truth for a given version, so the same binary + inputs always produce the same project (required by FR-14, SM-1, and agent trust). The tool does **not** fetch templates at runtime. Template/tool freshness is handled out-of-band by notifying the user when a newer `cardano-init` is available (an explicit binary update), never by silently changing generation output. Network is only needed for installing toolchains/deps and for the version-update check (FR-24).
+- **A-3:** Generation is **offline and deterministic**: the registry and all templates are embedded in the binary at compile time and are the single source of truth for a given version, so the same binary + inputs always produce the same project (required by FR-14, SM-1, and agent trust). The tool does **not** fetch templates at runtime. Template/tool freshness is handled out-of-band by notifying the user when a newer `cardano-init` is available (an explicit binary update), never by silently changing generation output. Network is only needed for installing toolchains/deps and for the version-update check (FR-24).
 - **A-4:** `just` is the task runner for all generated projects.

@@ -4,7 +4,7 @@ Scaffold a complete, runnable **Cardano protocol project** in seconds. Pick a to
 
 Built for newcomers and coding agents alike.
 
-> ⚠️ **Prototype — do not use yet.** This is an early POC under active design; scope, CLI flags, templates, and generated output **will change** without notice. Targeting a working showcase build (DX.02) and a public Release Candidate (DX.05) — see the [Roadmap](docs/ROADMAP.md).
+> ⚠️ **Prototype: do not use yet.** This is an early POC under active design; scope, CLI flags, templates, and generated output **will change** without notice. Targeting a working showcase build (DX.02) and a public Release Candidate (DX.05). See the [Roadmap](docs/ROADMAP.md).
 
 ## Quick start (pre-release)
 
@@ -45,7 +45,7 @@ You choose tools for **roles**. Only the directories for selected roles are crea
 
 | Doc | Purpose |
 |-----|---------|
-| [docs/PRD.md](docs/PRD.md) | Product requirements — who it's for, problem, scope, success metrics |
+| [docs/PRD.md](docs/PRD.md) | Product requirements: who it's for, problem, scope, success metrics |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, module structure, data model, pipeline |
 | [docs/TECH_SPEC.md](docs/TECH_SPEC.md) | Exact contracts, schemas, algorithms, edge cases |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phases & milestones (DX.02, DX.05) |
