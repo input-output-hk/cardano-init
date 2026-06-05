@@ -63,6 +63,7 @@ Early prototype. Currently in the registry:
 - [ ] Pebble
 - [ ] Plutarch
 - [ ] Opshin
+
 **Off-chain:**
 - [ ] MeshJS
 - [ ] Tx3
@@ -72,8 +73,10 @@ Early prototype. Currently in the registry:
 - [ ] Blaze
 - [ ] Elm Cardano
 - [ ] PyCardano
+
 **Testing:**
 - [ ] Scalus
+
 **Infrastructure:**
 - [ ] Cardano Node
 - [ ] Cardano Node CLI
@@ -85,6 +88,7 @@ Early prototype. Currently in the registry:
 - [ ] Kupo
 - [ ] Ogmios
 - [ ] Yaci DevKit
+
 **Formal Methods:**
 - [ ] Blaster
 
