@@ -4,7 +4,8 @@ Scaffold a complete, runnable **Cardano protocol project** in seconds. Pick a to
 
 Built for newcomers and coding agents alike.
 
-> ⚠️ **Prototype: do not use yet.** This is an early POC under active design; scope, CLI flags, templates, and generated output **will change** without notice. Targeting a working showcase build (DX.02) and a public Release Candidate (DX.05). See the [Roadmap](docs/ROADMAP.md).
+> [!WARNING]
+> **Prototype: do not use yet.** This is an early POC under active design; scope, CLI flags, templates, and generated output **will change** without notice. Targeting a working showcase build (DX.02) and a public Release Candidate (DX.05). See the [Roadmap](docs/ROADMAP.md).
 
 ## Quick start (pre-release)
 
