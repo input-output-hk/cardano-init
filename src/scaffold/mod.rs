@@ -33,6 +33,9 @@ pub enum ScaffoldError {
         source: toml::de::Error,
     },
 
+    #[error("unsafe destination path '{path}' (must be relative, no '..' or leading '/')")]
+    UnsafePath { path: String },
+
     #[error("tool '{tool_id}' not found in registry")]
     ToolNotFound { tool_id: String },
 

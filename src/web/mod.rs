@@ -221,9 +221,11 @@ fn build_plan_json(query: &HashMap<String, String>, registry: &Registry) -> Resu
         });
     }
     if let Some(infra_str) = query.get("infra") {
+        let mut seen = Vec::new();
         for tool_id in infra_str.split(',') {
             let tool_id = tool_id.trim();
-            if !tool_id.is_empty() {
+            if !tool_id.is_empty() && !seen.iter().any(|s| s == tool_id) {
+                seen.push(tool_id.to_string());
                 assignments.push(RoleAssignment {
                     role: Role::Infrastructure,
                     tool_id: tool_id.to_string(),

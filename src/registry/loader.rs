@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn load_tool_count() {
-        assert_eq!(registry().all_tools().len(), 4);
+        assert_eq!(registry().all_tools().len(), 5);
     }
 
     #[test]
@@ -231,10 +231,11 @@ mod tests {
     }
 
     #[test]
-    fn tools_for_role_infra_empty() {
+    fn tools_for_role_infra() {
         let reg = registry();
         let infra = reg.tools_for_role(Role::Infrastructure);
-        assert!(infra.is_empty());
+        let ids: Vec<&str> = infra.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, vec!["yaci"]);
     }
 
     #[test]

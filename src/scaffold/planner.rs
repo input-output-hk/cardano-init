@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use super::{ScaffoldError, TemplateAssets};
 use crate::registry::loader::Registry;
-use crate::registry::types::{Role, Selection};
+use crate::registry::types::{Role, RoleAssignment, Selection};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,6 +78,36 @@ struct ManifestFile {
 }
 
 // ---------------------------------------------------------------------------
+// Path safety
+// ---------------------------------------------------------------------------
+
+/// Reject a manifest `dest` that could escape the project root (§4.4).
+///
+/// A `dest` must be relative, non-empty, and contain no `..` component and no
+/// leading `/`. Manifests are first-party today, but the check is cheap
+/// insurance and required if templates ever become third-party.
+fn validate_dest(dest: &str) -> Result<(), ScaffoldError> {
+    use std::path::Component;
+
+    let unsafe_path = || ScaffoldError::UnsafePath {
+        path: dest.to_string(),
+    };
+
+    if dest.is_empty() {
+        return Err(unsafe_path());
+    }
+    let path = std::path::Path::new(dest);
+    for component in path.components() {
+        match component {
+            Component::Normal(_) | Component::CurDir => {}
+            // RootDir / Prefix (absolute or `C:\`), ParentDir (`..`) → reject.
+            _ => return Err(unsafe_path()),
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Planning
 // ---------------------------------------------------------------------------
 
@@ -110,12 +140,15 @@ pub fn plan(selection: &Selection, registry: &Registry) -> Result<FilePlan, Scaf
         },
     ];
 
-    // Blueprint directory (always present when on-chain is selected)
-    let has_on_chain = selection
+    // Blueprint directory: present for every project that has any
+    // blueprint-producing-or-consuming role — i.e. any role except
+    // infrastructure (equivalently: present unless the project is
+    // infrastructure-only). See TECH_SPEC §6.2.
+    let blueprint_present = selection
         .assignments
         .iter()
-        .any(|a| a.role == Role::OnChain);
-    if has_on_chain {
+        .any(|a| a.role != Role::Infrastructure);
+    if blueprint_present {
         entries.push(FileEntry {
             dest: PathBuf::from("blueprint/.gitkeep"),
             source: TemplateSource::Inline(Vec::new()),
@@ -124,7 +157,17 @@ pub fn plan(selection: &Selection, registry: &Registry) -> Result<FilePlan, Scaf
     }
 
     // --- Role layers ---
-    for assignment in &selection.assignments {
+    // Emit in canonical order regardless of flag/selection order (determinism, §11):
+    // roles in `Role::ALL` order, and within Infrastructure (the only multi-tool
+    // role) tools sorted by `tool_id`.
+    let mut ordered: Vec<&RoleAssignment> = selection.assignments.iter().collect();
+    ordered.sort_by(|a, b| {
+        let ai = Role::ALL.iter().position(|r| *r == a.role).unwrap();
+        let bi = Role::ALL.iter().position(|r| *r == b.role).unwrap();
+        ai.cmp(&bi).then_with(|| a.tool_id.cmp(&b.tool_id))
+    });
+
+    for assignment in ordered {
         let tool =
             registry
                 .get(&assignment.tool_id)
@@ -165,6 +208,7 @@ pub fn plan(selection: &Selection, registry: &Registry) -> Result<FilePlan, Scaf
             })?;
 
         for file in &manifest.files {
+            validate_dest(&file.dest)?;
             entries.push(FileEntry {
                 dest: dest_prefix.join(&file.dest),
                 source: TemplateSource::Role(format!("{}/{}", template_path, file.source)),
@@ -248,10 +292,28 @@ mod tests {
     }
 
     #[test]
-    fn no_blueprint_without_on_chain() {
+    fn blueprint_present_for_non_onchain_role() {
+        // Off-chain-only still gets the blueprint dir: it's a consuming role
+        // and a user may drop in an externally-built plutus.json.
         let sel = selection(vec![RoleAssignment {
             role: Role::OffChain,
             tool_id: "meshjs".into(),
+        }]);
+        let plan = plan(&sel, &registry()).unwrap();
+
+        let dests: Vec<&str> = plan
+            .entries
+            .iter()
+            .map(|e| e.dest.to_str().unwrap())
+            .collect();
+        assert!(dests.contains(&"blueprint/.gitkeep"));
+    }
+
+    #[test]
+    fn no_blueprint_for_infra_only() {
+        let sel = selection(vec![RoleAssignment {
+            role: Role::Infrastructure,
+            tool_id: "yaci".into(),
         }]);
         let plan = plan(&sel, &registry()).unwrap();
 
@@ -300,6 +362,49 @@ mod tests {
     }
 
     #[test]
+    fn plan_order_is_canonical_regardless_of_input_order() {
+        let forward = selection(vec![
+            RoleAssignment {
+                role: Role::OnChain,
+                tool_id: "aiken".into(),
+            },
+            RoleAssignment {
+                role: Role::OffChain,
+                tool_id: "meshjs".into(),
+            },
+        ]);
+        let reversed = selection(vec![
+            RoleAssignment {
+                role: Role::OffChain,
+                tool_id: "meshjs".into(),
+            },
+            RoleAssignment {
+                role: Role::OnChain,
+                tool_id: "aiken".into(),
+            },
+        ]);
+
+        let dests = |s| {
+            plan(s, &registry())
+                .unwrap()
+                .entries
+                .iter()
+                .map(|e| e.dest.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        };
+        let fwd = dests(&forward);
+        assert_eq!(fwd, dests(&reversed), "flag order must not affect plan");
+
+        // On-chain layer precedes off-chain layer (Role::ALL order).
+        let oc = fwd.iter().position(|d| d.starts_with("on-chain/")).unwrap();
+        let off = fwd
+            .iter()
+            .position(|d| d.starts_with("off-chain/"))
+            .unwrap();
+        assert!(oc < off);
+    }
+
+    #[test]
     fn combined_selection_entry_count() {
         let sel = selection(vec![
             RoleAssignment {
@@ -334,6 +439,23 @@ mod tests {
     }
 
     #[test]
+    fn validate_dest_accepts_relative_paths() {
+        assert!(validate_dest("Justfile").is_ok());
+        assert!(validate_dest("src/index.ts").is_ok());
+        assert!(validate_dest(".gitkeep").is_ok());
+        assert!(validate_dest("a/b/c.txt").is_ok());
+    }
+
+    #[test]
+    fn validate_dest_rejects_escapes() {
+        assert!(validate_dest("").is_err());
+        assert!(validate_dest("/etc/passwd").is_err());
+        assert!(validate_dest("../escape").is_err());
+        assert!(validate_dest("a/../../b").is_err());
+        assert!(validate_dest("sub/../../../etc").is_err());
+    }
+
+    #[test]
     fn nix_true_includes_flake() {
         let mut sel = selection(vec![RoleAssignment {
             role: Role::OnChain,
@@ -348,6 +470,39 @@ mod tests {
             .map(|e| e.dest.to_str().unwrap())
             .collect();
         assert!(dests.contains(&"flake.nix"));
+    }
+
+    /// Guard against the "registered but missing template" class of bug:
+    /// every tool's every role template must resolve to a real manifest, and
+    /// every file the manifest lists must exist as an embedded asset.
+    #[test]
+    fn every_registered_template_resolves() {
+        let reg = registry();
+        for tool in reg.all_tools() {
+            for (role, cfg) in &tool.roles {
+                let manifest_key = format!("{}/manifest.toml", cfg.template);
+                let data = TemplateAssets::get(&manifest_key).unwrap_or_else(|| {
+                    panic!(
+                        "tool '{}' role '{}' points at missing manifest '{}'",
+                        tool.id, role, manifest_key
+                    )
+                });
+                let text = std::str::from_utf8(&data.data).expect("manifest must be UTF-8");
+                let manifest: ManifestToml = toml::from_str(text)
+                    .unwrap_or_else(|e| panic!("manifest '{manifest_key}' failed to parse: {e}"));
+
+                for file in &manifest.files {
+                    let source_key = format!("{}/{}", cfg.template, file.source);
+                    assert!(
+                        TemplateAssets::get(&source_key).is_some(),
+                        "tool '{}' manifest '{}' references missing source '{}'",
+                        tool.id,
+                        manifest_key,
+                        source_key
+                    );
+                }
+            }
+        }
     }
 
     #[test]

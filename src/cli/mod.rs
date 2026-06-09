@@ -134,6 +134,31 @@ pub enum CliError {
     Prompt(#[from] dialoguer::Error),
 }
 
+impl CliError {
+    /// Process exit-code category (TECH_SPEC §2.3):
+    /// - `2` — usage / validation errors (bad or missing input);
+    /// - `1` — runtime errors (I/O, registry/render failure, web bind, …);
+    /// - `0` — interactive abort by user choice (not an error).
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            CliError::UnknownTool { .. }
+            | CliError::ToolRoleMismatch { .. }
+            | CliError::NoRolesSelected
+            | CliError::InvalidNetwork { .. }
+            | CliError::InvalidProjectName { .. }
+            | CliError::NameRequired => 2,
+
+            CliError::Aborted => 0,
+
+            CliError::Registry(_)
+            | CliError::Scaffold(_)
+            | CliError::Web(_)
+            | CliError::DirectoryExists { .. }
+            | CliError::Prompt(_) => 1,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tool catalog for --help
 // ---------------------------------------------------------------------------
@@ -248,8 +273,13 @@ fn run_init(args: InitArgs, registry: &Registry) -> Result<(), CliError> {
 
     let root = PathBuf::from(&selection.project_name);
 
-    // Safety: refuse to overwrite existing directory
-    if root.exists() {
+    // Safety: refuse to write into an existing, non-empty directory (never
+    // overwrite user files). A missing or empty target dir is fine (§6.4).
+    if root.exists()
+        && std::fs::read_dir(&root)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(true)
+    {
         return Err(CliError::DirectoryExists {
             path: selection.project_name.clone(),
         });

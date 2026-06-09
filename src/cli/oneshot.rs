@@ -36,8 +36,15 @@ pub fn build_selection(
         });
     }
 
+    // Infrastructure is the only repeatable role. De-duplicate keep-first so a
+    // repeated `--infra X --infra X` can't emit `infra/X/` twice (§3.4).
+    let mut seen_infra = Vec::new();
     for tool_id in infra {
+        if seen_infra.contains(tool_id) {
+            continue;
+        }
         validate_tool_for_role(tool_id, Role::Infrastructure, registry)?;
+        seen_infra.push(tool_id.clone());
         assignments.push(RoleAssignment {
             role: Role::Infrastructure,
             tool_id: tool_id.clone(),
@@ -224,9 +231,41 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_infra_is_deduplicated() {
+        let sel = build_selection(
+            "test",
+            None,
+            None,
+            &["yaci".to_string(), "yaci".to_string()],
+            None,
+            None,
+            "preview",
+            false,
+            &registry(),
+        )
+        .unwrap();
+
+        let infra_count = sel
+            .assignments
+            .iter()
+            .filter(|a| a.role == Role::Infrastructure)
+            .count();
+        assert_eq!(infra_count, 1);
+    }
+
+    #[test]
     fn no_roles_errors() {
-        let result =
-            build_selection("test", None, None, &[], None, None, "preview", false, &registry());
+        let result = build_selection(
+            "test",
+            None,
+            None,
+            &[],
+            None,
+            None,
+            "preview",
+            false,
+            &registry(),
+        );
         assert!(matches!(result, Err(CliError::NoRolesSelected)));
     }
 

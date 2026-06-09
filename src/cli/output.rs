@@ -29,6 +29,10 @@ pub fn print_welcome() {
         "  {} Frameworks for testing your contracts locally",
         style("Testing:").cyan().bold()
     );
+    println!(
+        "  {} Specification and automated verification tools",
+        style("Formal methods:").cyan().bold()
+    );
     println!();
 }
 

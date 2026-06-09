@@ -1,0 +1,10 @@
+[manifest]
+summary = "Yaci DevKit local node + indexer (placeholder — not yet implemented)"
+
+[[files]]
+source = "Justfile.jinja"
+dest = "Justfile"
+
+[[files]]
+source = "yaci.yml"
+dest = "yaci.yml"

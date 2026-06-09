@@ -1,0 +1,10 @@
+[manifest]
+summary = "Scalus off-chain transaction building (placeholder — not yet implemented)"
+
+[[files]]
+source = "Justfile.jinja"
+dest = "Justfile"
+
+[[files]]
+source = "src/Main.scala"
+dest = "src/Main.scala"

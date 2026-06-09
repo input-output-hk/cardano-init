@@ -1,0 +1,10 @@
+[manifest]
+summary = "Scalus integration tests (placeholder — not yet implemented)"
+
+[[files]]
+source = "Justfile.jinja"
+dest = "Justfile"
+
+[[files]]
+source = "src/ExampleTest.scala"
+dest = "src/ExampleTest.scala"

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use serde::Serialize;
 
@@ -32,6 +32,11 @@ pub struct TemplateContext {
     pub has_testing: bool,
     pub has_formal_methods: bool,
 
+    /// True when the `blueprint/` directory is scaffolded: any non-infrastructure
+    /// role is present (i.e. the project is not infrastructure-only). Mirrors the
+    /// planner's blueprint predicate (TECH_SPEC §6.2).
+    pub has_blueprint: bool,
+
     pub on_chain: Option<RoleContext>,
     pub off_chain: Option<RoleContext>,
     pub infra_tools: Vec<RoleContext>,
@@ -39,7 +44,8 @@ pub struct TemplateContext {
     pub formal_methods: Option<RoleContext>,
 
     pub blueprint_path: String,
-    pub env_vars: HashMap<String, String>,
+    /// Backed by a `BTreeMap` so it serializes in sorted-key order (determinism, §11).
+    pub env_vars: BTreeMap<String, String>,
 
     pub nix: bool,
     pub nix_packages: Vec<String>,
@@ -98,7 +104,11 @@ pub fn build_context(
         }
     }
 
-    let mut env_vars = HashMap::new();
+    // Canonical order for the only multi-tool role: sorted by tool id (§11).
+    // Mirrors the planner's infra ordering so context and plan agree.
+    infra_tools.sort_by(|a, b| a.tool_id.cmp(&b.tool_id));
+
+    let mut env_vars = BTreeMap::new();
     env_vars.insert(
         contract::ENV_NETWORK.to_string(),
         selection.network.to_string(),
@@ -116,6 +126,11 @@ pub fn build_context(
         has_infra: !infra_tools.is_empty(),
         has_testing: testing.is_some(),
         has_formal_methods: formal_methods.is_some(),
+
+        has_blueprint: on_chain.is_some()
+            || off_chain.is_some()
+            || testing.is_some()
+            || formal_methods.is_some(),
 
         on_chain,
         off_chain,

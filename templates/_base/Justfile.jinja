@@ -28,9 +28,6 @@ test-off-chain:
 dev-{{ infra_tool.tool_id }}:
     just -f {{ infra_tool.dir }}/{{ infra_tool.tool_id }}/Justfile dev
 {%- endfor %}
-
-dev-infra:
-{%- for infra_tool in infra_tools %} dev-{{ infra_tool.tool_id }}{% endfor %}
 {%- endif %}
 {%- if has_testing %}
 
@@ -73,3 +70,34 @@ clean:
 {%- endif %}
     rm -f {{ blueprint_path }}
     @echo "Clean complete."
+
+# --- dev: bring up the shared, long-running infrastructure ---
+# Per-component watch/dev (on-chain, off-chain, testing, formal-methods) is run
+# directly in each component dir; only infrastructure is orchestrated here.
+{%- if not has_infra %}
+dev:
+    @echo "No infrastructure to start. Run a component's dev directly:"
+{%- if has_on_chain %}
+    @echo "  just -f {{ on_chain.dir }}/Justfile dev"
+{%- endif %}
+{%- if has_off_chain %}
+    @echo "  just -f {{ off_chain.dir }}/Justfile dev"
+{%- endif %}
+{%- if has_testing %}
+    @echo "  just -f {{ testing.dir }}/Justfile dev"
+{%- endif %}
+{%- if has_formal_methods %}
+    @echo "  just -f {{ formal_methods.dir }}/Justfile dev"
+{%- endif %}
+{%- elif infra_tools | length == 1 %}
+dev:
+    just -f {{ infra_tools[0].dir }}/{{ infra_tools[0].tool_id }}/Justfile dev
+{%- else %}
+dev:
+    @echo "Multiple infrastructure services selected. Start each in its own terminal:"
+{%- for infra_tool in infra_tools %}
+    @echo "  just dev-{{ infra_tool.tool_id }}"
+{%- endfor %}
+    @echo "Or install process-compose to orchestrate them together:"
+    @echo "  https://f1bonacc1.github.io/process-compose/"
+{%- endif %}

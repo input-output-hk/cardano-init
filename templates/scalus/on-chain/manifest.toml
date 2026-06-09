@@ -1,0 +1,10 @@
+[manifest]
+summary = "Scalus on-chain validators (placeholder — not yet implemented)"
+
+[[files]]
+source = "Justfile.jinja"
+dest = "Justfile"
+
+[[files]]
+source = "src/Validator.scala"
+dest = "src/Validator.scala"

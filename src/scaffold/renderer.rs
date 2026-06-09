@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use minijinja::Environment;
+use minijinja::{AutoEscape, Environment, UndefinedBehavior};
 
 use super::context::TemplateContext;
 use super::planner::{FilePlan, TemplateSource};
@@ -53,7 +53,17 @@ pub fn render(
     }
 
     // Build the MiniJinja environment with all templates loaded.
+    //
+    // Rendering contract (TECH_SPEC §4.3):
+    // - strict undefined: a template referencing an undefined variable fails at
+    //   generation time instead of silently emitting an empty string;
+    // - autoescape off: output is code/config, never HTML;
+    // - keep trailing newline: the authored file's final newline is preserved, so
+    //   output bytes match the template source (determinism, §11).
     let mut env = Environment::new();
+    env.set_undefined_behavior(UndefinedBehavior::Strict);
+    env.set_auto_escape_callback(|_name| AutoEscape::None);
+    env.set_keep_trailing_newline(true);
     for (key, text) in &sources {
         env.add_template(key, text)
             .map_err(|e| ScaffoldError::Render {
@@ -214,6 +224,158 @@ mod tests {
         assert!(content.contains("aiken"));
         assert!(content.contains("test-project"));
         assert!(!content.contains("{%"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Snapshot tests (determinism guard, §11)
+    //
+    // Render a selection into one canonical string (each file in plan order,
+    // prefixed by its dest) and compare against a committed fixture under
+    // `src/scaffold/snapshots/`. Regenerate after an intentional change with:
+    //
+    //     UPDATE_SNAPSHOTS=1 cargo test
+    //
+    // and review the diff before committing.
+    // -----------------------------------------------------------------------
+
+    fn render_to_snapshot(sel: &Selection) -> String {
+        let reg = registry();
+        let plan = planner::plan(sel, &reg).unwrap();
+        let ctx = build_context(sel, &reg).unwrap();
+        let files = render(&plan, &ctx).unwrap();
+
+        let mut out = String::new();
+        for file in &files {
+            out.push_str("=== ");
+            out.push_str(&file.dest.to_string_lossy());
+            out.push_str(" ===\n");
+            out.push_str(std::str::from_utf8(&file.content).expect("snapshot content is UTF-8"));
+            out.push('\n');
+        }
+        out
+    }
+
+    fn assert_snapshot(name: &str, sel: &Selection) {
+        let actual = render_to_snapshot(sel);
+        let path = format!(
+            "{}/src/scaffold/snapshots/{name}.snap",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        if std::env::var("UPDATE_SNAPSHOTS").is_ok() {
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(&path, &actual).unwrap();
+        }
+        let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+            panic!("missing snapshot '{path}'. Run `UPDATE_SNAPSHOTS=1 cargo test` to create it.")
+        });
+        assert_eq!(actual, expected, "snapshot '{name}' drifted");
+    }
+
+    fn sel(assignments: Vec<RoleAssignment>, network: Network, nix: bool) -> Selection {
+        Selection {
+            project_name: "snap-project".to_string(),
+            assignments,
+            network,
+            nix,
+        }
+    }
+
+    fn a(role: Role, tool: &str) -> RoleAssignment {
+        RoleAssignment {
+            role,
+            tool_id: tool.into(),
+        }
+    }
+
+    #[test]
+    fn snapshot_aiken_only() {
+        assert_snapshot(
+            "aiken_only",
+            &sel(vec![a(Role::OnChain, "aiken")], Network::Preview, false),
+        );
+    }
+
+    #[test]
+    fn snapshot_aiken_meshjs_nix() {
+        assert_snapshot(
+            "aiken_meshjs_nix",
+            &sel(
+                vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")],
+                Network::Preprod,
+                true,
+            ),
+        );
+    }
+
+    #[test]
+    fn snapshot_offchain_only() {
+        assert_snapshot(
+            "offchain_only",
+            &sel(vec![a(Role::OffChain, "meshjs")], Network::Preview, false),
+        );
+    }
+
+    #[test]
+    fn snapshot_yaci_infra_only() {
+        assert_snapshot(
+            "yaci_infra_only",
+            &sel(
+                vec![a(Role::Infrastructure, "yaci")],
+                Network::Mainnet,
+                false,
+            ),
+        );
+    }
+
+    #[test]
+    fn snapshot_scalus_multi_role() {
+        assert_snapshot(
+            "scalus_multi_role",
+            &sel(
+                vec![
+                    a(Role::OnChain, "scalus"),
+                    a(Role::OffChain, "scalus"),
+                    a(Role::Testing, "scalus"),
+                ],
+                Network::Preview,
+                false,
+            ),
+        );
+    }
+
+    #[test]
+    fn rendered_output_has_no_crlf() {
+        let s = sel(
+            vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")],
+            Network::Preview,
+            true,
+        );
+        let reg = registry();
+        let plan = planner::plan(&s, &reg).unwrap();
+        let ctx = build_context(&s, &reg).unwrap();
+        for file in render(&plan, &ctx).unwrap() {
+            assert!(
+                !file.content.contains(&b'\r'),
+                "{:?} contains a CR byte",
+                file.dest
+            );
+        }
+    }
+
+    #[test]
+    fn rendered_justfile_keeps_trailing_newline() {
+        let s = sel(vec![a(Role::OnChain, "aiken")], Network::Preview, false);
+        let reg = registry();
+        let plan = planner::plan(&s, &reg).unwrap();
+        let ctx = build_context(&s, &reg).unwrap();
+        let files = render(&plan, &ctx).unwrap();
+        let justfile = files
+            .iter()
+            .find(|f| f.dest == PathBuf::from("Justfile"))
+            .unwrap();
+        assert!(justfile.content.ends_with(b"\n"));
     }
 
     #[test]
