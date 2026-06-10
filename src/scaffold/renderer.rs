@@ -123,6 +123,8 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
     use crate::registry::loader::Registry;
     use crate::registry::types::{Network, Role, RoleAssignment, Selection};
     use crate::scaffold::context::build_context;
@@ -175,7 +177,7 @@ mod tests {
 
         let justfile = files
             .iter()
-            .find(|f| f.dest == PathBuf::from("Justfile"))
+            .find(|f| f.dest == Path::new("Justfile"))
             .expect("Justfile should be in rendered files");
 
         let content = std::str::from_utf8(&justfile.content).unwrap();
@@ -197,7 +199,7 @@ mod tests {
 
         let gitkeep = files
             .iter()
-            .find(|f| f.dest == PathBuf::from("blueprint/.gitkeep"))
+            .find(|f| f.dest == Path::new("blueprint/.gitkeep"))
             .expect("blueprint/.gitkeep should be in rendered files");
 
         assert!(gitkeep.content.is_empty());
@@ -217,7 +219,7 @@ mod tests {
 
         let flake = files
             .iter()
-            .find(|f| f.dest == PathBuf::from("flake.nix"))
+            .find(|f| f.dest == Path::new("flake.nix"))
             .expect("flake.nix should be in rendered files");
 
         let content = std::str::from_utf8(&flake.content).unwrap();
@@ -373,7 +375,7 @@ mod tests {
         let files = render(&plan, &ctx).unwrap();
         let justfile = files
             .iter()
-            .find(|f| f.dest == PathBuf::from("Justfile"))
+            .find(|f| f.dest == Path::new("Justfile"))
             .unwrap();
         assert!(justfile.content.ends_with(b"\n"));
     }
@@ -398,7 +400,7 @@ mod tests {
         assert_eq!(files.len(), plan.entries.len());
 
         for file in &files {
-            if file.dest != PathBuf::from("blueprint/.gitkeep") {
+            if file.dest != Path::new("blueprint/.gitkeep") {
                 assert!(
                     !file.content.is_empty(),
                     "file {:?} should have content",

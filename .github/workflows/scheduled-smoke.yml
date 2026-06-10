@@ -1,0 +1,112 @@
+# Scheduled maintenance gate.
+#
+# Purpose: detect when a *generated project* stops building/testing because of
+# EXTERNAL drift — a Cardano hardfork, a breaking upstream tool release, or an
+# unmaintained dependency — even though nothing in this repo changed. The
+# templates pin floating version ranges (e.g. meshjs "^1.7.0", aiken stdlib
+# "v2"), so this can happen with zero commits here and would otherwise go
+# unnoticed until a user hits it.
+#
+# This is DISTINCT from the PR/commit gates (which catch regressions we
+# introduce). It runs the per-tool build smoke tests the docs already require
+# (ARCHITECTURE §11, PRD SM-1), but on a schedule, and opens a tracking issue
+# on failure.
+
+name: scheduled-smoke
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # every Monday 06:00 UTC
+  workflow_dispatch: {} # allow manual runs
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: ${{ matrix.tool }} build+test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # one tool breaking must not mask the others
+      matrix:
+        # Only the tools that are meant to build green are listed. Placeholders
+        # (scalus, blaster, yaci) are intentionally excluded — their `just`
+        # targets only echo, so they have no external dependency to drift. Add a
+        # tool here the moment its template becomes genuinely build-green.
+        include:
+          - tool: aiken
+            flags: --on-chain aiken
+          - tool: meshjs
+            flags: --off-chain meshjs
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      # --- per-tool toolchain (extend as the matrix grows) ---
+      - name: Install Aiken
+        if: matrix.tool == 'aiken'
+        # NOTE: verify the action ref/inputs against the current Aiken docs.
+        uses: aiken-lang/setup-aiken@v1
+        with:
+          version: latest
+
+      - name: Install Node
+        if: matrix.tool == 'meshjs'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Scaffold project in isolation
+        run: cargo run --quiet -- --name smoke-${{ matrix.tool }} ${{ matrix.flags }}
+
+      - name: Build & test the generated project
+        working-directory: smoke-${{ matrix.tool }}
+        run: |
+          # Tools whose `just build` assumes deps are installed do it here.
+          if [ "${{ matrix.tool }}" = "meshjs" ]; then npm install; fi
+          just build
+          just test
+
+  notify-on-failure:
+    needs: smoke
+    # Only file an issue for the unattended scheduled run, not manual debugging.
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const label = "scheduled-smoke";
+            const title = "Scheduled smoke test failed: a generated project no longer builds";
+            const today = new Date().toISOString().slice(0, 10);
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const body = [
+              `The weekly per-tool smoke run failed on ${today}.`,
+              ``,
+              `A generated project stopped building/testing with no change to this repo —`,
+              `likely a Cardano hardfork, a breaking upstream tool release, or an`,
+              `unmaintained dependency. Investigate which template drifted.`,
+              ``,
+              `Run: ${runUrl}`,
+            ].join("\n");
+
+            // De-dupe: comment on the existing open issue instead of spamming a
+            // new one every Monday. (Creating an issue auto-creates the label.)
+            const existing = await github.rest.issues.listForRepo({
+              owner, repo, state: "open", labels: label,
+            });
+            if (existing.data.length === 0) {
+              await github.rest.issues.create({ owner, repo, title, body, labels: [label] });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: existing.data[0].number, body,
+              });
+            }

@@ -363,6 +363,7 @@ The local `serve` path (10.1) ships regardless and keeps its planner-backed prev
 - **Unit (pure core):** registry loading (every TOML parses, fields present); context building; planning (exact file set + order); rendering (context + template → expected output); doctor `resolve` over synthetic environments (incl. multi-step bootstrap chains and the cycle guard).
 - **Contract compliance (mechanical):** for each template, assert the Justfile exposes `build`/`test`/`dev`/`clean`; for on-chain, assert `just build` produces `blueprint/plutus.json`. This is what lets us avoid testing tool combinations.
 - **Per-tool build smoke tests:** scaffold each tool in isolation and, where CI has the toolchain (or via Nix), run `just build && just test`. New tools must add these (PRD SM-1).
+- **Scheduled maintenance gate:** the per-tool smoke tests also run on a schedule (weekly cron + manual dispatch, `.github/workflows/scheduled-smoke.yml`), not only on PR/commit. This is what detects a *generated project* breaking with **no repo change** — a Cardano hardfork, a breaking upstream tool release, or an unmaintained dependency (templates pin floating version ranges). A failure opens a tracking issue. It is distinct from the PR gates, which catch regressions we introduce.
 - **Determinism / snapshot tests:** `--dry-run` and rendered output compared against committed snapshots for a set of selections; guards §6.4.
 - **No combinatorial testing:** composition is guaranteed by the contract, so we verify each tool individually rather than every pair.
 

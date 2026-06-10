@@ -5,6 +5,9 @@ use crate::registry::types::{Network, Role, RoleAssignment, Selection};
 /// Build a `Selection` from one-shot CLI flags.
 ///
 /// Assumes `args.name` is `Some` (caller verified before calling this).
+// One positional per role flag mirrors the CLI surface; grouping them into a
+// struct would just shift the argument list elsewhere with no real gain.
+#[allow(clippy::too_many_arguments)]
 pub fn build_selection(
     name: &str,
     on_chain: Option<&str>,
