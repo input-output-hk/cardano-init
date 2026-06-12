@@ -44,7 +44,7 @@ verify:
 build:
 {%- if has_on_chain %} build-on-chain{% endif %}
 {%- if has_off_chain %} build-off-chain{% endif %}
-    @echo "Build complete."
+    @echo '{{ "{{BOLD + GREEN}}✓ Build complete{{NORMAL}}" }}'
 
 # Build the on-chain blueprint first (consumers read ../blueprint/plutus.json),
 # then run each component's tests in role order.
@@ -69,4 +69,4 @@ clean:
     just -f {{ formal_methods.dir }}/Justfile clean
 {%- endif %}
     rm -f {{ blueprint_path }}
-    @echo "Clean complete."
+    @echo '{{ "{{BOLD + GREEN}}✓ Clean complete{{NORMAL}}" }}'

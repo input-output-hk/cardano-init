@@ -27,7 +27,7 @@ test-off-chain:
 
 # --- Aggregate tasks ---
 build: build-on-chain build-off-chain
-    @echo "Build complete."
+    @echo '{{BOLD + GREEN}}✓ Build complete{{NORMAL}}'
 
 # Build the on-chain blueprint first (consumers read ../blueprint/plutus.json),
 # then run each component's tests in role order.
@@ -38,7 +38,7 @@ clean:
     just -f on-chain/Justfile clean
     just -f off-chain/Justfile clean
     rm -f blueprint/plutus.json
-    @echo "Clean complete."
+    @echo '{{BOLD + GREEN}}✓ Clean complete{{NORMAL}}'
 
 === README.md ===
 # snap-project
