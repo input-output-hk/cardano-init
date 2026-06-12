@@ -1,31 +1,34 @@
 # Off-chain component (MeshJS) — GiftCard
 # Part of {{ project_name }}
 
+# Install dependencies only when needed — node_modules is missing, or
+# package.json changed since the last install. Keeps repeat runs fast and quiet
+# (no npm output at all when deps are already up to date). `--no-fund --no-audit`
+# trims npm's noise when it does run. Delete node_modules (or `just clean`) to
+# force a fresh install.
+_install:
+    @if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install --no-fund --no-audit; fi
+
 # Build the importable library into dist/ (JS + type declarations).
-build:
-    npm install
+build: _install
     npm run build
 
-test:
-    npm install
+test: _install
     npm run test
 
 # Status: show the loaded blueprint and whether the env is ready for txs.
-dev:
-    npm install
+dev: _install
     npm run start
 
 # Create a gift card: mint a token and lock <lovelace> at the script address.
 # Submits to the local devnet if one is running (INDEXER_URL in ../.env), else
 # to Blockfrost (needs BLOCKFROST_PROJECT_ID). Needs MNEMONIC either way — see
 # .env.example.
-create token lovelace:
-    npm install
+create token lovelace: _install
     npx tsx src/cli.ts create {{ "{{token}}" }} {{ "{{lovelace}}" }}
 
 # Redeem the gift card produced by the create transaction <txhash>.
-redeem txhash:
-    npm install
+redeem txhash: _install
     npx tsx src/cli.ts redeem {{ "{{txhash}}" }}
 
 clean:
