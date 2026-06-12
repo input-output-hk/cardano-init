@@ -452,11 +452,11 @@ mod tests {
         // base: 4 (Justfile, README, .gitignore, .env)
         // blueprint/.gitkeep: 1
         // aiken on-chain: 4 (aiken.toml, Justfile, lib/helpers.ak, validators/giftcard.ak)
-        // meshjs off-chain: 10 (package.json, tsconfig.json, Justfile, .env.example,
+        // meshjs off-chain: 11 (package.json, tsconfig.json, Justfile, .env.example,
         //                       scripts/bundle-blueprint.mjs,
-        //                       src/{contract,node,index,cli,contract.test}.ts)
-        // total: 19
-        assert_eq!(plan.entries.len(), 19);
+        //                       src/{contract,node,index,cli,contract.test,contract.integration.test}.ts)
+        // total: 20
+        assert_eq!(plan.entries.len(), 20);
     }
 
     #[test]

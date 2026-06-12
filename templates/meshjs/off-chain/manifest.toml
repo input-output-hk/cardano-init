@@ -40,3 +40,7 @@ dest = "src/cli.ts"
 [[files]]
 source = "src/contract.test.ts"
 dest = "src/contract.test.ts"
+
+[[files]]
+source = "src/contract.integration.test.ts"
+dest = "src/contract.integration.test.ts"

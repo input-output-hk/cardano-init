@@ -142,14 +142,16 @@ export async function createGiftCardContractFromEnv(options: {
  * wallet has something to spend. No-op on Blockfrost (use a pre-funded wallet
  * there). Requires YACI_ADMIN_URL to have been published to ../.env by the
  * devnet's `just dev`.
+ *
+ * `ada` is the amount in **ADA** (Yaci's topup unit), not lovelace.
  */
 export async function topupOnDevnet(
   provider: ChainProvider,
   address: string,
-  lovelace: string,
+  ada: string,
 ): Promise<boolean> {
   if (provider instanceof YaciProvider) {
-    await provider.addressTopup(address, lovelace);
+    await provider.addressTopup(address, ada);
     return true;
   }
   return false;

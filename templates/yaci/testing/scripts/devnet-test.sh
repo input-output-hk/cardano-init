@@ -54,5 +54,16 @@ const probe = async () => {
 probe();
 " || { echo "✗ Devnet did not become ready. Recent log:"; tail -n 30 "$LOG" 2>/dev/null || true; exit 1; }
 
-# Devnet is up. Point the test at it explicitly (overrides ../.env) and run.
+# Devnet is up. Point the test at it explicitly (overrides ../.env) and run the
+# standalone smoke test.
 INDEXER_URL="$API_URL" node integration.test.mjs
+
+# If an off-chain component is present, run its suite against this devnet too:
+# its integration tests pick up INDEXER_URL and exercise real transactions
+# (they self-skip when no devnet is set, e.g. during the top-level test-off-chain
+# phase). Generic — keyed on the off-chain role's dir, not on any specific tool.
+if [ -f ../off-chain/Justfile ]; then
+  echo "Running off-chain integration tests against the devnet ..."
+  INDEXER_URL="$API_URL" YACI_ADMIN_URL="http://localhost:10000" \
+    just -f ../off-chain/Justfile test
+fi

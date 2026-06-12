@@ -10,7 +10,11 @@ import {
 } from "@meshsdk/common";
 import {
   Asset,
+  DEFAULT_V1_COST_MODEL_LIST,
+  DEFAULT_V2_COST_MODEL_LIST,
+  DEFAULT_V3_COST_MODEL_LIST,
   deserializeDatum,
+  IEvaluator,
   IFetcher,
   ISubmitter,
   MeshTxBuilder,
@@ -135,6 +139,13 @@ export type GiftCardContractInput = {
   fetcher: IFetcher;
   /** Submits signed transactions. A provider such as BlockfrostProvider works. */
   submitter: ISubmitter;
+  /**
+   * Computes Plutus script execution units for the transaction. Required for
+   * the on-chain scripts to balance correctly — providers such as
+   * BlockfrostProvider and YaciProvider implement this. Defaults to the
+   * `submitter` when it also implements `IEvaluator` (both providers do).
+   */
+  evaluator?: IEvaluator;
   /** The wallet that funds, signs, and submits. */
   wallet: GiftCardWallet;
   /** 0 for testnets (preview/preprod), 1 for mainnet. */
@@ -144,6 +155,7 @@ export type GiftCardContractInput = {
 export class GiftCardContract {
   private readonly fetcher: IFetcher;
   private readonly submitter: ISubmitter;
+  private readonly evaluator?: IEvaluator;
   private readonly wallet: GiftCardWallet;
   private readonly networkId: number;
   private readonly giftCardCompiledCode: string;
@@ -152,6 +164,14 @@ export class GiftCardContract {
   constructor(input: GiftCardContractInput) {
     this.fetcher = input.fetcher;
     this.submitter = input.submitter;
+    // Fall back to the submitter as evaluator (BlockfrostProvider / YaciProvider
+    // implement IEvaluator), so Plutus ex-units are computed without extra wiring.
+    this.evaluator =
+      input.evaluator ??
+      (input.submitter != null &&
+      typeof (input.submitter as { evaluateTx?: unknown }).evaluateTx === "function"
+        ? (input.submitter as unknown as IEvaluator)
+        : undefined);
     this.wallet = input.wallet;
     this.networkId = input.networkId;
     const validators = getBundledValidators();
@@ -161,10 +181,24 @@ export class GiftCardContract {
 
   /** A fresh transaction builder. One builder builds one transaction. */
   private newTxBuilder(): MeshTxBuilder {
-    return new MeshTxBuilder({
+    const builder = new MeshTxBuilder({
       fetcher: this.fetcher,
       submitter: this.submitter,
+      evaluator: this.evaluator,
     });
+    // Pin the Plutus cost models the script-data hash is computed from. These
+    // are the current protocol-era constants (identical to what every Cardano
+    // network uses), so tx building is deterministic and doesn't depend on the
+    // provider implementing `fetchCostModels` — MeshJS's YaciProvider does not,
+    // and without this the builder logs an alarming-looking (but harmless)
+    // fallback. To instead use a provider's network-fetched cost models, drop
+    // this call (BlockfrostProvider supports it; YaciProvider does not yet).
+    builder.setNetwork([
+      DEFAULT_V1_COST_MODEL_LIST,
+      DEFAULT_V2_COST_MODEL_LIST,
+      DEFAULT_V3_COST_MODEL_LIST,
+    ]);
+    return builder;
   }
 
   /** Apply the (token name, seed UTxO) parameters to the one-shot mint policy. */

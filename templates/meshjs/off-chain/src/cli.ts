@@ -73,9 +73,9 @@ async function create(tokenName: string, lovelace: string): Promise<void> {
   const { contract, wallet, provider } = await createGiftCardContractFromEnv({ env });
 
   // On a local devnet, top the wallet up from the faucet so a fresh wallet has
-  // funds + collateral. No-op (and not needed) on Blockfrost.
+  // funds + collateral. Amount is in ADA. No-op (and not needed) on Blockfrost.
   const address = await wallet.getChangeAddress();
-  const topped = await topupOnDevnet(provider, address, "10000000000"); // 10k ADA
+  const topped = await topupOnDevnet(provider, address, "10000"); // 10,000 ADA
   if (topped) console.log(`Funded ${address.slice(0, 20)}… from the devnet faucet.`);
 
   const unsignedTx = await contract.createGiftCard(tokenName, [
