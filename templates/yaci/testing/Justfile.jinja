@@ -39,8 +39,11 @@ dev:
     @echo "Starting Yaci DevKit devnet (Ctrl-C to stop) ..."
     yaci-devkit up --enable-yaci-store
 
-# Stop the devnet (best-effort) and clear the connection details from ../.env.
+# A devnet leaves nothing to build. `clean` stops a devnet if one is still
+# running (the npm CLI has no `down` command, so we stop its process tree —
+# scoped to ~/.yaci-cli, a no-op when nothing is running) and clears the
+# connection details it published to ../.env.
 clean:
-    -yaci-devkit down
+    @pkill -f "$HOME/.yaci-cli/" 2>/dev/null || true
     node scripts/set-env.mjs --clear
-    @echo "Devnet stopped and connection details cleared from ../.env."
+    @echo "Cleared the devnet connection details from ../.env."

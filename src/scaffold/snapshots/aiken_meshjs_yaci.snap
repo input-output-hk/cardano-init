@@ -1442,11 +1442,14 @@ dev:
     @echo "Starting Yaci DevKit devnet (Ctrl-C to stop) ..."
     yaci-devkit up --enable-yaci-store
 
-# Stop the devnet (best-effort) and clear the connection details from ../.env.
+# A devnet leaves nothing to build. `clean` stops a devnet if one is still
+# running (the npm CLI has no `down` command, so we stop its process tree —
+# scoped to ~/.yaci-cli, a no-op when nothing is running) and clears the
+# connection details it published to ../.env.
 clean:
-    -yaci-devkit down
+    @pkill -f "$HOME/.yaci-cli/" 2>/dev/null || true
     node scripts/set-env.mjs --clear
-    @echo "Devnet stopped and connection details cleared from ../.env."
+    @echo "Cleared the devnet connection details from ../.env."
 
 === test/README.md ===
 # Testing — Yaci DevKit
@@ -1678,10 +1681,11 @@ DEVNET_PID=""
 teardown() {
   status=$?
   echo "Tearing down the ephemeral devnet ..."
-  yaci-devkit down >/dev/null 2>&1 || true
+  # The npm yaci-devkit CLI has no `down`/`stop` command — stopping the devnet
+  # means killing the process tree. Kill the launcher, then reap the components
+  # it spawned (yaci-store / cardano-node) which outlive the launcher PID.
+  # Scoped to ~/.yaci-cli so nothing else is touched.
   if [ -n "$DEVNET_PID" ]; then kill "$DEVNET_PID" >/dev/null 2>&1 || true; fi
-  # Reap orphaned components (yaci-cli spawns yaci-store / cardano-node, which
-  # outlive the launcher PID). Scoped to ~/.yaci-cli so nothing else is touched.
   pkill -f "$HOME/.yaci-cli/" >/dev/null 2>&1 || true
   exit "$status"
 }

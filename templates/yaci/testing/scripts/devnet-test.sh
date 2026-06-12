@@ -18,7 +18,7 @@ LOG=".yaci-devnet.log"
 if ! command -v yaci-devkit >/dev/null 2>&1; then
   echo "• yaci-devkit not installed — running the test without a devnet (it will skip)."
   echo "  Install it for the full integration test:"
-  echo "    npm install -g @bloxbean/yaci-devkit"
+  echo "  npm install -g @bloxbean/yaci-devkit"
   exec node integration.test.mjs
 fi
 
@@ -26,10 +26,8 @@ DEVNET_PID=""
 teardown() {
   status=$?
   echo "Tearing down the ephemeral devnet ..."
-  yaci-devkit down >/dev/null 2>&1 || true
+  # The npm yaci-devkit CLI has no `down`/`stop` command. killing the process tree.
   if [ -n "$DEVNET_PID" ]; then kill "$DEVNET_PID" >/dev/null 2>&1 || true; fi
-  # Reap orphaned components (yaci-cli spawns yaci-store / cardano-node, which
-  # outlive the launcher PID). Scoped to ~/.yaci-cli so nothing else is touched.
   pkill -f "$HOME/.yaci-cli/" >/dev/null 2>&1 || true
   exit "$status"
 }
