@@ -340,7 +340,8 @@ mod tests {
             .collect();
         assert!(dests.contains(&"on-chain/aiken.toml"));
         assert!(dests.contains(&"on-chain/Justfile"));
-        assert!(dests.contains(&"on-chain/validators/example.ak"));
+        assert!(dests.contains(&"on-chain/lib/helpers.ak"));
+        assert!(dests.contains(&"on-chain/validators/giftcard.ak"));
     }
 
     #[test]
@@ -420,10 +421,12 @@ mod tests {
 
         // base: 4 (Justfile, README, .gitignore, .env)
         // blueprint/.gitkeep: 1
-        // aiken on-chain: 3 (aiken.toml, Justfile, validators/example.ak)
-        // meshjs off-chain: 3 (package.json, Justfile, src/index.ts)
-        // total: 11
-        assert_eq!(plan.entries.len(), 11);
+        // aiken on-chain: 4 (aiken.toml, Justfile, lib/helpers.ak, validators/giftcard.ak)
+        // meshjs off-chain: 10 (package.json, tsconfig.json, Justfile, .env.example,
+        //                       scripts/bundle-blueprint.mjs,
+        //                       src/{contract,node,index,cli,contract.test}.ts)
+        // total: 19
+        assert_eq!(plan.entries.len(), 19);
     }
 
     #[test]

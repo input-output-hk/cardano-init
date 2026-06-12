@@ -1,10 +1,12 @@
 # Build artifacts
 /target/
-/build/
-/dist/
+build/
+dist/
+# Generated code (e.g. blueprint bundled into the off-chain library)
+*.generated.ts
 
 # Dependencies
-/node_modules/
+node_modules/
 
 # Environment
 .env.local

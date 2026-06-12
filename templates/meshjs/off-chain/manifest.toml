@@ -1,14 +1,42 @@
 [manifest]
-summary = "MeshJS off-chain project with a transaction building example"
+summary = "MeshJS off-chain GiftCard library (importable) + a CLI to run create/redeem txs"
 
 [[files]]
 source = "package.json.jinja"
 dest = "package.json"
 
 [[files]]
+source = "tsconfig.json"
+dest = "tsconfig.json"
+
+[[files]]
 source = "Justfile.jinja"
 dest = "Justfile"
 
 [[files]]
-source = "src/index.ts"
+source = ".env.example"
+dest = ".env.example"
+
+[[files]]
+source = "scripts/bundle-blueprint.mjs"
+dest = "scripts/bundle-blueprint.mjs"
+
+[[files]]
+source = "src/contract.ts"
+dest = "src/contract.ts"
+
+[[files]]
+source = "src/node.ts"
+dest = "src/node.ts"
+
+[[files]]
+source = "src/index.ts.jinja"
 dest = "src/index.ts"
+
+[[files]]
+source = "src/cli.ts"
+dest = "src/cli.ts"
+
+[[files]]
+source = "src/contract.test.ts"
+dest = "src/contract.test.ts"

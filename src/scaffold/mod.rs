@@ -124,7 +124,7 @@ mod tests {
         // On-chain files
         assert!(dir.path().join("on-chain/aiken.toml").is_file());
         assert!(dir.path().join("on-chain/Justfile").is_file());
-        assert!(dir.path().join("on-chain/validators/example.ak").is_file());
+        assert!(dir.path().join("on-chain/validators/giftcard.ak").is_file());
 
         // Content checks
         let justfile = std::fs::read_to_string(dir.path().join("Justfile")).unwrap();

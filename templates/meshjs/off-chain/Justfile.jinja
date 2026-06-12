@@ -1,14 +1,30 @@
-# Off-chain component (MeshJS)
+# Off-chain component (MeshJS) — GiftCard
 # Part of {{ project_name }}
 
+# Build the importable library into dist/ (JS + type declarations).
 build:
+    npm install
     npm run build
 
 test:
+    npm install
     npm run test
 
+# Status: show the loaded blueprint and whether the env is ready for txs.
 dev:
+    npm install
     npm run start
 
+# Create a gift card: mint a token and lock <lovelace> at the script address.
+# Requires BLOCKFROST_PROJECT_ID + MNEMONIC (see .env.example).
+create token lovelace:
+    npm install
+    npx tsx src/cli.ts create {{ "{{token}}" }} {{ "{{lovelace}}" }}
+
+# Redeem the gift card produced by the create transaction <txhash>.
+redeem txhash:
+    npm install
+    npx tsx src/cli.ts redeem {{ "{{txhash}}" }}
+
 clean:
-    rm -rf dist/ node_modules/
+    rm -rf node_modules dist

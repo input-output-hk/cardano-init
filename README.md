@@ -74,7 +74,7 @@ By design, `cardano-init` is **not** a package or version manager: it does not p
 Early prototype. Currently in the registry: 
 
 **On-chain:**
-- [ ] Aiken
+- [x] Aiken
 - [ ] Scalus
 - [ ] Plinth
 - [ ] Pebble
@@ -82,7 +82,7 @@ Early prototype. Currently in the registry:
 - [ ] Opshin
 
 **Off-chain:**
-- [ ] MeshJS
+- [x] MeshJS
 - [ ] Tx3
 - [ ] Scalus
 - [ ] Lucid Evolution
@@ -92,7 +92,9 @@ Early prototype. Currently in the registry:
 - [ ] PyCardano
 
 **Testing:**
+- [ ] Yaci DevKit
 - [ ] Scalus
+- [ ] Evolution SDK
 
 **Infrastructure:**
 - [ ] Cardano Node
@@ -104,7 +106,6 @@ Early prototype. Currently in the registry:
 - [ ] Mithril Client
 - [ ] Kupo
 - [ ] Ogmios
-- [ ] Yaci DevKit
 
 **Formal Methods:**
 - [ ] Blaster

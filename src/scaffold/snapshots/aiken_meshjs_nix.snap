@@ -89,11 +89,13 @@ This project targets the **preprod** network.
 === .gitignore ===
 # Build artifacts
 /target/
-/build/
-/dist/
+build/
+dist/
+# Generated code (e.g. blueprint bundled into the off-chain library)
+*.generated.ts
 
 # Dependencies
-/node_modules/
+node_modules/
 
 # Environment
 .env.local
@@ -126,6 +128,8 @@ NODE_SOCKET_PATH=
 === on-chain/aiken.toml ===
 name = "snap-project/on-chain"
 version = "0.0.0"
+compiler = "v1.1.21"
+plutus = "v3"
 license = "Apache-2.0"
 description = "On-chain validators for snap-project"
 
@@ -136,8 +140,10 @@ platform = "github"
 
 [[dependencies]]
 name = "aiken-lang/stdlib"
-version = "v2"
+version = "v3.1.0"
 source = "github"
+
+[config]
 
 === on-chain/Justfile ===
 # On-chain component (Aiken)
@@ -157,71 +163,964 @@ clean:
     rm -rf build/
     rm -f plutus.json
 
-=== on-chain/validators/example.ak ===
-/// A simple always-succeeds validator.
-/// Replace this with your own validator logic.
-validator example {
-  spend(_datum: Option<Data>, _redeemer: Data, _output_ref: Data, _tx: Data) {
-    True
+=== on-chain/lib/helpers.ak ===
+use cardano/address
+use cardano/assets.{zero}
+use cardano/transaction.{Input, NoDatum, Output, OutputReference}
+
+pub const test_token_name = "hello world"
+
+pub const test_policy_id =
+  #"00000000000000000000000000000000000000000000000000000000"
+
+pub fn mock_output_reference(index: Int) -> OutputReference {
+  OutputReference {
+    transaction_id: #"0000000000000000000000000000000000000000000000000000000000000000",
+    output_index: index,
   }
+}
+
+pub fn mock_input(output_reference: OutputReference) -> Input {
+  Input {
+    output_reference,
+    output: Output {
+      // A minimal payment address backed by a dummy verification-key hash.
+      address: address.from_verification_key(
+        #"00000000000000000000000000000000000000000000000000000000",
+      ),
+      value: zero,
+      datum: NoDatum,
+      reference_script: None,
+    },
+  }
+}
+
+=== on-chain/validators/giftcard.ak ===
+use aiken/collection/dict
+use aiken/collection/list
+use cardano/assets.{PolicyId, from_asset}
+use cardano/transaction.{Input, OutputReference, Transaction, placeholder}
+use helpers.{mock_input, mock_output_reference, test_policy_id, test_token_name}
+
+// The gift-card minting policy and the redeem spending validator.
+// Creating a gift card mints a single token and locks the gift assets at the
+// `redeem` script address. Redeeming burns that token and releases the assets
+// to whoever spends the UTxO.
+
+// --------------------------- MINT POLICY --------------------------------------
+// ------------------------------------------------------------------------------
+
+/// Redeemer for the gift-card minting policy.
+pub type Action {
+  Mint
+  Burn
+}
+
+/// One-shot minting policy: parameterised by the token name and a specific
+/// UTxO that must be spent when minting. Spending that UTxO can only happen
+/// once, which guarantees the gift-card token is unique.
+validator gift_card(token_name: ByteArray, utxo_ref: OutputReference) {
+  mint(rdmr: Action, policy_id: PolicyId, tx: Transaction) {
+    // Extract inputs and minted values from the transaction
+    let Transaction { inputs, mint, .. } = tx
+    // Get all tokens of this policy minted/burned in this transaction and
+    // ensure it's only one.
+    expect [Pair(asset_name, amount)] =
+      mint
+        |> assets.tokens(policy_id)
+        |> dict.to_pairs()
+    when rdmr is {
+      Mint -> {
+        // Check that we're spending the parameterised UTxO.
+        expect Some(_input) =
+          list.find(inputs, fn(input) { input.output_reference == utxo_ref })
+        // Check that we're minting only one token of name `token_name`.
+        amount == 1 && asset_name == token_name
+      }
+      // Check that we're burning only one token of name `token_name`.
+      Burn -> amount == -1 && asset_name == token_name
+    }
+  }
+
+  else(_) {
+    fail
+  }
+}
+
+// ------------------------ REDEEM (SPEND) VALIDATOR ----------------------------
+// ------------------------------------------------------------------------------
+
+/// Spending validator guarding the locked gift assets. It only allows the UTxO
+/// to be spent when the matching gift-card token is being burned in the same
+/// transaction.
+validator redeem(token_name: ByteArray, policy_id: ByteArray) {
+  spend(
+    _datum: Option<Data>,
+    _redeemer: Data,
+    _input: OutputReference,
+    tx: Transaction,
+  ) {
+    // Extract minted values from the transaction
+    let Transaction { mint, .. } = tx
+    // Get all tokens of this policy minted/burned in this transaction and
+    // ensure it's only one.
+    expect [Pair(asset_name, amount)] =
+      mint
+        |> assets.tokens(policy_id)
+        |> dict.to_pairs()
+    // Check that we're burning only one token of name `token_name`.
+    amount == -1 && asset_name == token_name
+  }
+
+  else(_) {
+    fail
+  }
+}
+
+// --------------------------------- TESTS --------------------------------------
+// ------------------------------------------------------------------------------
+
+test success_mint() {
+  let utxo_ref = mock_output_reference(0)
+  let tx =
+    Transaction {
+      ..placeholder,
+      inputs: [mock_input(utxo_ref)],
+      mint: from_asset(test_policy_id, test_token_name, 1),
+    }
+  gift_card.mint(test_token_name, utxo_ref, Mint, test_policy_id, tx)
+}
+
+test fail_mint_with_wrong_amount() fail {
+  let utxo_ref = mock_output_reference(0)
+  let tx =
+    Transaction {
+      ..placeholder,
+      inputs: [mock_input(utxo_ref)],
+      mint: from_asset(test_policy_id, test_token_name, 2),
+    }
+  gift_card.mint(test_token_name, utxo_ref, Mint, test_policy_id, tx)
+}
+
+test fail_mint_without_param_utxo() fail {
+  let utxo_ref = mock_output_reference(0)
+  let tx =
+    Transaction {
+      ..placeholder,
+      inputs: [mock_input(mock_output_reference(1))],
+      mint: from_asset(test_policy_id, test_token_name, 1),
+    }
+  gift_card.mint(test_token_name, utxo_ref, Mint, test_policy_id, tx)
+}
+
+test success_burn_and_redeem() {
+  let utxo_ref = mock_output_reference(0)
+  let tx =
+    Transaction {
+      ..placeholder,
+      mint: from_asset(test_policy_id, test_token_name, -1),
+    }
+  gift_card.mint(test_token_name, utxo_ref, Burn, test_policy_id, tx) && redeem.spend(
+    test_token_name,
+    test_policy_id,
+    None,
+    "",
+    utxo_ref,
+    tx,
+  )
+}
+
+test fail_redeem_with_wrong_amount() fail {
+  let utxo_ref = mock_output_reference(0)
+  let tx =
+    Transaction {
+      ..placeholder,
+      mint: from_asset(test_policy_id, test_token_name, -2),
+    }
+  redeem.spend(test_token_name, test_policy_id, None, "", utxo_ref, tx)
 }
 
 === off-chain/package.json ===
 {
   "name": "snap-project-off-chain",
   "version": "0.0.0",
-  "private": true,
+  "description": "Off-chain GiftCard bindings for snap-project — importable as a library",
   "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
+    "bundle-blueprint": "node scripts/bundle-blueprint.mjs",
+    "prebuild": "npm run bundle-blueprint",
     "build": "tsc",
-    "start": "tsx src/index.ts",
-    "test": "vitest run"
+    "pretypecheck": "npm run bundle-blueprint",
+    "typecheck": "tsc --noEmit",
+    "prestart": "npm run bundle-blueprint",
+    "start": "tsx src/cli.ts",
+    "pretest": "npm run bundle-blueprint",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@meshsdk/core": "^1.7.0"
+    "@meshsdk/common": "^1.9.0",
+    "@meshsdk/core": "^1.9.0",
+    "@meshsdk/core-cst": "^1.9.0",
+    "dotenv": "^16.4.0"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0",
     "vitest": "^2.0.0"
   }
 }
 
+=== off-chain/tsconfig.json ===
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
+}
+
 === off-chain/Justfile ===
-# Off-chain component (MeshJS)
+# Off-chain component (MeshJS) — GiftCard
 # Part of snap-project
 
+# Build the importable library into dist/ (JS + type declarations).
 build:
+    npm install
     npm run build
 
 test:
+    npm install
     npm run test
 
+# Status: show the loaded blueprint and whether the env is ready for txs.
 dev:
+    npm install
     npm run start
 
+# Create a gift card: mint a token and lock <lovelace> at the script address.
+# Requires BLOCKFROST_PROJECT_ID + MNEMONIC (see .env.example).
+create token lovelace:
+    npm install
+    npx tsx src/cli.ts create {{token}} {{lovelace}}
+
+# Redeem the gift card produced by the create transaction <txhash>.
+redeem txhash:
+    npm install
+    npx tsx src/cli.ts redeem {{txhash}}
+
 clean:
-    rm -rf dist/ node_modules/
+    rm -rf node_modules dist
 
-=== off-chain/src/index.ts ===
-import { MeshTxBuilder, BlockfrostProvider } from "@meshsdk/core";
-import { readFileSync, existsSync } from "fs";
+=== off-chain/.env.example ===
+# Off-chain secrets for submitting real transactions.
+# Copy this file to `.env.local` (gitignored) and fill in the values.
+# CARDANO_NETWORK is read from the shared ../.env.
 
-// Read the CIP-57 blueprint if available
-const blueprintPath = "../blueprint/plutus.json";
+# Blockfrost project id for your target network — https://blockfrost.io
+BLOCKFROST_PROJECT_ID=
+
+# Mnemonic (space-separated words) of the wallet that funds and signs txs.
+# Use a throwaway test wallet — never commit a real seed phrase.
+MNEMONIC=
+
+=== off-chain/scripts/bundle-blueprint.mjs ===
+// Inlines the on-chain blueprint into a generated TypeScript module so the
+// built library carries the validators with it — consumers importing the
+// package from a frontend or backend don't have to supply plutus.json.
+//
+// Runs automatically before build/test/start (npm "pre" hooks). Reads
+// ../blueprint/plutus.json if present; otherwise emits a null placeholder so
+// the sources still type-check before the on-chain component has been built.
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const blueprintPath = resolve(here, "..", "..", "blueprint", "plutus.json");
+const outPath = resolve(here, "..", "src", "blueprint.generated.ts");
+
+const header =
+  "// AUTO-GENERATED by scripts/bundle-blueprint.mjs — do not edit by hand.\n" +
+  "// Regenerated from ../blueprint/plutus.json before each build.\n" +
+  'import type { Blueprint } from "./contract.js";\n\n';
+
+let body;
 if (existsSync(blueprintPath)) {
   const blueprint = JSON.parse(readFileSync(blueprintPath, "utf-8"));
-  console.log(
-    `Loaded blueprint with ${blueprint.validators?.length ?? 0} validator(s)`
-  );
+  body = `export const bundledBlueprint: Blueprint | null = ${JSON.stringify(
+    blueprint,
+    null,
+    2,
+  )};\n`;
+  console.log(`Bundled ${blueprint.validators?.length ?? 0} validators from blueprint.`);
 } else {
-  console.log("No blueprint found — running without on-chain component.");
+  body = "export const bundledBlueprint: Blueprint | null = null;\n";
+  console.log("No blueprint found; emitted a null placeholder.");
 }
 
-// Example: build a simple transaction
-// Replace this with your own off-chain logic.
-console.log("MeshJS off-chain component ready.");
-console.log("Edit src/index.ts to start building transactions.");
+mkdirSync(dirname(outPath), { recursive: true });
+writeFileSync(outPath, header + body);
+
+=== off-chain/src/contract.ts ===
+import {
+  builtinByteString,
+  BuiltinByteString,
+  Integer,
+  List,
+  mConStr0,
+  mConStr1,
+  outputReference,
+  stringToHex,
+} from "@meshsdk/common";
+import {
+  Asset,
+  deserializeDatum,
+  IFetcher,
+  ISubmitter,
+  MeshTxBuilder,
+  resolveScriptHash,
+  serializePlutusScript,
+  UTxO,
+} from "@meshsdk/core";
+import { applyParamsToScript } from "@meshsdk/core-cst";
+
+import { bundledBlueprint } from "./blueprint.generated.js";
+
+// Core, framework-agnostic bindings for the GiftCard contract. This module has
+// no Node-only dependencies (no `fs`), so it is safe to import in a browser
+// frontend as well as a backend. The on-chain blueprint is bundled in at build
+// time from ../blueprint/plutus.json (see scripts/bundle-blueprint.mjs), so the
+// contract always knows its validators — consumers never supply them.
+
+/** Plutus language version the on-chain validators are compiled to. */
+export const LANGUAGE_VERSION = "V3" as const;
+
+/**
+ * Shape of the CIP-57 blueprint produced by the on-chain `aiken build`. Only
+ * the fields this library reads are named; the index signatures tolerate the
+ * many other fields a real plutus.json carries (preamble, redeemer, datum, …).
+ */
+export type Blueprint = {
+  validators: { title: string; compiledCode: string; [key: string]: unknown }[];
+  [key: string]: unknown;
+};
+
+/** The two compiled validators the GiftCard flow needs. */
+export type GiftCardValidators = {
+  /** Compiled code of the `gift_card` minting policy. */
+  giftCard: string;
+  /** Compiled code of the `redeem` spending validator. */
+  redeem: string;
+};
+
+/** A reference to the seed UTxO that parameterises a gift card. */
+export type SeedUtxo = {
+  txHash: string;
+  outputIndex: number;
+};
+
+/**
+ * The parameterised scripts and derived identifiers for a single gift card.
+ * Useful on a frontend to display the policy id / script address without
+ * building a transaction.
+ */
+export type GiftCardScripts = {
+  giftCardScript: string;
+  policyId: string;
+  redeemScript: string;
+  redeemAddress: string;
+  /** The full asset unit (policy id + hex token name) of the gift-card token. */
+  unit: string;
+};
+
+// Aiken prefixes validator titles with their module name, e.g.
+// "giftcard.gift_card.mint". We match on the "<validator>.<purpose>" suffix so
+// the lookup is independent of the module (file) name.
+export function findValidator(blueprint: Blueprint, suffix: string): string {
+  const validator = blueprint.validators.find(
+    (v) => v.title === suffix || v.title.endsWith(`.${suffix}`),
+  );
+  if (!validator) {
+    const known = blueprint.validators.map((v) => v.title).join(", ");
+    throw new Error(
+      `Validator "${suffix}" not found in blueprint. Available: ${known}`,
+    );
+  }
+  return validator.compiledCode;
+}
+
+/** Pull the gift_card (mint) and redeem (spend) validators out of a blueprint. */
+export function getGiftCardValidators(blueprint: Blueprint): GiftCardValidators {
+  return {
+    giftCard: findValidator(blueprint, "gift_card.mint"),
+    redeem: findValidator(blueprint, "redeem.spend"),
+  };
+}
+
+/** The blueprint inlined at build time, or null if none was bundled. */
+export { bundledBlueprint };
+
+/** Whether a blueprint was bundled into this build. */
+export function hasBundledBlueprint(): boolean {
+  return bundledBlueprint !== null;
+}
+
+/**
+ * The GiftCard validators bundled at build time. Throws if none was bundled —
+ * build the on-chain component and run the off-chain `just build`, or pass
+ * `validators` to the contract explicitly.
+ */
+export function getBundledValidators(): GiftCardValidators {
+  if (bundledBlueprint === null) {
+    throw new Error(
+      "No blueprint was bundled into this build. Build the on-chain component " +
+        "(its `just build` writes ../blueprint/plutus.json), then run the " +
+        "off-chain `just build`; or pass `validators` to GiftCardContract.",
+    );
+  }
+  return getGiftCardValidators(bundledBlueprint);
+}
+
+/**
+ * Minimal wallet surface the contract needs. Both MeshWallet (backend) and
+ * BrowserWallet (frontend) satisfy this structurally, so the library is not
+ * tied to a particular wallet implementation.
+ */
+export interface GiftCardWallet {
+  getUtxos(): Promise<UTxO[]>;
+  getCollateral(): Promise<UTxO[]>;
+  getChangeAddress(): Promise<string>;
+  signTx(unsignedTx: string, partialSign?: boolean): Promise<string>;
+  submitTx(tx: string): Promise<string>;
+}
+
+export type GiftCardContractInput = {
+  /** Reads chain state (UTxOs). A provider such as BlockfrostProvider works. */
+  fetcher: IFetcher;
+  /** Submits signed transactions. A provider such as BlockfrostProvider works. */
+  submitter: ISubmitter;
+  /** The wallet that funds, signs, and submits. */
+  wallet: GiftCardWallet;
+  /** 0 for testnets (preview/preprod), 1 for mainnet. */
+  networkId: number;
+};
+
+export class GiftCardContract {
+  private readonly fetcher: IFetcher;
+  private readonly submitter: ISubmitter;
+  private readonly wallet: GiftCardWallet;
+  private readonly networkId: number;
+  private readonly giftCardCompiledCode: string;
+  private readonly redeemCompiledCode: string;
+
+  constructor(input: GiftCardContractInput) {
+    this.fetcher = input.fetcher;
+    this.submitter = input.submitter;
+    this.wallet = input.wallet;
+    this.networkId = input.networkId;
+    const validators = getBundledValidators();
+    this.giftCardCompiledCode = validators.giftCard;
+    this.redeemCompiledCode = validators.redeem;
+  }
+
+  /** A fresh transaction builder. One builder builds one transaction. */
+  private newTxBuilder(): MeshTxBuilder {
+    return new MeshTxBuilder({
+      fetcher: this.fetcher,
+      submitter: this.submitter,
+    });
+  }
+
+  /** Apply the (token name, seed UTxO) parameters to the one-shot mint policy. */
+  private giftCardCbor(
+    tokenNameHex: string,
+    utxoTxHash: string,
+    utxoTxId: number,
+  ): string {
+    return applyParamsToScript(
+      this.giftCardCompiledCode,
+      [builtinByteString(tokenNameHex), outputReference(utxoTxHash, utxoTxId)],
+      "JSON",
+    );
+  }
+
+  /** Apply the (token name, policy id) parameters to the redeem spend script. */
+  private redeemCbor(tokenNameHex: string, policyId: string): string {
+    return applyParamsToScript(this.redeemCompiledCode, [tokenNameHex, policyId]);
+  }
+
+  private getScriptAddress(scriptCbor: string): string {
+    return serializePlutusScript(
+      { code: scriptCbor, version: LANGUAGE_VERSION },
+      undefined,
+      this.networkId,
+    ).address;
+  }
+
+  /**
+   * Derive the parameterised scripts, policy id, and redeem address for a gift
+   * card seeded by `seedUtxo`. Pure: no wallet or network access, so it is safe
+   * to call from a frontend to preview an address.
+   */
+  getScripts(tokenName: string, seedUtxo: SeedUtxo): GiftCardScripts {
+    const tokenNameHex = stringToHex(tokenName);
+    const giftCardScript = this.giftCardCbor(
+      tokenNameHex,
+      seedUtxo.txHash,
+      seedUtxo.outputIndex,
+    );
+    const policyId = resolveScriptHash(giftCardScript, LANGUAGE_VERSION);
+    const redeemScript = this.redeemCbor(tokenNameHex, policyId);
+    return {
+      giftCardScript,
+      policyId,
+      redeemScript,
+      redeemAddress: this.getScriptAddress(redeemScript),
+      unit: policyId + tokenNameHex,
+    };
+  }
+
+  private async getWalletInfoForTx(): Promise<{
+    utxos: UTxO[];
+    walletAddress: string;
+    collateral: UTxO;
+  }> {
+    const utxos = await this.wallet.getUtxos();
+    const collateral = (await this.wallet.getCollateral())[0];
+    const walletAddress = await this.wallet.getChangeAddress();
+    if (utxos.length === 0) throw new Error("No UTxOs found in wallet");
+    if (collateral === undefined)
+      throw new Error("No collateral UTxO found in wallet");
+    return { utxos, walletAddress, collateral };
+  }
+
+  /**
+   * Build a transaction that mints a unique gift-card token and locks
+   * `giftValue` at the redeem script address. Returns the UNSIGNED transaction
+   * hex — sign and submit it with `signAndSubmit`, a browser wallet, or your
+   * own signer.
+   */
+  createGiftCard = async (
+    tokenName: string,
+    giftValue: Asset[],
+  ): Promise<string> => {
+    const { utxos, walletAddress, collateral } = await this.getWalletInfoForTx();
+    const tokenNameHex = stringToHex(tokenName);
+    const firstUtxo = utxos[0];
+    if (firstUtxo === undefined) throw new Error("No UTxOs available");
+    const remainingUtxos = utxos.slice(1);
+
+    const { giftCardScript, policyId, redeemAddress, unit } = this.getScripts(
+      tokenName,
+      firstUtxo.input,
+    );
+
+    const tx = await this.newTxBuilder()
+      .txIn(
+        firstUtxo.input.txHash,
+        firstUtxo.input.outputIndex,
+        firstUtxo.output.amount,
+        firstUtxo.output.address,
+      )
+      .mintPlutusScript(LANGUAGE_VERSION)
+      .mint("1", policyId, tokenNameHex)
+      .mintingScript(giftCardScript)
+      .mintRedeemerValue(mConStr0([]))
+      .txOut(redeemAddress, [...giftValue, { unit, quantity: "1" }])
+      .txOutInlineDatumValue([
+        firstUtxo.input.txHash,
+        firstUtxo.input.outputIndex,
+        tokenNameHex,
+      ])
+      .changeAddress(walletAddress)
+      .txInCollateral(
+        collateral.input.txHash,
+        collateral.input.outputIndex,
+        collateral.output.amount,
+        collateral.output.address,
+      )
+      .selectUtxosFrom(remainingUtxos)
+      .complete();
+
+    return tx;
+  };
+
+  /**
+   * Build a transaction that burns a gift-card token and releases the locked
+   * assets to the redeemer. `giftCardUtxo` is the UTxO sitting at the redeem
+   * script address (see `getGiftCardUtxo`). Returns the UNSIGNED transaction hex.
+   */
+  redeemGiftCard = async (giftCardUtxo: UTxO): Promise<string> => {
+    const { utxos, walletAddress, collateral } = await this.getWalletInfoForTx();
+
+    const inlineDatum = deserializeDatum<List>(
+      giftCardUtxo.output.plutusData!,
+    ).list;
+    const paramTxHash = (inlineDatum[0] as BuiltinByteString).bytes;
+    const paramTxId = (inlineDatum[1] as Integer).int as number;
+    const tokenNameHex = (inlineDatum[2] as BuiltinByteString).bytes;
+
+    const giftCardScript = this.giftCardCbor(tokenNameHex, paramTxHash, paramTxId);
+    const policyId = resolveScriptHash(giftCardScript, LANGUAGE_VERSION);
+    const redeemScript = this.redeemCbor(tokenNameHex, policyId);
+
+    const tx = await this.newTxBuilder()
+      .spendingPlutusScript(LANGUAGE_VERSION)
+      .txIn(
+        giftCardUtxo.input.txHash,
+        giftCardUtxo.input.outputIndex,
+        giftCardUtxo.output.amount,
+        giftCardUtxo.output.address,
+      )
+      .spendingReferenceTxInInlineDatumPresent()
+      .spendingReferenceTxInRedeemerValue("")
+      .txInScript(redeemScript)
+      .mintPlutusScript(LANGUAGE_VERSION)
+      .mint("-1", policyId, tokenNameHex)
+      .mintingScript(giftCardScript)
+      .mintRedeemerValue(mConStr1([]))
+      .changeAddress(walletAddress)
+      .txInCollateral(
+        collateral.input.txHash,
+        collateral.input.outputIndex,
+        collateral.output.amount,
+        collateral.output.address,
+      )
+      .selectUtxosFrom(utxos)
+      .complete();
+
+    return tx;
+  };
+
+  /**
+   * Find the gift-card UTxO produced by a `createGiftCard` transaction: the
+   * output carrying an inline datum (the one locked at the redeem address).
+   */
+  getGiftCardUtxo = async (txHash: string): Promise<UTxO | undefined> => {
+    const utxos = await this.fetcher.fetchUTxOs(txHash);
+    return utxos.find((u) => u.output.plutusData !== undefined);
+  };
+
+  /** Sign an unsigned transaction with the wallet and submit it. Returns the tx hash. */
+  signAndSubmit = async (unsignedTx: string): Promise<string> => {
+    const signedTx = await this.wallet.signTx(unsignedTx);
+    return this.submitter.submitTx(signedTx);
+  };
+}
+
+=== off-chain/src/node.ts ===
+import { existsSync } from "node:fs";
+
+import { config as loadDotenv } from "dotenv";
+import { BlockfrostProvider, MeshWallet } from "@meshsdk/core";
+
+import { GiftCardContract } from "./contract.js";
+
+// Node-only helpers: reading configuration from the environment and wiring up a
+// provider + wallet. Importing this in a browser bundle would pull in `node:fs`
+// (via dotenv); frontends import the package root ("." → ./contract), which
+// already carries the bundled blueprint, and build their own BrowserWallet.
+
+const NETWORK_IDS = { preview: 0, preprod: 0, mainnet: 1 } as const;
+export type Network = keyof typeof NETWORK_IDS;
+
+export type GiftCardEnv = {
+  network: Network;
+  networkId: 0 | 1;
+  blockfrostProjectId: string;
+  mnemonic: string[];
+};
+
+export type EnvResult =
+  | { ok: true; env: GiftCardEnv }
+  | { ok: false; missing: string[] };
+
+/**
+ * Load configuration from the environment. Reads the given dotenv files (the
+ * shared `../.env` for CARDANO_NETWORK and the gitignored `.env.local` for
+ * secrets) without overriding anything already set in `process.env`.
+ *
+ * Required: BLOCKFROST_PROJECT_ID, MNEMONIC (space-separated words).
+ * Optional: CARDANO_NETWORK (preview | preprod | mainnet; default preview).
+ */
+export function loadEnv(
+  envFiles = ["../.env", ".env.local", ".env"],
+): EnvResult {
+  for (const path of envFiles) {
+    if (existsSync(path)) loadDotenv({ path, override: false });
+  }
+
+  const network = (process.env.CARDANO_NETWORK ?? "preview") as Network;
+  const blockfrostProjectId = process.env.BLOCKFROST_PROJECT_ID ?? "";
+  const mnemonicRaw = process.env.MNEMONIC ?? "";
+
+  const missing: string[] = [];
+  if (!(network in NETWORK_IDS))
+    missing.push("CARDANO_NETWORK (one of preview|preprod|mainnet)");
+  if (!blockfrostProjectId) missing.push("BLOCKFROST_PROJECT_ID");
+  if (!mnemonicRaw.trim()) missing.push("MNEMONIC");
+  if (missing.length > 0) return { ok: false, missing };
+
+  return {
+    ok: true,
+    env: {
+      network,
+      networkId: NETWORK_IDS[network],
+      blockfrostProjectId,
+      mnemonic: mnemonicRaw.trim().split(/\s+/),
+    },
+  };
+}
+
+/**
+ * Wire up a BlockfrostProvider, a mnemonic-backed MeshWallet, and a
+ * GiftCardContract from the environment. The contract uses the blueprint
+ * bundled at build time. The wallet is initialized and ready to use. Backend
+ * convenience; a frontend builds its own BrowserWallet and constructs
+ * GiftCardContract directly.
+ */
+export async function createGiftCardContractFromEnv(options: {
+  env: GiftCardEnv;
+}): Promise<{
+  contract: GiftCardContract;
+  wallet: MeshWallet;
+  provider: BlockfrostProvider;
+}> {
+  const { env } = options;
+  const provider = new BlockfrostProvider(env.blockfrostProjectId);
+  const wallet = new MeshWallet({
+    networkId: env.networkId,
+    fetcher: provider,
+    submitter: provider,
+    key: { type: "mnemonic", words: env.mnemonic },
+  });
+  await wallet.init();
+
+  const contract = new GiftCardContract({
+    fetcher: provider,
+    submitter: provider,
+    wallet,
+    networkId: env.networkId,
+  });
+
+  return { contract, wallet, provider };
+}
+
+=== off-chain/src/index.ts ===
+// Library entry point. Re-exports the framework-agnostic core so the package
+// can be imported from a backend or a frontend:
+//
+//   import { GiftCardContract, getGiftCardValidators } from "snap-project-off-chain";
+//
+// Node-only helpers (reading the blueprint from disk, building a wallet from
+// environment variables) live behind the "snap-project-off-chain/node"
+// subpath so they never reach a browser bundle.
+export * from "./contract.js";
+
+=== off-chain/src/cli.ts ===
+import { getBundledValidators, hasBundledBlueprint } from "./contract.js";
+import { createGiftCardContractFromEnv, loadEnv } from "./node.js";
+
+// Runnable entry point for `just dev` / `npm start` and the `create` / `redeem`
+// commands. It submits real transactions when the blueprint is bundled and the
+// required environment variables are present, and degrades to guidance
+// otherwise. The blueprint is bundled from ../blueprint/plutus.json before this
+// runs (the npm "pre" hooks call scripts/bundle-blueprint.mjs).
+//
+//   npm start                       # status: blueprint + env readiness
+//   npx tsx src/cli.ts create <name> <lovelace>
+//   npx tsx src/cli.ts redeem <createTxHash>
+
+function printStatus(): void {
+  if (!hasBundledBlueprint()) {
+    console.log("No blueprint bundled.");
+    console.log(
+      "Build the on-chain component first:  just -f ../on-chain/Justfile build",
+    );
+    return;
+  }
+
+  const { giftCard, redeem } = getBundledValidators();
+  console.log("Bundled on-chain blueprint:");
+  console.log(`  gift_card (mint):  ${giftCard.length} hex chars`);
+  console.log(`  redeem    (spend): ${redeem.length} hex chars`);
+  console.log("");
+
+  const env = loadEnv();
+  if (env.ok) {
+    console.log(`Environment ready (network: ${env.env.network}).`);
+    console.log("Run a transaction:");
+    console.log("  npx tsx src/cli.ts create <tokenName> <lovelace>");
+    console.log("  npx tsx src/cli.ts redeem <createTxHash>");
+  } else {
+    console.log("To submit transactions, set the following (see .env.example):");
+    for (const key of env.missing) console.log(`  - ${key}`);
+  }
+}
+
+function requireEnv() {
+  if (!hasBundledBlueprint()) {
+    throw new Error(
+      "No blueprint bundled. Build on-chain first: " +
+        "just -f ../on-chain/Justfile build",
+    );
+  }
+  const env = loadEnv();
+  if (!env.ok) {
+    throw new Error(
+      `Missing required configuration: ${env.missing.join(", ")}. ` +
+        "See .env.example.",
+    );
+  }
+  return env.env;
+}
+
+async function create(tokenName: string, lovelace: string): Promise<void> {
+  const env = requireEnv();
+  const { contract } = await createGiftCardContractFromEnv({ env });
+
+  const unsignedTx = await contract.createGiftCard(tokenName, [
+    { unit: "lovelace", quantity: lovelace },
+  ]);
+  const txHash = await contract.signAndSubmit(unsignedTx);
+
+  console.log(`Gift card "${tokenName}" created.`);
+  console.log(`  tx: ${txHash}`);
+  console.log("Once it is confirmed on chain, redeem it with:");
+  console.log(`  npx tsx src/cli.ts redeem ${txHash}`);
+}
+
+async function redeem(createTxHash: string): Promise<void> {
+  const env = requireEnv();
+  const { contract } = await createGiftCardContractFromEnv({ env });
+
+  const giftCardUtxo = await contract.getGiftCardUtxo(createTxHash);
+  if (giftCardUtxo === undefined) {
+    throw new Error(
+      `No gift-card UTxO (output with an inline datum) found in tx ${createTxHash}.`,
+    );
+  }
+
+  const unsignedTx = await contract.redeemGiftCard(giftCardUtxo);
+  const txHash = await contract.signAndSubmit(unsignedTx);
+
+  console.log("Gift card redeemed; assets released to your wallet.");
+  console.log(`  tx: ${txHash}`);
+}
+
+async function main(): Promise<void> {
+  const [command, ...args] = process.argv.slice(2);
+
+  switch (command) {
+    case undefined:
+    case "status":
+      printStatus();
+      break;
+    case "create":
+      if (args.length < 2) {
+        throw new Error("usage: create <tokenName> <lovelace>");
+      }
+      await create(args[0]!, args[1]!);
+      break;
+    case "redeem":
+      if (args.length < 1) {
+        throw new Error("usage: redeem <createTxHash>");
+      }
+      await redeem(args[0]!);
+      break;
+    default:
+      throw new Error(`Unknown command "${command}". Use: status | create | redeem`);
+  }
+}
+
+main().catch((err) => {
+  console.error(err instanceof Error ? err.message : err);
+  process.exit(1);
+});
+
+=== off-chain/src/contract.test.ts ===
+import { describe, expect, it } from "vitest";
+
+import {
+  getBundledValidators,
+  GiftCardContract,
+  hasBundledBlueprint,
+} from "./contract.js";
+
+// The blueprint is bundled before tests run (the npm "pretest" hook calls
+// scripts/bundle-blueprint.mjs), so these run only once the on-chain component
+// has been built. They need no wallet or network — script parameterisation and
+// address derivation are pure.
+const bundled = hasBundledBlueprint();
+
+// A throwaway seed UTxO — script derivation is pure, so any well-formed
+// reference works for an offline test.
+const SEED_UTXO = {
+  txHash: "0000000000000000000000000000000000000000000000000000000000000000",
+  outputIndex: 0,
+};
+
+describe("GiftCard off-chain", () => {
+  it.runIf(bundled)("bundles both validators from the blueprint", () => {
+    const { giftCard, redeem } = getBundledValidators();
+    expect(giftCard.length).toBeGreaterThan(0);
+    expect(redeem.length).toBeGreaterThan(0);
+  });
+
+  it.runIf(bundled)(
+    "derives a policy id and redeem address from the bundled blueprint",
+    () => {
+      // No validators passed — the contract uses the bundled blueprint.
+      const contract = new GiftCardContract({
+        // Pure derivation does not touch these; cast for the offline test.
+        fetcher: undefined as never,
+        submitter: undefined as never,
+        wallet: undefined as never,
+        networkId: 0,
+      });
+
+      const scripts = contract.getScripts("hello world", SEED_UTXO);
+
+      // Policy id is a 28-byte blake2b-224 hash → 56 hex chars.
+      expect(scripts.policyId).toMatch(/^[0-9a-f]{56}$/);
+      // Preview/preprod script addresses are bech32 with the `addr_test` HRP.
+      expect(scripts.redeemAddress.startsWith("addr_test")).toBe(true);
+      // The asset unit is policy id + hex token name ("hello world").
+      expect(scripts.unit).toBe(scripts.policyId + "68656c6c6f20776f726c64");
+    },
+  );
+});
 
 === flake.nix ===
 {

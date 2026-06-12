@@ -1,5 +1,5 @@
 [manifest]
-summary = "Aiken on-chain project with a simple always-succeeds validator"
+summary = "Aiken on-chain project implementing the GiftCard mint + redeem validators"
 
 [[files]]
 source = "aiken.toml.jinja"
@@ -10,5 +10,9 @@ source = "Justfile.jinja"
 dest = "Justfile"
 
 [[files]]
-source = "validators/example.ak"
-dest = "validators/example.ak"
+source = "lib/helpers.ak"
+dest = "lib/helpers.ak"
+
+[[files]]
+source = "validators/giftcard.ak"
+dest = "validators/giftcard.ak"

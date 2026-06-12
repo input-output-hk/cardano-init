@@ -154,13 +154,13 @@ mod tests {
         let ctx = build_context(&sel, &reg).unwrap();
         let files = render(&plan, &ctx).unwrap();
 
-        let example = files
+        let validator = files
             .iter()
-            .find(|f| f.dest.to_str().unwrap().contains("validators/example.ak"))
-            .expect("example.ak should be in rendered files");
+            .find(|f| f.dest.to_str().unwrap().contains("validators/giftcard.ak"))
+            .expect("giftcard.ak should be in rendered files");
 
-        let content = std::str::from_utf8(&example.content).unwrap();
-        assert!(content.contains("validator example"));
+        let content = std::str::from_utf8(&validator.content).unwrap();
+        assert!(content.contains("validator gift_card"));
         assert!(!content.contains("{{"));
     }
 

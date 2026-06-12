@@ -1,17 +1,43 @@
 {
   "name": "{{ project_name }}-off-chain",
   "version": "0.0.0",
-  "private": true,
+  "description": "Off-chain GiftCard bindings for {{ project_name }} — importable as a library",
   "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
+    "bundle-blueprint": "node scripts/bundle-blueprint.mjs",
+    "prebuild": "npm run bundle-blueprint",
     "build": "tsc",
-    "start": "tsx src/index.ts",
-    "test": "vitest run"
+    "pretypecheck": "npm run bundle-blueprint",
+    "typecheck": "tsc --noEmit",
+    "prestart": "npm run bundle-blueprint",
+    "start": "tsx src/cli.ts",
+    "pretest": "npm run bundle-blueprint",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@meshsdk/core": "^1.7.0"
+    "@meshsdk/common": "^1.9.0",
+    "@meshsdk/core": "^1.9.0",
+    "@meshsdk/core-cst": "^1.9.0",
+    "dotenv": "^16.4.0"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0",
     "vitest": "^2.0.0"
