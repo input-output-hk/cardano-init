@@ -130,16 +130,16 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 
 ### Generation
 
-- **FR-5 (M):** Generate a monorepo with role directories **only** for selected roles, plus a base layer present in every project: a top-level orchestrating `Justfile`, a top-level README explaining the full architecture, `.gitignore`, `.env` (always: it seeds `CARDANO_NETWORK` and the infra connection vars), and the `blueprint/` directory (present for every project except infrastructure-only: so every blueprint-consuming role has a stable path and a user can drop in an external `plutus.json`; the `plutus.json` file itself is produced by on-chain `build`).
+- **FR-5 (M):** Generate a monorepo with role directories **only** for selected roles, plus a base layer present in every project: a top-level orchestrating `Justfile`, a top-level README explaining the full architecture, `.gitignore`, `.env` (always: it seeds `CARDANO_NETWORK` and the standard chain connection vars), and the `blueprint/` directory (present for every project except infrastructure-only: so every blueprint-consuming role has a stable path and a user can drop in an external `plutus.json`; the `plutus.json` file itself is produced by on-chain `build`).
 - **FR-6 (M):** Every generated project includes a **simple but complete, runnable example** that demonstrates the selected components working *together*, not in isolation.
 - **FR-7 (M):** Composition is generic. The pipeline wires components using only the set of present roles and the interface contract, with **no per-tool-pair logic**.
-- **FR-8 (M):** Top-level and per-component `Justfile`s expose standardized targets (`build`, `test`, `dev`, `clean`); the top level delegates to each component.
+- **FR-8 (M):** Per-component `Justfile`s expose standardized targets (`build`, `test`, `clean`; plus an optional `dev` when the tool has a watch/daemon/devnet mode). The top level aggregates only the terminating, composable tasks — `build`, `test`, `clean` — delegating to each component (`test` builds the on-chain blueprint first, then runs each component's `test` in role order); `dev`, where present, is run per-component by the developer and is not aggregated.
 - **FR-9 (S):** Optional Nix flake (`flake.nix`) providing a dev shell with all required toolchains, opt-in at selection time. Without Nix, prerequisites are documented in the README.
 
 ### Interface contract (mechanically enforced, see TECH_SPEC)
 
 - **FR-10 (M):** On-chain templates produce the CIP-57 blueprint at the canonical path (`blueprint/plutus.json`) during `build` and other roles (e.g. off-chain, testing, formal-methods) read it from the same path.
-- **FR-11 (M):** Infrastructure templates write standardized connection details to `.env` (e.g. `INDEXER_URL`) during `dev`; consumers read from there.
+- **FR-11 (M):** Whichever component provisions a local chain endpoint writes standardized connection details to `.env` (e.g. `INDEXER_URL`) during `dev` — an infrastructure service, or a local devnet in the testing role (e.g. Yaci DevKit); consumers read from there and react only to the presence of the keys, not to which role wrote them.
 - **FR-12 (M):** Every template works **independently** (e.g., its `just build` succeeds with no other roles present), and has to handle all shared `just` commands. It can optionally add more to be ran on that role's folder, but it can't avoid handling the shared ones (it should, at least, print a message).
 
 ### Agent affordances

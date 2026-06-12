@@ -163,9 +163,9 @@ pub const ENV_NODE_SOCKET_PATH = "NODE_SOCKET_PATH"; ENV_NETWORK = "CARDANO_NETW
 
 **Compliance checklist (enforced mechanically by contract-compliance tests):**
 
-- **Every template** ships a `Justfile` exposing `build`, `test`, `dev`, `clean`, and works **independently** (its `just build` succeeds with no other roles present). A target that is a no-op for that tool must still exist (printing a message is fine).
+- **Every template** ships a `Justfile` exposing `build`, `test`, `clean`, and works **independently** (its `just build` succeeds with no other roles present). A no-op-for-this-tool target among those three still exists (printing a message is fine). **`dev` is optional** — provided only when the tool has a real watch/daemon/devnet mode. The **top level** aggregates only `build`/`test`/`clean`; `dev`, where present, is per-component (§6.2 / TECH_SPEC §7.2), never aggregated.
 - **On-chain** produces the CIP-57 blueprint at `../blueprint/plutus.json` during `build`. Other roles read it from that path if present.
-- **Infrastructure** writes standard connection vars to `../.env` during `dev`.
+- **The component that provisions a local chain endpoint** writes the standard connection vars to `../.env` during its `dev`. This is **role-agnostic** — usually an *infrastructure* service, but a local devnet such as Yaci DevKit in the *testing* role does it too. Role = a tool's *purpose*; writing `.env` = the orthogonal *capability* of exposing a local endpoint. Consumers react to the presence of `INDEXER_URL`, never to which role set it (principle 1).
 - **Off-chain / testing / formal-methods** read the blueprint and `.env` if present, and degrade gracefully when absent.
 
 The `blueprint/` **directory** is scaffolded whenever any blueprint-producing-or-consuming
@@ -285,7 +285,7 @@ doctor/
 └── probe.rs       Impure: detect OS + which installers are on PATH -> Environment
 ```
 
-- **Two-tier inputs.** The selection yields **required** deps = `{just}` (universal task runner) ∪ the `system_deps` of all selected tools (unioned, deduped); and **recommended** deps = `{process-compose}` **if  two or more infrastructure tools are selected** (improves multi-service `just dev`, never required; TECH_SPEC §7.2/§9.1). `just`/`process-compose` are base/derived deps owned by no tool. Missing recommended deps are soft notes, never blocking.
+- **Two-tier inputs.** The selection yields **required** deps = `{just}` (universal task runner) ∪ the `system_deps` of all selected tools (unioned, deduped); and **recommended** deps (soft notes, never blocking). The two-tier mechanism stands, but there is **currently no recommended dep**: the former `process-compose`/≥2-infra case existed only to smooth a multi-service top-level `just dev`, which no longer exists (the top level no longer aggregates `dev`; long-running services start per-component — TECH_SPEC §7.2/§9.1). `just` is a base/derived dep owned by no tool.
 - **Installers vs deps: the key model.** An **installer** is just another dependency. Code owns a *closed* `Installer` vocabulary (`Brew`, `Apt`, `Dnf`, `Pacman`, `Winget`, `Nix`, `Go`, `Cargo`, `Npm`, `Aikup`, `CardanoUp`, `Curl`, `PowerShell`); each declares its detect-binaries, a command template (`brew install {arg}`, `npm install -g {arg}`, `curl -sSfL {arg} | sh`, …), and a **`bootstrap` list of dep ids**. An **empty `bootstrap` list ⇒ terminal** (we detect it, never install it: system package managers, `nix`, the OS shells); a **non-empty list ⇒ bootstrappable** by installing any one of those deps in order (`npm`→`["node"]`, `aikup`→`["aikup"]`, `cargo`→`["rustup","rust"]`). This is what makes the catalog a graph rather than a flat list.
 - **Recipes live in data.** Per-dep recipes are an embedded TOML file (`registry/deps.toml`), keyed by dep id: `binaries` (presence check), `docs` (universal fallback), and an ordered `install` list of `{ installer = arg }` methods. Installer names are validated against the code enum at load (unknown installer → load error, like an unknown `Role`). See §8.1 for why code/data split this way.
 - **Resolver (`resolve`, pure, recursive).** A dep is present if  any of its `binaries` is on `PATH`. For a missing dep, walk its `install` methods in order: the first method whose installer is **detected** yields a one-step command; otherwise, if the installer is **bootstrappable**, recurse to satisfy one of its `bootstrap` deps and prepend those steps. The result is an ordered, possibly multi-step **plan** (e.g. `aiken` missing with no `nix`/`aikup` → install `aikup` via `npm`, then `aikup install latest`). Picking a single method per dep is exactly why the `nix` path needs no `aikup`. Cycle detection guards the walk; `docs` is the fallback when nothing resolves (advice never empty, FR-20). Version constraints are out of scope for v1 (presence only); doctor output is **host-dependent by design** (not part of the byte-identical generation contract).
@@ -319,7 +319,7 @@ docs     = "https://aiken-lang.org/installation-instructions"
 install  = [ { aikup = "latest" }, { nix = "aiken" } ]
 ```
 
-**Referential integrity (tests):** every `system_deps` id (plus base deps `just` / `process-compose`) has a `registry/deps.toml` entry; every installer named in the data exists in the `Installer` enum; every dep id in an installer's `bootstrap` list exists. The full field-by-field schema and the resolver algorithm are in TECH_SPEC §9.
+**Referential integrity (tests):** every `system_deps` id (plus the base dep `just`) has a `registry/deps.toml` entry; every installer named in the data exists in the `Installer` enum; every dep id in an installer's `bootstrap` list exists. The full field-by-field schema and the resolver algorithm are in TECH_SPEC §9.
 
 ---
 
@@ -361,7 +361,7 @@ The local `serve` path (10.1) ships regardless and keeps its planner-backed prev
 ## 11. Testing strategy
 
 - **Unit (pure core):** registry loading (every TOML parses, fields present); context building; planning (exact file set + order); rendering (context + template → expected output); doctor `resolve` over synthetic environments (incl. multi-step bootstrap chains and the cycle guard).
-- **Contract compliance (mechanical):** for each template, assert the Justfile exposes `build`/`test`/`dev`/`clean`; for on-chain, assert `just build` produces `blueprint/plutus.json`. This is what lets us avoid testing tool combinations.
+- **Contract compliance (mechanical):** for each template, assert the Justfile exposes `build`/`test`/`clean` (`dev` is optional); for on-chain, assert `just build` produces `blueprint/plutus.json`. This is what lets us avoid testing tool combinations.
 - **Per-tool build smoke tests:** scaffold each tool in isolation and, where CI has the toolchain (or via Nix), run `just build && just test`. New tools must add these (PRD SM-1).
 - **Scheduled maintenance gate:** the per-tool smoke tests also run on a schedule (weekly cron + manual dispatch, `.github/workflows/scheduled-smoke.yml`), not only on PR/commit. This is what detects a *generated project* breaking with **no repo change** — a Cardano hardfork, a breaking upstream tool release, or an unmaintained dependency (templates pin floating version ranges). A failure opens a tracking issue. It is distinct from the PR gates, which catch regressions we introduce.
 - **Determinism / snapshot tests:** `--dry-run` and rendered output compared against committed snapshots for a set of selections; guards §6.4.

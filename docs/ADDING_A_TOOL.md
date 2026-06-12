@@ -99,16 +99,23 @@ Every template, regardless of role, must conform to the interface contract defin
 
 ### Mandatory Justfile targets
 
-Every template **must** include a `Justfile` that exposes these four targets:
+Every template **must** include a `Justfile` that exposes these three targets:
 
 | Target | Purpose |
 |---|---|
 | `build` | Compile / package the component |
 | `test` | Run the component's tests |
-| `dev` | Start development mode (watch, REPL, local daemon) |
 | `clean` | Remove build artifacts |
 
-The top-level project Justfile delegates to these by calling `just -f <role>/Justfile build`, so the names are non-negotiable.
+The top-level project Justfile delegates to these by calling `just -f <role>/Justfile <target>`, so the names are non-negotiable. The top level aggregates only these three (the terminating, composable tasks).
+
+### Optional: `dev`
+
+| Target | Purpose |
+|---|---|
+| `dev` | Start development mode (watch, REPL, local daemon, local devnet) |
+
+`dev` is **optional** — add it only when your tool has a genuine long-running or interactive mode (don't ship a no-op `dev` just to fill the slot). It is **never aggregated** at the top level; the developer runs it directly (`just -f <role>/Justfile dev`). A `dev` that provisions a local chain endpoint writes the standard connection vars to `../.env` (see below).
 
 ### Role-specific requirements
 
@@ -130,16 +137,16 @@ build:
     npm run build
 ```
 
-Off-chain tools may also read infrastructure connection details from `../.env`:
+Off-chain tools may also read chain connection details from `../.env`, and should switch behavior on their presence — e.g. talk to a local devnet when `INDEXER_URL` is set, and fall back to a public provider otherwise:
 
 ```typescript
 import * as dotenv from "dotenv";
 dotenv.config({ path: "../.env" });
 
-const indexerUrl = process.env.INDEXER_URL;
+const indexerUrl = process.env.INDEXER_URL; // set → a local endpoint is up
 ```
 
-**Infrastructure tools** must write their connection details to `../.env` during `dev`. Use the standard variable names:
+**Tools that provision a local chain endpoint** must write the connection details to `../.env` during `dev`. This applies to **infrastructure** services and, equally, to a **local devnet in the testing role** (e.g. Yaci DevKit) — the seam is the `.env` keys, not the role. Use the standard variable names:
 
 | Variable | Meaning |
 |---|---|
@@ -155,7 +162,9 @@ dev:
     echo "INDEXER_PORT=1442" >> ../.env
 ```
 
-**Testing tools** should read both the blueprint and the `.env` if they are present, but must work if neither exists.
+Write the keys idempotently (replace in place rather than appending) so repeated `just dev` runs don't accumulate duplicate lines. Off-chain/testing consumers read these and never need to know which tool wrote them.
+
+**Testing tools** should read both the blueprint and the `.env` if they are present, but must work if neither exists. A testing tool may *also* provision a local devnet (writing the connection vars above during `dev`) — that is how off-chain components reach it, and it composes with any off-chain tool without per-pair code.
 
 **Formal-methods tools** have no extra contract beyond the four Justfile targets.
 

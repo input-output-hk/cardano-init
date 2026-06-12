@@ -16,7 +16,9 @@ dev:
     npm run start
 
 # Create a gift card: mint a token and lock <lovelace> at the script address.
-# Requires BLOCKFROST_PROJECT_ID + MNEMONIC (see .env.example).
+# Submits to the local devnet if one is running (INDEXER_URL in ../.env), else
+# to Blockfrost (needs BLOCKFROST_PROJECT_ID). Needs MNEMONIC either way — see
+# .env.example.
 create token lovelace:
     npm install
     npx tsx src/cli.ts create {{ "{{token}}" }} {{ "{{lovelace}}" }}

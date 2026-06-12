@@ -111,6 +111,16 @@ fn validate_dest(dest: &str) -> Result<(), ScaffoldError> {
 // Planning
 // ---------------------------------------------------------------------------
 
+/// Whether the `blueprint/` directory is scaffolded: true when any
+/// non-infrastructure role is present (equivalently, unless the project is
+/// infrastructure-only). See TECH_SPEC §6.2. Mirrors `TemplateContext::has_blueprint`.
+pub(crate) fn blueprint_dir_present(selection: &Selection) -> bool {
+    selection
+        .assignments
+        .iter()
+        .any(|a| a.role != Role::Infrastructure)
+}
+
 /// Build a `FilePlan` from a `Selection` and the tool `Registry`.
 ///
 /// This determines every file that will be written during scaffolding.
@@ -144,11 +154,7 @@ pub fn plan(selection: &Selection, registry: &Registry) -> Result<FilePlan, Scaf
     // blueprint-producing-or-consuming role — i.e. any role except
     // infrastructure (equivalently: present unless the project is
     // infrastructure-only). See TECH_SPEC §6.2.
-    let blueprint_present = selection
-        .assignments
-        .iter()
-        .any(|a| a.role != Role::Infrastructure);
-    if blueprint_present {
+    if blueprint_dir_present(selection) {
         entries.push(FileEntry {
             dest: PathBuf::from("blueprint/.gitkeep"),
             source: TemplateSource::Inline(Vec::new()),
@@ -311,8 +317,27 @@ mod tests {
 
     #[test]
     fn no_blueprint_for_infra_only() {
-        let sel = selection(vec![RoleAssignment {
+        // Infrastructure-only → no blueprint dir. Exercised through the predicate
+        // because the registry currently ships no infrastructure tool to plan
+        // end-to-end (Yaci moved to the testing role).
+        let infra_only = selection(vec![RoleAssignment {
             role: Role::Infrastructure,
+            tool_id: "some-infra".into(),
+        }]);
+        assert!(!blueprint_dir_present(&infra_only));
+
+        // Any non-infra role flips it on.
+        let testing_only = selection(vec![RoleAssignment {
+            role: Role::Testing,
+            tool_id: "yaci".into(),
+        }]);
+        assert!(blueprint_dir_present(&testing_only));
+    }
+
+    #[test]
+    fn yaci_testing_entries() {
+        let sel = selection(vec![RoleAssignment {
+            role: Role::Testing,
             tool_id: "yaci".into(),
         }]);
         let plan = plan(&sel, &registry()).unwrap();
@@ -322,7 +347,12 @@ mod tests {
             .iter()
             .map(|e| e.dest.to_str().unwrap())
             .collect();
-        assert!(!dests.contains(&"blueprint/.gitkeep"));
+        // Testing role lives under test/, and still gets the blueprint dir.
+        assert!(dests.contains(&"blueprint/.gitkeep"));
+        assert!(dests.contains(&"test/Justfile"));
+        assert!(dests.contains(&"test/integration.test.mjs"));
+        assert!(dests.contains(&"test/scripts/devnet-test.sh"));
+        assert!(dests.contains(&"test/scripts/set-env.mjs"));
     }
 
     #[test]

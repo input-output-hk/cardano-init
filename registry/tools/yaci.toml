@@ -2,15 +2,19 @@
 id = "yaci"
 name = "Yaci DevKit"
 description = """\
-A local Cardano development environment. Yaci DevKit runs a local node and \
-indexer so you can build and test against a private devnet without touching a \
-public network. It writes the standard connection details (indexer URL/port, \
-node socket path) into your project's .env so off-chain and testing components \
-can find it. Recommended for newcomers who want a self-contained local setup."""
-website = "https://github.com/bloxbean/yaci-devkit"
-languages = ["docker"]
-system_deps = ["yaci-devkit"]
+A local Cardano development and testing kit. Yaci DevKit spins up a private \
+devnet (a local node plus the Yaci Store indexer, which serves a \
+Blockfrost-compatible API) so you can deploy and exercise your contracts \
+end-to-end without touching a public network or spending real funds. Its \
+built-in faucet tops up test wallets on demand. Run `just test` for an \
+integration smoke test, or `just dev` to start a persistent devnet that \
+off-chain components connect to automatically (it writes the standard \
+connection details into the project .env). Yaci DevKit is a dev/test tool — \
+you never deploy it — so it fills the testing role, not infrastructure."""
+website = "https://devkit.yaci.xyz"
+languages = ["typescript"]
+system_deps = ["docker", "node"]
 nix_packages = []
 
-[roles.infrastructure]
-template = "yaci/infrastructure"
+[roles.testing]
+template = "yaci/testing"

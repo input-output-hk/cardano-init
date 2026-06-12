@@ -33,8 +33,8 @@ Deliverables below are tracked as checklists (`[ ]` = not yet done).
 **The tool: all five roles present, four building green, formal-methods preview:**
 - [ ] **On-chain:** Aiken; make the template genuinely `build`+`test` green (blueprint at canonical path).
 - [ ] **Off-chain:** MeshJS + Tx3; both generate and build.
-- [ ] **Infrastructure:** Yaci DevKit (local node+indexer; cardano-up-friendly); `dev` writes the standard `.env` vars.
-- [ ] **Testing:** Scalus; template builds and runs a passing example suite.
+- [ ] **Infrastructure:** no tool ships yet — the role is present in the vocabulary but unfilled (a real deployable service such as Kupo+Ogmios or a node provider is a follow-up). Yaci DevKit was reclassified to **testing** (it is a dev/test kit, never deployed).
+- [ ] **Testing:** Yaci DevKit (local devnet — its `dev` starts a Blockfrost-compatible devnet and writes the standard `.env` connection vars, so off-chain connects to it automatically; `test` runs an integration smoke test). Scalus testing remains a placeholder.
 - [ ] **Formal-methods:** preview; visible in the registry/UI as "coming soon"; the Blaster placeholder is not a build-green deliverable yet (made real at DX.05).
 
 **Feature surface:**
@@ -52,7 +52,7 @@ Deliverables below are tracked as checklists (`[ ]` = not yet done).
 
 ### Cut-line (if behind in August)
 
-**Protect the all-five-roles; relax build-green under pressure.** Keep every role visible and generating plus the feature surface demoable. If time is short, the harder templates (Infrastructure, possibly Tx3) may ship as **"generates but not yet fully green,"** with SM-1 completion moved to DX.05. **Floor that never slips:** Aiken (on-chain) and MeshJS (off-chain) build green, and the project generates for every role.
+**Protect the all-five-roles; relax build-green under pressure.** Keep every role visible and generating plus the feature surface demoable. If time is short, the harder templates (possibly Tx3) may ship as **"generates but not yet fully green,"** with SM-1 completion moved to DX.05. **Floor that never slips:** Aiken (on-chain) and MeshJS (off-chain) build green, and the project generates for every role.
 
 ---
 

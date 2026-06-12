@@ -234,6 +234,8 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "no infrastructure tool in the registry to exercise infra dedup; \
+                re-enable (and swap the tool id) once one is added"]
     fn duplicate_infra_is_deduplicated() {
         let sel = build_selection(
             "test",

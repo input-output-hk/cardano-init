@@ -277,7 +277,7 @@ The **directory** (via `.gitkeep`) exists for every project except infrastructur
 ### 6.3 `.env` seeding
 
 `.env` is always written (base layer), seeded by `context.rs` with:
-`CARDANO_NETWORK=<network>`, and empty `INDEXER_URL=`, `INDEXER_PORT=`, `NODE_SOCKET_PATH=`. Infrastructure `dev` fills the connection vars at runtime (§7).
+`CARDANO_NETWORK=<network>`, and empty `INDEXER_URL=`, `INDEXER_PORT=`, `NODE_SOCKET_PATH=`. Whichever component provisions a local endpoint fills the connection vars at runtime during its `dev` (§7).
 Emitted in **sorted key order** for determinism.
 
 ### 6.4 Write semantics & target dir
@@ -294,35 +294,27 @@ Constants (`contract.rs`):
 - dirs `on-chain|off-chain|infra|test|formal-methods`;
 - env `INDEXER_URL`, `INDEXER_PORT`, `NODE_SOCKET_PATH`, `CARDANO_NETWORK`.
 
-**Every component Justfile** exposes `build`, `test`, `dev`, `clean` and works standalone (its `just build` succeeds with no other roles present). A target that is a no-op for a tool still exists (may print a message).
+**Every component Justfile** exposes `build`, `test`, `clean` and works standalone (its `just build` succeeds with no other roles present). A target that is a no-op for a tool still exists (may print a message). **`dev` is optional**: a component provides it only when it has a genuine watch/daemon/devnet mode — there are no no-op `dev` targets (it is not aggregated at the top level, §7.2, so an absent `dev` costs nothing).
 
 - **On-chain** `build` writes `../blueprint/plutus.json`.
 - **Off-chain / testing / formal-methods** read `../blueprint/plutus.json` and `../.env` if present; degrade gracefully if absent.
-- **Infrastructure** `dev` writes the standard connection vars into `../.env`.
+- **The component that provisions a local chain endpoint** writes the standard connection vars (`INDEXER_URL`, …) into `../.env` during its `dev`. This is **role-agnostic**: it is typically an *infrastructure* service, but a local devnet such as Yaci DevKit in the *testing* role does it too. The seam is the `.env` keys, not the role — a tool's **role** is its *purpose*, while writing `.env` is the orthogonal *capability* of exposing a local endpoint. Consumers react only to the presence of `INDEXER_URL`, never to which tool/role set it (this is what keeps composition O(tools), ARCHITECTURE §1).
 
 ### 7.1 Top-level Justfile aggregation
 
-- `build`: Each present component's `build`, on-chain first (so the blueprint exists for consumers), then off-chain/testing/formal in `Role::ALL` order.
-- `test`: Each present component's `test`.
-- `clean`: Each component's `clean`, then `rm -f blueprint/plutus.json`.
+The top level aggregates only the tasks that **terminate and compose**:
 
-### 7.2 `just dev` semantics (the one orchestrated task)
+- `build`: each present component's `build`, on-chain first (so the blueprint exists for consumers), then off-chain/testing/formal in `Role::ALL` order.
+- `test`: on-chain `build` first (produce the blueprint), then each present component's `test` in `Role::ALL` order — on-chain, off-chain, testing, and formal-methods (`verify`).
+- `clean`: each component's `clean`, then `rm -f blueprint/plutus.json`.
 
-Top-level `dev` brings up **infrastructure only**: the shared services everything else talks to. App/watch `dev` for on-chain/off-chain/testing/formal are run **per component** by the developer (`just -f off-chain/Justfile dev`, etc.), documented in the README.
+### 7.2 No top-level `dev`
 
-This does **not** relax §7: every component still implements its own `dev` target (a no-op that prints guidance where a tool has no watch mode), so `just dev` works in any component directory. The top level simply doesn't *aggregate* the non-infra `dev` targets, only infrastructure's.
+There is **no top-level `dev` target**. Long-running / interactive tasks (watch modes, local devnets, REPLs) do not aggregate into one foreground command — that is exactly why a multi-service launcher is awkward — so they are **per-component**: the developer runs `just -f <role>/Justfile dev` (or `just -f infra/<tool>/Justfile dev`) directly, documented in the README.
 
-Behavior by infra tool count:
+`dev` is **optional per component** (§7): a tool provides it only when it has a genuine watch/daemon/devnet mode. Because the top level never aggregates `dev`, a component without one costs nothing — and we don't ship no-op `dev` targets just to fill the slot.
 
-
-| Infra tools | `just dev` does |
-|-------------|-----------------|
-| 0 | Prints the available per-component `dev` commands; orchestrates nothing (nothing shared/long-running). |
-| 1 | Delegates to `just -f infra/<tool>/Justfile dev`. **No orchestrator dependency.** |
-| ≥2 | A `process-compose.yaml` is generated (each infra tool's `dev`, with `depends_on`/health-checks for ordering). `just dev` runs `process-compose up` **if it is on `PATH`**; otherwise it prints how to install process-compose, or how to run each infra `dev` manually. **Recommended, not required: degrades gracefully.** |
-
-
-`process-compose` is a **recommended (optional) dependency**, surfaced by the doctor only in the ≥2-infra case (§9.1), never a hard requirement, since `just dev` is outside the build/test acceptance bar. It is not owned by any tool's `system_deps`, and is **not** Nix-forced: the catalog offers go/brew/sh/nix install methods (§9). Build/test never touch it.
+A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) writes the standard connection vars into `../.env` as part of that per-component `dev`; off-chain/testing consumers then pick them up automatically (§7). Bringing such a service up is therefore a deliberate, per-component developer action, not a top-level orchestration step.
 
 ---
 
@@ -358,13 +350,13 @@ Pure functions of the selection. Two tiers:
 ```
 required_deps    = {"just"}                                  // universal task runner
                  ∪ (tool.system_deps for each selected tool) // unioned, deduped
-recommended_deps = {"process-compose"}  if infra_tool_count ≥ 2   else {}
+recommended_deps = {}                                        // see note
 ```
 
 - **Required** deps gate the build/test acceptance bar (SM-1); their absence is reported prominently. `just` is a base/derived required dep (every project needs the task runner).
-- **Recommended** deps improve the experience but are **never required**. `process-compose` is recommended only when ≥2 infra tools are selected: it smooths multi-service `just dev`, which is *outside* the build/test acceptance bar (§7.2). Its absence is a soft note, never a blocking "missing dependency."
+- **Recommended** deps improve the experience but are **never required** (soft notes only). The two-tier mechanism remains for future use, but there is **currently no recommended dep**: the former `process-compose` case existed only to smooth a multi-service top-level `just dev`, and the top level no longer aggregates `dev` (§7.2), so that rationale is gone. Long-running services are now started per-component.
 
-`just` and `process-compose` are **base/derived deps owned by no tool**; both have entries in `registry/deps.toml` like any dep. (`cardano-up` is reached as an *installer* and is itself a dep entry, rather than added to either set directly.)
+`just` is a **base/derived dep owned by no tool**; it has an entry in `registry/deps.toml` like any dep. (`cardano-up` is reached as an *installer* and is itself a dep entry, rather than added to either set directly.)
 
 ### 9.2 Catalog = installers (code) + recipes (data)
 
@@ -474,14 +466,12 @@ Picking a single method per dep is exactly why the `nix` path for `aiken` needs 
     { "id": "aiken", "required": true,  "present": false,
       "plan": [ { "installer": "npm",   "command": "npm install -g @aiken-lang/aikup" },
                 { "installer": "aikup", "command": "aikup install latest" } ],
-      "docs": "https://aiken-lang.org/installation-instructions" },
-    { "id": "process-compose", "required": false, "present": false,
-      "reason": "orchestrates multiple infrastructure services for `just dev`",
-      "plan": [ { "installer": "brew", "command": "brew install process-compose" } ],
-      "docs": "https://f1bonacc1.github.io/process-compose/" }
+      "docs": "https://aiken-lang.org/installation-instructions" }
   ]
 }}
 ```
+
+(The `recommended`/soft-note tier carries no members today — see §9.1 — so the example lists only required deps. A recommended dep, if reintroduced, would appear with `"required": false` and a `reason`.)
 
 - `plan` = the ordered, possibly multi-step install sequence the resolver produced **for this host** (empty when present; omitted/empty with only `docs` when unresolved).
 - `required` distinguishes tiers; `all_required_present` ignores recommended deps. The presenter shows missing required deps prominently and recommended ones as a soft note with `reason`. `docs` is always available so advice is never empty (FR-20).
@@ -489,7 +479,7 @@ Picking a single method per dep is exactly why the `nix` path for `aiken` needs 
 
 ### 9.5 Referential integrity (tests)
 
-- Every `system_deps` id (plus base deps `just` and `process-compose`) has a `registry/deps.toml` entry.
+- Every `system_deps` id (plus the base dep `just`) has a `registry/deps.toml` entry.
 - Every installer named in any recipe is an `Installer` enum variant (also enforced at load).
 - Every dep id in any installer's `bootstrap` list has a recipe entry.
 - The dep graph resolves without infinite recursion (the resolver's cycle guard is exercised by a test).
@@ -568,7 +558,7 @@ The command-string the UI emits, and the previewed tree, must equal what the CLI
 ## 14. Non-functional
 
 - **Language/edition:** Rust 2024 edition (the code uses let-chains and `&[Role]` consts). MSRV pinned in `Cargo.toml`/CI to the stable that supports those (≥1.88).
-- **Dependencies (current):** `clap`, `dialoguer`, `minijinja`, `serde`, `serde_json`, `toml`, `rust-embed`, `console`, `thiserror`; `tempfile` (dev). **Planned additions:** a minimal HTTPS client for §10 (e.g. `ureq`), kept off the generation path. The generated *project* may depend on `process-compose` (§7.2) and always on `just`.
+- **Dependencies (current):** `clap`, `dialoguer`, `minijinja`, `serde`, `serde_json`, `toml`, `rust-embed`, `console`, `thiserror`; `tempfile` (dev). **Planned additions:** a minimal HTTPS client for §10 (e.g. `ureq`), kept off the generation path. The generated *project* always depends on `just`, plus the `system_deps` of whichever tools were selected.
 - **Distribution:** single statically-linked binary; generation works fully offline.
 - **Platforms:** Linux, macOS, Windows. Exec-bit-free output (§4.5) and LF normalization (§11) keep behavior identical across them.
 

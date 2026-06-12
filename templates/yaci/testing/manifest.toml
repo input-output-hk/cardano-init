@@ -1,0 +1,22 @@
+[manifest]
+summary = "Yaci DevKit local devnet — `test` spins up a throwaway Blockfrost-compatible devnet, runs an integration test, and tears it down; `dev` starts a persistent devnet and writes connection details to .env"
+
+[[files]]
+source = "Justfile.jinja"
+dest = "Justfile"
+
+[[files]]
+source = "README.md"
+dest = "README.md"
+
+[[files]]
+source = "integration.test.mjs"
+dest = "integration.test.mjs"
+
+[[files]]
+source = "scripts/devnet-test.sh"
+dest = "scripts/devnet-test.sh"
+
+[[files]]
+source = "scripts/set-env.mjs"
+dest = "scripts/set-env.mjs"

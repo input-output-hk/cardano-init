@@ -3,3 +3,6 @@
 my-protocol
 
 !docs/*
+
+yaci-cli.history
+logs/

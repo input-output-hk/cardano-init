@@ -1,5 +1,15 @@
 import { getBundledValidators, hasBundledBlueprint } from "./contract.js";
-import { createGiftCardContractFromEnv, loadEnv } from "./node.js";
+import { createGiftCardContractFromEnv, loadEnv, topupOnDevnet } from "./node.js";
+
+/** A one-line, human description of where transactions will go. */
+function describeProvider(provider: {
+  kind: "yaci" | "blockfrost";
+  url?: string;
+}): string {
+  return provider.kind === "yaci"
+    ? `local devnet at ${provider.url} (Yaci)`
+    : "Blockfrost";
+}
 
 // Runnable entry point for `just dev` / `npm start` and the `create` / `redeem`
 // commands. It submits real transactions when the blueprint is bundled and the
@@ -28,7 +38,10 @@ function printStatus(): void {
 
   const env = loadEnv();
   if (env.ok) {
-    console.log(`Environment ready (network: ${env.env.network}).`);
+    console.log(
+      `Environment ready (network: ${env.env.network}, ` +
+        `provider: ${describeProvider(env.env.provider)}).`,
+    );
     console.log("Run a transaction:");
     console.log("  npx tsx src/cli.ts create <tokenName> <lovelace>");
     console.log("  npx tsx src/cli.ts redeem <createTxHash>");
@@ -57,7 +70,13 @@ function requireEnv() {
 
 async function create(tokenName: string, lovelace: string): Promise<void> {
   const env = requireEnv();
-  const { contract } = await createGiftCardContractFromEnv({ env });
+  const { contract, wallet, provider } = await createGiftCardContractFromEnv({ env });
+
+  // On a local devnet, top the wallet up from the faucet so a fresh wallet has
+  // funds + collateral. No-op (and not needed) on Blockfrost.
+  const address = await wallet.getChangeAddress();
+  const topped = await topupOnDevnet(provider, address, "10000000000"); // 10k ADA
+  if (topped) console.log(`Funded ${address.slice(0, 20)}… from the devnet faucet.`);
 
   const unsignedTx = await contract.createGiftCard(tokenName, [
     { unit: "lovelace", quantity: lovelace },

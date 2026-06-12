@@ -231,11 +231,22 @@ mod tests {
     }
 
     #[test]
-    fn tools_for_role_infra() {
+    fn tools_for_role_testing() {
         let reg = registry();
-        let infra = reg.tools_for_role(Role::Infrastructure);
-        let ids: Vec<&str> = infra.iter().map(|t| t.id.as_str()).collect();
-        assert_eq!(ids, vec!["yaci"]);
+        let testing = reg.tools_for_role(Role::Testing);
+        let mut ids: Vec<&str> = testing.iter().map(|t| t.id.as_str()).collect();
+        ids.sort();
+        // Yaci DevKit is a dev/test kit, so it fills the testing role (not infra).
+        assert_eq!(ids, vec!["scalus", "yaci"]);
+    }
+
+    #[test]
+    fn no_infrastructure_tools_yet() {
+        // The registry currently ships no infrastructure tool (Yaci moved to the
+        // testing role). The role itself still exists in the vocabulary. Update
+        // this when a real infrastructure tool is added.
+        let reg = registry();
+        assert!(reg.tools_for_role(Role::Infrastructure).is_empty());
     }
 
     #[test]

@@ -1,0 +1,46 @@
+# Testing component (Yaci DevKit) — local devnet + integration smoke test
+# Part of {{ project_name }}
+#
+# This component lives at test/, so the project root is one level up (../).
+#
+# Yaci DevKit is a dev/test kit, not deployable infrastructure: it runs a
+# private Cardano devnet (a local node + the Yaci Store indexer, which serves a
+# Blockfrost-compatible API at http://localhost:8080/api/v1/). Two entry points:
+#
+#   just test   SELF-CONTAINED: starts a throwaway devnet, runs the integration
+#               test against it, then tears it down — all in one command, no
+#               `just dev` needed first. If yaci-devkit isn't installed it skips
+#               and passes, so CI without it stays green.
+#   just dev    start a PERSISTENT devnet (for iterating with off-chain
+#               create/redeem) and write its connection details into ../.env
+#               (INDEXER_URL / INDEXER_PORT / YACI_ADMIN_URL). Off-chain
+#               components read those and connect automatically.
+
+build:
+    @echo "Nothing to build — Yaci DevKit is a runtime devnet."
+    @echo "Run 'just test' for an integration test or 'just dev' for a persistent devnet."
+
+# Spin up an ephemeral devnet, run the integration test, tear it down (always).
+# The lifecycle lives in a script so teardown is guaranteed even on failure;
+# the assertions live in integration.test.mjs (standalone, Node built-in fetch,
+# reads ../{{ blueprint_path }} if present).
+test:
+    sh scripts/devnet-test.sh
+
+# Start a PERSISTENT local devnet and publish its connection details to ../.env
+# so off-chain consumers can find it (use this when iterating on transactions,
+# not for `just test`). Long-running: Ctrl-C to stop.
+#
+# Uses the npm-distributed CLI (`npm install -g @bloxbean/yaci-devkit`). If you
+# use the Docker distribution instead, replace the last line with the devkit
+# directory's `./bin/devkit.sh start`. See ./README.md.
+dev:
+    node scripts/set-env.mjs
+    @echo "Starting Yaci DevKit devnet (Ctrl-C to stop) ..."
+    yaci-devkit up --enable-yaci-store
+
+# Stop the devnet (best-effort) and clear the connection details from ../.env.
+clean:
+    -yaci-devkit down
+    node scripts/set-env.mjs --clear
+    @echo "Devnet stopped and connection details cleared from ../.env."

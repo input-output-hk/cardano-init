@@ -54,8 +54,8 @@ Tool definitions live in `registry/tools/<tool>.toml`. Templates live in `templa
 
 The **interface contract** (`contract.rs`) is what enables any on-chain tool to compose with any off-chain tool without per-pair logic:
 - On-chain templates must produce `blueprint/plutus.json` during `build`.
-- Infra templates must write standard env vars (e.g., `INDEXER_URL`) to `.env` during `dev`.
-- All templates must expose `build`, `test`, `dev`, `clean` Justfile targets.
+- Whichever component provisions a local chain endpoint writes the standard env vars (e.g., `INDEXER_URL`) to `.env` during `dev` — an infrastructure service, or a local devnet such as Yaci DevKit in the *testing* role. Consumers read them and degrade gracefully when blank. (The `.env` connection seam is role-agnostic: role = a tool's purpose; writing `.env` = the capability of exposing a local endpoint. These are orthogonal.)
+- All templates must expose `build`, `test`, `clean` Justfile targets and work standalone. `dev` is **optional** — a component provides it only when it has a real watch/daemon/devnet mode (no no-op `dev`s). The **top level** aggregates only `build`/`test`/`clean` (terminating, composable tasks); `test` builds on-chain first (blueprint), then runs each component's `test` in `Role::ALL` order (incl. formal `verify`). Long-running/interactive `dev`, where present, is **per-component** (run directly, e.g. `just -f test/Justfile dev`), never aggregated at the top level.
 
 ### Scaffolding pipeline
 

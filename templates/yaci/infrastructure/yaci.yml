@@ -1,5 +1,0 @@
-# Yaci DevKit configuration — PLACEHOLDER
-# Replace with your local devnet settings.
-#
-# When implemented, this configures the local node + indexer that `just dev`
-# brings up (network, ports, indexer backend, etc.).
