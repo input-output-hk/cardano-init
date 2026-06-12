@@ -91,10 +91,8 @@ Early prototype. Currently in the registry:
 - [ ] Elm Cardano
 - [ ] PyCardano
 
-**Testing:**
-- [ ] Yaci DevKit
-- [ ] Scalus
-- [ ] Evolution SDK
+**Testing devntet:**
+- [x] Yaci DevKit
 
 **Infrastructure:**
 - [ ] Cardano Node
