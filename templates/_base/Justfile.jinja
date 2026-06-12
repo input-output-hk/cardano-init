@@ -53,7 +53,7 @@ test:
 {%- if has_off_chain %} test-off-chain{% endif %}
 {%- if has_testing %} test-integration{% endif %}
 {%- if has_formal_methods %} verify{% endif %}
-    @echo "All tests passed."
+    @echo '{{ "{{BOLD + BLACK + BG_GREEN}}  ✓  All tests passed  {{NORMAL}}" }}'
 
 clean:
 {%- if has_on_chain %}

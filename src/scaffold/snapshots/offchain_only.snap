@@ -25,7 +25,7 @@ build: build-off-chain
 # Build the on-chain blueprint first (consumers read ../blueprint/plutus.json),
 # then run each component's tests in role order.
 test: test-off-chain
-    @echo "All tests passed."
+    @echo '{{BOLD + BLACK + BG_GREEN}}  ✓  All tests passed  {{NORMAL}}'
 
 clean:
     just -f off-chain/Justfile clean

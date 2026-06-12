@@ -22,7 +22,7 @@ build:
 # Build the on-chain blueprint first (consumers read ../blueprint/plutus.json),
 # then run each component's tests in role order.
 test: test-integration
-    @echo "All tests passed."
+    @echo '{{BOLD + BLACK + BG_GREEN}}  ✓  All tests passed  {{NORMAL}}'
 
 clean:
     just -f test/Justfile clean
