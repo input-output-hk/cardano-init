@@ -4,7 +4,7 @@
 // fetch (Node 18+). It exercises the seam the rest of the project relies on:
 // the Blockfrost-compatible API that off-chain components talk to.
 //
-// Behaviour (per the interface contract's graceful-degradation rule for testing
+// Behaviour (per the interface contract's graceful-degradation rule for devnet
 // components — it must work even when neither the devnet nor a blueprint exists):
 //
 //   • No INDEXER_URL in ../.env, or the devnet is unreachable

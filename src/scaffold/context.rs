@@ -29,7 +29,7 @@ pub struct TemplateContext {
     pub has_on_chain: bool,
     pub has_off_chain: bool,
     pub has_infra: bool,
-    pub has_testing: bool,
+    pub has_devnet: bool,
     pub has_formal_methods: bool,
 
     /// True when the `blueprint/` directory is scaffolded: any non-infrastructure
@@ -40,7 +40,7 @@ pub struct TemplateContext {
     pub on_chain: Option<RoleContext>,
     pub off_chain: Option<RoleContext>,
     pub infra_tools: Vec<RoleContext>,
-    pub testing: Option<RoleContext>,
+    pub devnet: Option<RoleContext>,
     pub formal_methods: Option<RoleContext>,
 
     pub blueprint_path: String,
@@ -63,7 +63,7 @@ pub fn build_context(
     let mut on_chain = None;
     let mut off_chain = None;
     let mut infra_tools = Vec::new();
-    let mut testing = None;
+    let mut devnet = None;
     let mut formal_methods = None;
     let mut nix_packages = Vec::new();
 
@@ -99,7 +99,7 @@ pub fn build_context(
             Role::OnChain => on_chain = Some(rc),
             Role::OffChain => off_chain = Some(rc),
             Role::Infrastructure => infra_tools.push(rc),
-            Role::Testing => testing = Some(rc),
+            Role::Devnet => devnet = Some(rc),
             Role::FormalMethods => formal_methods = Some(rc),
         }
     }
@@ -124,18 +124,18 @@ pub fn build_context(
         has_on_chain: on_chain.is_some(),
         has_off_chain: off_chain.is_some(),
         has_infra: !infra_tools.is_empty(),
-        has_testing: testing.is_some(),
+        has_devnet: devnet.is_some(),
         has_formal_methods: formal_methods.is_some(),
 
         has_blueprint: on_chain.is_some()
             || off_chain.is_some()
-            || testing.is_some()
+            || devnet.is_some()
             || formal_methods.is_some(),
 
         on_chain,
         off_chain,
         infra_tools,
-        testing,
+        devnet,
         formal_methods,
 
         blueprint_path: contract::BLUEPRINT_PATH.to_string(),
@@ -180,8 +180,8 @@ mod tests {
                 tool_id: "meshjs".into(),
             },
             RoleAssignment {
-                role: Role::Testing,
-                tool_id: "scalus".into(),
+                role: Role::Devnet,
+                tool_id: "yaci".into(),
             },
         ]);
         let ctx = build_context(&sel, &registry()).unwrap();
@@ -189,11 +189,11 @@ mod tests {
         assert!(ctx.has_on_chain);
         assert!(ctx.has_off_chain);
         assert!(!ctx.has_infra);
-        assert!(ctx.has_testing);
+        assert!(ctx.has_devnet);
 
         assert_eq!(ctx.on_chain.as_ref().unwrap().tool_id, "aiken");
         assert_eq!(ctx.off_chain.as_ref().unwrap().tool_id, "meshjs");
-        assert_eq!(ctx.testing.as_ref().unwrap().tool_id, "scalus");
+        assert_eq!(ctx.devnet.as_ref().unwrap().tool_id, "yaci");
     }
 
     #[test]
@@ -207,10 +207,10 @@ mod tests {
         assert!(ctx.has_on_chain);
         assert!(!ctx.has_off_chain);
         assert!(!ctx.has_infra);
-        assert!(!ctx.has_testing);
+        assert!(!ctx.has_devnet);
         assert!(!ctx.has_formal_methods);
         assert!(ctx.off_chain.is_none());
-        assert!(ctx.testing.is_none());
+        assert!(ctx.devnet.is_none());
         assert!(ctx.formal_methods.is_none());
         assert!(ctx.infra_tools.is_empty());
     }
@@ -226,7 +226,7 @@ mod tests {
         assert!(!ctx.has_on_chain);
         assert!(ctx.has_off_chain);
         assert!(!ctx.has_infra);
-        assert!(!ctx.has_testing);
+        assert!(!ctx.has_devnet);
         assert!(!ctx.has_formal_methods);
     }
 
@@ -275,15 +275,15 @@ mod tests {
                 tool_id: "meshjs".into(),
             },
             RoleAssignment {
-                role: Role::Testing,
-                tool_id: "scalus".into(),
+                role: Role::Devnet,
+                tool_id: "yaci".into(),
             },
         ]);
         let ctx = build_context(&sel, &registry()).unwrap();
 
         assert_eq!(ctx.on_chain.as_ref().unwrap().dir, "on-chain");
         assert_eq!(ctx.off_chain.as_ref().unwrap().dir, "off-chain");
-        assert_eq!(ctx.testing.as_ref().unwrap().dir, "test");
+        assert_eq!(ctx.devnet.as_ref().unwrap().dir, "devnet");
     }
 
     #[test]
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn role_mismatch_errors() {
         let sel = selection(vec![RoleAssignment {
-            role: Role::Testing,
+            role: Role::Devnet,
             tool_id: "aiken".into(),
         }]);
         let result = build_context(&sel, &registry());
@@ -318,14 +318,14 @@ mod tests {
 
     #[test]
     fn nix_packages_deduped_across_tools() {
-        // Scalus on-chain + scalus testing — same tool, same nix_packages
+        // Scalus on-chain + scalus off-chain — same tool, same nix_packages
         let sel = selection(vec![
             RoleAssignment {
                 role: Role::OnChain,
                 tool_id: "scalus".into(),
             },
             RoleAssignment {
-                role: Role::Testing,
+                role: Role::OffChain,
                 tool_id: "scalus".into(),
             },
         ]);

@@ -1,4 +1,4 @@
-# Testing — Yaci DevKit
+# Devnet — Yaci DevKit
 
 [Yaci DevKit](https://devkit.yaci.xyz) runs a private Cardano **devnet** on your
 machine: a local node plus the **Yaci Store** indexer, which exposes a
@@ -7,7 +7,7 @@ exercise your contracts against it end-to-end — no public testnet, no real
 funds. A built-in faucet tops up test wallets on demand.
 
 It is a development/testing tool, never deployed, which is why it fills the
-**testing** role rather than infrastructure.
+**devnet** role rather than infrastructure.
 
 ## Tasks
 

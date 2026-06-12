@@ -8,7 +8,7 @@
 
 ## 1. Summary
 
-`cardano-init` is a CLI tool (with a thin web front-end) that scaffolds a complete, runnable Cardano protocol monorepo. The user picks a tool for each functional role they need (on-chain, off-chain, infrastructure, testing, and other registry-defined roles) and the tool generates a project where every component is already wired together and a small end-to-end example builds and passes its tests out of the box.
+`cardano-init` is a CLI tool (with a thin web front-end) that scaffolds a complete, runnable Cardano protocol monorepo. The user picks a tool for each functional role they need (on-chain, off-chain, infrastructure, devnet, and other registry-defined roles) and the tool generates a project where every component is already wired together and a small end-to-end example builds and passes its tests out of the box.
 
 The defining bet is the **interface contract**: every tool template conforms to a shared set of conventions (canonical blueprint path, standard Justfile tasks, standard `.env` variables) so *any* producer composes with *any* consumer without per-pair integration code. Adding a tool is a data change, not a code change.
 
@@ -18,7 +18,7 @@ The defining bet is the **interface contract**: every tool template conforms to 
 
 Two distinct pains block people from starting a Cardano protocol project:
 
-1. **Cross-tool wiring is hard and undifferentiated work.** Individual tools ship their own `init` (`aiken new`, etc.), but nothing wires *across* roles. Connecting an on-chain validator to an off-chain transaction builder, off-chain with local infrastructure, on-chian with testing framework and formal methods, environment variables, build commands across tools, etc. This takes time, is error-prone, and has to be redone for every new combination of tools.
+1. **Cross-tool wiring is hard and undifferentiated work.** Individual tools ship their own `init` (`aiken new`, etc.), but nothing wires *across* roles. Connecting an on-chain validator to an off-chain transaction builder, off-chain with local infrastructure or a local devnet, on-chain with formal methods, environment variables, build commands across tools, etc. This takes time, is error-prone, and has to be redone for every new combination of tools.
 
 2. **The tooling landscape is opaque to newcomers.** A developer arriving at Cardano faces choice paralysis: which tool writes validators, which builds transactions, which indexes the chain, and which of them actually work together? The cost of a wrong early choice is high, and there is no opinionated, trustworthy starting point that explains the landscape while setting them up.
 
@@ -74,7 +74,7 @@ The PRD commits to two headline metrics. Both are measurable in CI and tied to t
 
 ### 5.1 In scope for v1
 
-- **Roles are a fixed, code-defined vocabulary; tools are the open-ended part.** The set of roles is defined in code, not data: the registry *references* roles but cannot introduce them. It is *not* frozen at "four": the current set is on-chain, off-chain, infrastructure, testing, and formal-methods, and it can grow in a future version via a deliberate code change. **Tools**, by contrast, are fully data-driven: adding one is a registry + template change with no core code change (see [ARCHITECTURE.md](./ARCHITECTURE.md) §3.1).
+- **Roles are a fixed, code-defined vocabulary; tools are the open-ended part.** The set of roles is defined in code, not data: the registry *references* roles but cannot introduce them. It is *not* frozen at "four": the current set is on-chain, off-chain, infrastructure, devnet, and formal-methods, and it can grow in a future version via a deliberate code change. **Tools**, by contrast, are fully data-driven: adding one is a registry + template change with no core code change (see [ARCHITECTURE.md](./ARCHITECTURE.md) §3.1).
 - **At least one working tool per advertised role.** No role is advertised with zero working tools. There is no single "golden path" combination: every shipped tool is verified individually and the interface contract guarantees that any combination composes (§7), so combinations are not tested pairwise.
 - **Whatever ships in the registry must work.** Every registered tool is held to the build/contract bar; adding a tool requires adding its tests (§7, SM-1).
 - **Three surfaces**: One-shot CLI, interactive CLI, and web (§6).
@@ -138,8 +138,8 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 
 ### Interface contract (mechanically enforced, see TECH_SPEC)
 
-- **FR-10 (M):** On-chain templates produce the CIP-57 blueprint at the canonical path (`blueprint/plutus.json`) during `build` and other roles (e.g. off-chain, testing, formal-methods) read it from the same path.
-- **FR-11 (M):** Whichever component provisions a local chain endpoint writes standardized connection details to `.env` (e.g. `INDEXER_URL`) during `dev` — an infrastructure service, or a local devnet in the testing role (e.g. Yaci DevKit); consumers read from there and react only to the presence of the keys, not to which role wrote them.
+- **FR-10 (M):** On-chain templates produce the CIP-57 blueprint at the canonical path (`blueprint/plutus.json`) during `build` and other roles (e.g. off-chain, devnet, formal-methods) read it from the same path.
+- **FR-11 (M):** Whichever component provisions a local chain endpoint writes standardized connection details to `.env` (e.g. `INDEXER_URL`) during `dev` — an infrastructure service, or a local devnet in the devnet role (e.g. Yaci DevKit); consumers read from there and react only to the presence of the keys, not to which role wrote them.
 - **FR-12 (M):** Every template works **independently** (e.g., its `just build` succeeds with no other roles present), and has to handle all shared `just` commands. It can optionally add more to be ran on that role's folder, but it can't avoid handling the shared ones (it should, at least, print a message).
 
 ### Agent affordances

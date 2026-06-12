@@ -35,7 +35,7 @@ cardano-init list [--format <fmt>]   # (planned) capability discovery
 | `--on-chain <TOOL_ID>` | string | At most one. |
 | `--off-chain <TOOL_ID>` | string | At most one. |
 | `--infra <TOOL_ID>` | string, repeatable | Multiple allowed (only multi-tool role). |
-| `--testing <TOOL_ID>` | string | At most one. |
+| `--devnet <TOOL_ID>` | string | At most one. |
 | `--formal-methods <TOOL_ID>` | string | At most one. |
 | `--network <preview\|preprod\|mainnet>` | enum | Default `preview`. |
 | `--nix` | bool | Emit `flake.nix` + `.envrc`. |
@@ -97,7 +97,7 @@ Exact types; field-level source of truth is `src/registry/types.rs`.
 ### 3.1 Role
 
 ```rust
-pub enum Role { OnChain, OffChain, Infrastructure, Testing, FormalMethods }
+pub enum Role { OnChain, OffChain, Infrastructure, Devnet, FormalMethods }
 ```
 
 
@@ -106,7 +106,7 @@ pub enum Role { OnChain, OffChain, Infrastructure, Testing, FormalMethods }
 | OnChain | `on-chain` | `on-chain` | On-chain | no |
 | OffChain | `off-chain` | `off-chain` | Off-chain | no |
 | Infrastructure | `infrastructure` | `infra` | Infrastructure | **yes** |
-| Testing | `testing` | `test` | Testing | no |
+| Devnet | `devnet` | `devnet` | Devnet | no |
 | FormalMethods | `formal-methods` | `formal-methods` | Formal methods | no |
 
 
@@ -223,12 +223,12 @@ struct TemplateContext {
     network: String,                 // "preview" | "preprod" | "mainnet"
 
     has_on_chain: bool, has_off_chain: bool, has_infra: bool,
-    has_testing: bool,  has_formal_methods: bool,
+    has_devnet: bool,  has_formal_methods: bool,
 
     on_chain: Option<RoleContext>,
     off_chain: Option<RoleContext>,
     infra_tools: Vec<RoleContext>,   // 0..n, canonical order (§11)
-    testing: Option<RoleContext>,
+    devnet: Option<RoleContext>,
     formal_methods: Option<RoleContext>,
 
     blueprint_path: String,          // "blueprint/plutus.json" (contract constant)
@@ -297,15 +297,15 @@ Constants (`contract.rs`):
 **Every component Justfile** exposes `build`, `test`, `clean` and works standalone (its `just build` succeeds with no other roles present). A target that is a no-op for a tool still exists (may print a message). **`dev` is optional**: a component provides it only when it has a genuine watch/daemon/devnet mode — there are no no-op `dev` targets (it is not aggregated at the top level, §7.2, so an absent `dev` costs nothing).
 
 - **On-chain** `build` writes `../blueprint/plutus.json`.
-- **Off-chain / testing / formal-methods** read `../blueprint/plutus.json` and `../.env` if present; degrade gracefully if absent.
-- **The component that provisions a local chain endpoint** writes the standard connection vars (`INDEXER_URL`, …) into `../.env` during its `dev`. This is **role-agnostic**: it is typically an *infrastructure* service, but a local devnet such as Yaci DevKit in the *testing* role does it too. The seam is the `.env` keys, not the role — a tool's **role** is its *purpose*, while writing `.env` is the orthogonal *capability* of exposing a local endpoint. Consumers react only to the presence of `INDEXER_URL`, never to which tool/role set it (this is what keeps composition O(tools), ARCHITECTURE §1).
+- **Off-chain / devnet / formal-methods** read `../blueprint/plutus.json` and `../.env` if present; degrade gracefully if absent.
+- **The component that provisions a local chain endpoint** writes the standard connection vars (`INDEXER_URL`, …) into `../.env` during its `dev`. This is **role-agnostic**: it is typically an *infrastructure* service, but a local devnet such as Yaci DevKit in the *devnet* role does it too. The seam is the `.env` keys, not the role — a tool's **role** is its *purpose*, while writing `.env` is the orthogonal *capability* of exposing a local endpoint. Consumers react only to the presence of `INDEXER_URL`, never to which tool/role set it (this is what keeps composition O(tools), ARCHITECTURE §1).
 
 ### 7.1 Top-level Justfile aggregation
 
 The top level aggregates only the tasks that **terminate and compose**:
 
-- `build`: each present component's `build`, on-chain first (so the blueprint exists for consumers), then off-chain/testing/formal in `Role::ALL` order.
-- `test`: on-chain `build` first (produce the blueprint), then each present component's `test` in `Role::ALL` order — on-chain, off-chain, testing, and formal-methods (`verify`).
+- `build`: each present component's `build`, on-chain first (so the blueprint exists for consumers), then off-chain/devnet/formal in `Role::ALL` order.
+- `test`: on-chain `build` first (produce the blueprint), then each present component's `test` in `Role::ALL` order — on-chain, off-chain, devnet, and formal-methods (`verify`).
 - `clean`: each component's `clean`, then `rm -f blueprint/plutus.json`.
 
 ### 7.2 No top-level `dev`
@@ -314,7 +314,7 @@ There is **no top-level `dev` target**. Long-running / interactive tasks (watch 
 
 `dev` is **optional per component** (§7): a tool provides it only when it has a genuine watch/daemon/devnet mode. Because the top level never aggregates `dev`, a component without one costs nothing — and we don't ship no-op `dev` targets just to fill the slot.
 
-A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) writes the standard connection vars into `../.env` as part of that per-component `dev`; off-chain/testing consumers then pick them up automatically (§7). Bringing such a service up is therefore a deliberate, per-component developer action, not a top-level orchestration step.
+A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) writes the standard connection vars into `../.env` as part of that per-component `dev`; off-chain/devnet consumers then pick them up automatically (§7). Bringing such a service up is therefore a deliberate, per-component developer action, not a top-level orchestration step.
 
 ---
 
@@ -549,7 +549,7 @@ Identical `(binary, Selection)` ⇒ byte-identical tree. Rules:
 
 - `GET /` → `ui.html`.
 - `GET /api/registry` → `{ "tools": [ … ] }` (prebuilt once).
-- `GET /api/plan?on_chain=&off_chain=&infra=a,b&testing=&formal_methods=&network=&nix=&name=` → `{ "files": [ … ] }`, computed by the **real `scaffold::planner`** (no duplicated logic). Invalid input → `{ "error": "…" }` with 4xx.
+- `GET /api/plan?on_chain=&off_chain=&infra=a,b&devnet=&formal_methods=&network=&nix=&name=` → `{ "files": [ … ] }`, computed by the **real `scaffold::planner`** (no duplicated logic). Invalid input → `{ "error": "…" }` with 4xx.
 
 The command-string the UI emits, and the previewed tree, must equal what the CLI produces for the same selection. Hosted-page strategy is **OD-1, open** (ARCHITECTURE §10.2).
 

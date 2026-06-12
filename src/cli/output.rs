@@ -26,8 +26,8 @@ pub fn print_welcome() {
         style("Infrastructure:").cyan().bold()
     );
     println!(
-        "  {} Frameworks for testing your contracts locally",
-        style("Testing:").cyan().bold()
+        "  {} Local throwaway chain to develop and test against",
+        style("Devnet:").cyan().bold()
     );
     println!(
         "  {} Specification and automated verification tools",
@@ -48,7 +48,7 @@ pub fn print_summary(selection: &Selection, registry: &Registry) {
             Role::OnChain => "On-chain",
             Role::OffChain => "Off-chain",
             Role::Infrastructure => "Infra",
-            Role::Testing => "Testing",
+            Role::Devnet => "Devnet",
             Role::FormalMethods => "Formal methods",
         };
 
@@ -173,7 +173,7 @@ pub fn print_success(selection: &Selection) {
             Role::OnChain => "on-chain",
             Role::OffChain => "off-chain",
             Role::Infrastructure => "infrastructure",
-            Role::Testing => "testing",
+            Role::Devnet => "devnet",
             Role::FormalMethods => "formal-methods",
         };
         println!(

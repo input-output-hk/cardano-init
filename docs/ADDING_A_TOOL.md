@@ -1,6 +1,6 @@
 # Adding a Tool to cardano-init
 
-This guide is for contributors who want to integrate their own tooling into `cardano-init`. If your tool fills one of the supported roles (**on-chain**, **off-chain**, **infrastructure**, **testing**, or **formal-methods**) you can add it by providing two things:
+This guide is for contributors who want to integrate their own tooling into `cardano-init`. If your tool fills one of the supported roles (**on-chain**, **off-chain**, **infrastructure**, **devnet**, or **formal-methods**) you can add it by providing two things:
 
 1. A registry entry (`registry/tools/<your-tool>.toml`)
 2. A template directory (`templates/<your-tool>/<role>/`)
@@ -35,8 +35,8 @@ A tool can fill multiple roles. Add one `[roles.<role>]` section per role:
 [roles.on-chain]
 template = "mytool/on-chain"
 
-[roles.testing]
-template = "mytool/testing"
+[roles.off-chain]
+template = "mytool/off-chain"
 ```
 
 ### Valid role names
@@ -46,7 +46,7 @@ template = "mytool/testing"
 | `on-chain` | Smart contract / validator logic |
 | `off-chain` | Transaction building and submission |
 | `infrastructure` | Indexers, chain followers, node providers |
-| `testing` | Contract and integration testing frameworks |
+| `devnet` | Local throwaway chain to develop and integration-test against |
 | `formal-methods` | Specification and automated verification |
 
 ---
@@ -127,7 +127,7 @@ build:
     cp -f output/plutus.json ../blueprint/plutus.json
 ```
 
-The off-chain and testing templates read from `../blueprint/plutus.json`. If your tool outputs to a different path, the `build` target must copy it to the canonical location. This is the primary integration seam between on-chain and off-chain.
+The off-chain and devnet templates read from `../blueprint/plutus.json`. If your tool outputs to a different path, the `build` target must copy it to the canonical location. This is the primary integration seam between on-chain and off-chain.
 
 **Off-chain tools** must handle the case where no blueprint exists yet:
 
@@ -146,7 +146,7 @@ dotenv.config({ path: "../.env" });
 const indexerUrl = process.env.INDEXER_URL; // set → a local endpoint is up
 ```
 
-**Tools that provision a local chain endpoint** must write the connection details to `../.env` during `dev`. This applies to **infrastructure** services and, equally, to a **local devnet in the testing role** (e.g. Yaci DevKit) — the seam is the `.env` keys, not the role. Use the standard variable names:
+**Tools that provision a local chain endpoint** must write the connection details to `../.env` during `dev`. This applies to **infrastructure** services and, equally, to a **local devnet in the devnet role** (e.g. Yaci DevKit) — the seam is the `.env` keys, not the role. Use the standard variable names:
 
 | Variable | Meaning |
 |---|---|
@@ -162,9 +162,9 @@ dev:
     echo "INDEXER_PORT=1442" >> ../.env
 ```
 
-Write the keys idempotently (replace in place rather than appending) so repeated `just dev` runs don't accumulate duplicate lines. Off-chain/testing consumers read these and never need to know which tool wrote them.
+Write the keys idempotently (replace in place rather than appending) so repeated `just dev` runs don't accumulate duplicate lines. Off-chain/devnet consumers read these and never need to know which tool wrote them.
 
-**Testing tools** should read both the blueprint and the `.env` if they are present, but must work if neither exists. A testing tool may *also* provision a local devnet (writing the connection vars above during `dev`) — that is how off-chain components reach it, and it composes with any off-chain tool without per-pair code.
+**Devnet tools** provision a local throwaway chain. They should read both the blueprint and the `.env` if they are present, but must work if neither exists, and write the connection vars above during `dev` — that is how off-chain components reach the devnet, and it composes with any off-chain tool without per-pair code.
 
 **Formal-methods tools** have no extra contract beyond the four Justfile targets.
 
@@ -184,7 +184,7 @@ Any rendered file (one whose `source` ends in `.jinja`) can reference the follow
 {{ has_on_chain }}
 {{ has_off_chain }}
 {{ has_infra }}
-{{ has_testing }}
+{{ has_devnet }}
 {{ has_formal_methods }}
 
 {# Per-role context (only safe to access when the corresponding has_* is true) #}
@@ -198,8 +198,8 @@ Any rendered file (one whose `source` ends in `.jinja`) can reference the follow
 {{ off_chain.language }}
 {{ off_chain.dir }}         {# "off-chain" #}
 
-{{ testing.tool_id }}
-{{ testing.dir }}           {# "test" #}
+{{ devnet.tool_id }}
+{{ devnet.dir }}            {# "devnet" #}
 
 {{ formal_methods.tool_id }}
 {{ formal_methods.dir }}    {# "formal-methods" #}

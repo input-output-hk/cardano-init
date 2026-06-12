@@ -231,20 +231,20 @@ mod tests {
     }
 
     #[test]
-    fn tools_for_role_testing() {
+    fn tools_for_role_devnet() {
         let reg = registry();
-        let testing = reg.tools_for_role(Role::Testing);
-        let mut ids: Vec<&str> = testing.iter().map(|t| t.id.as_str()).collect();
+        let devnet = reg.tools_for_role(Role::Devnet);
+        let mut ids: Vec<&str> = devnet.iter().map(|t| t.id.as_str()).collect();
         ids.sort();
-        // Yaci DevKit is a dev/test kit, so it fills the testing role (not infra).
-        assert_eq!(ids, vec!["scalus", "yaci"]);
+        // Yaci DevKit is a local devnet, so it fills the devnet role (not infra).
+        assert_eq!(ids, vec!["yaci"]);
     }
 
     #[test]
     fn no_infrastructure_tools_yet() {
-        // The registry currently ships no infrastructure tool (Yaci moved to the
-        // testing role). The role itself still exists in the vocabulary. Update
-        // this when a real infrastructure tool is added.
+        // The registry currently ships no infrastructure tool (Yaci fills the
+        // devnet role, not infra). The role itself still exists in the vocabulary.
+        // Update this when a real infrastructure tool is added.
         let reg = registry();
         assert!(reg.tools_for_role(Role::Infrastructure).is_empty());
     }
@@ -255,8 +255,7 @@ mod tests {
         let scalus = reg.get("scalus").expect("scalus should exist");
         assert!(scalus.roles.contains_key(&Role::OnChain));
         assert!(scalus.roles.contains_key(&Role::OffChain));
-        assert!(scalus.roles.contains_key(&Role::Testing));
-        assert_eq!(scalus.roles.len(), 3);
+        assert_eq!(scalus.roles.len(), 2);
     }
 
     #[test]

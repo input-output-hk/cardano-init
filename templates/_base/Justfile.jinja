@@ -27,11 +27,11 @@ build-off-chain:
 test-off-chain:
     just -f {{ off_chain.dir }}/Justfile test
 {%- endif %}
-{%- if has_testing %}
+{%- if has_devnet %}
 
-# --- Testing ({{ testing.tool_name }}) ---
+# --- Devnet ({{ devnet.tool_name }}) ---
 test-integration:
-    just -f {{ testing.dir }}/Justfile test
+    just -f {{ devnet.dir }}/Justfile test
 {%- endif %}
 {%- if has_formal_methods %}
 
@@ -51,7 +51,7 @@ build:
 test:
 {%- if has_on_chain %} build-on-chain test-on-chain{% endif %}
 {%- if has_off_chain %} test-off-chain{% endif %}
-{%- if has_testing %} test-integration{% endif %}
+{%- if has_devnet %} test-integration{% endif %}
 {%- if has_formal_methods %} verify{% endif %}
     @echo '{{ "{{BOLD + BLACK + BG_GREEN}}  ✓  All tests passed  {{NORMAL}}" }}'
 
@@ -62,8 +62,8 @@ clean:
 {%- if has_off_chain %}
     just -f {{ off_chain.dir }}/Justfile clean
 {%- endif %}
-{%- if has_testing %}
-    just -f {{ testing.dir }}/Justfile clean
+{%- if has_devnet %}
+    just -f {{ devnet.dir }}/Justfile clean
 {%- endif %}
 {%- if has_formal_methods %}
     just -f {{ formal_methods.dir }}/Justfile clean

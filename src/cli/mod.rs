@@ -54,9 +54,9 @@ pub struct InitArgs {
     #[arg(long, value_name = "TOOL_ID")]
     pub infra: Vec<String>,
 
-    /// Testing tool (e.g., scalus)
+    /// Devnet tool (e.g., yaci)
     #[arg(long, value_name = "TOOL_ID")]
-    pub testing: Option<String>,
+    pub devnet: Option<String>,
 
     /// Formal methods tool (e.g., blaster)
     #[arg(long, value_name = "TOOL_ID")]
@@ -81,7 +81,7 @@ impl InitArgs {
         self.on_chain.is_some()
             || self.off_chain.is_some()
             || !self.infra.is_empty()
-            || self.testing.is_some()
+            || self.devnet.is_some()
             || self.formal_methods.is_some()
             || self.nix
             || self.dry_run
@@ -261,7 +261,7 @@ fn run_init(args: InitArgs, registry: &Registry) -> Result<(), CliError> {
             args.on_chain.as_deref(),
             args.off_chain.as_deref(),
             &args.infra,
-            args.testing.as_deref(),
+            args.devnet.as_deref(),
             args.formal_methods.as_deref(),
             &args.network,
             args.nix,

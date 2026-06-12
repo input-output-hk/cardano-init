@@ -320,24 +320,24 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_yaci_testing_only() {
+    fn snapshot_yaci_devnet_only() {
         assert_snapshot(
-            "yaci_testing_only",
-            &sel(vec![a(Role::Testing, "yaci")], Network::Preview, false),
+            "yaci_devnet_only",
+            &sel(vec![a(Role::Devnet, "yaci")], Network::Preview, false),
         );
     }
 
     #[test]
     fn snapshot_aiken_meshjs_yaci() {
         // The headline integration: on-chain + off-chain + a local devnet in the
-        // testing role. Locks the connection wiring (MeshJS ↔ Yaci via .env).
+        // devnet role. Locks the connection wiring (MeshJS ↔ Yaci via .env).
         assert_snapshot(
             "aiken_meshjs_yaci",
             &sel(
                 vec![
                     a(Role::OnChain, "aiken"),
                     a(Role::OffChain, "meshjs"),
-                    a(Role::Testing, "yaci"),
+                    a(Role::Devnet, "yaci"),
                 ],
                 Network::Preview,
                 false,
@@ -350,11 +350,7 @@ mod tests {
         assert_snapshot(
             "scalus_multi_role",
             &sel(
-                vec![
-                    a(Role::OnChain, "scalus"),
-                    a(Role::OffChain, "scalus"),
-                    a(Role::Testing, "scalus"),
-                ],
+                vec![a(Role::OnChain, "scalus"), a(Role::OffChain, "scalus")],
                 Network::Preview,
                 false,
             ),

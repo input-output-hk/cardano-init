@@ -4,7 +4,7 @@
 [![Code Quality](https://github.com/input-output-hk/cardano-init/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/github-code-scanning/codeql)
 [![Scheduled Smoke](https://github.com/input-output-hk/cardano-init/actions/workflows/scheduled-smoke.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/scheduled-smoke.yml)
 
-Scaffold a complete, runnable **Cardano protocol project** in seconds. Pick a tool for each role you need (e.g., on-chain, off-chain, infrastructure, testing, formal-methods) and `cardano-init` generates a monorepo where every component is already wired together and a small end-to-end example that builds and passes its tests out of the box.
+Scaffold a complete, runnable **Cardano protocol project** in seconds. Pick a tool for each role you need (e.g., on-chain, off-chain, infrastructure, devnet, formal-methods) and `cardano-init` generates a monorepo where every component is already wired together and a small end-to-end example that builds and passes its tests out of the box.
 
 Built for newcomers and coding agents alike.
 
@@ -20,7 +20,7 @@ Requires a recent Rust toolchain (2024 edition). From a clone:
 cargo run
 
 # One-shot (non-interactive)
-cargo run -- --name my-protocol --on-chain aiken --off-chain meshjs --testing yaci
+cargo run -- --name my-protocol --on-chain aiken --off-chain meshjs --devnet yaci
 
 # Preview what would be generated, without writing
 cargo run -- --name my-protocol --on-chain aiken --dry-run
@@ -40,8 +40,8 @@ You choose tools for **roles**. Only the directories for selected roles are crea
 |------|--------------|-----------------|
 | `on-chain` | Validators / smart-contract logic; produces the CIP-57 blueprint | no |
 | `off-chain` | Transaction building & submission | no |
+| `devnet` | Local throwaway chain to develop & integration-test against | no |
 | `infrastructure` | Indexers, node providers, chain followers | **yes** |
-| `testing` | Contract & integration testing | no |
 | `formal-methods` | Specification & verification | no |
 
 
@@ -95,7 +95,7 @@ Early prototype. Currently in the registry:
 - [ ] Elm Cardano
 - [ ] PyCardano
 
-**Testing devntet:**
+**Devnet:**
 - [x] Yaci DevKit
 
 **Infrastructure:**

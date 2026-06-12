@@ -233,11 +233,11 @@ fn build_plan_json(query: &HashMap<String, String>, registry: &Registry) -> Resu
             }
         }
     }
-    if let Some(tool_id) = query.get("testing")
+    if let Some(tool_id) = query.get("devnet")
         && !tool_id.is_empty()
     {
         assignments.push(RoleAssignment {
-            role: Role::Testing,
+            role: Role::Devnet,
             tool_id: tool_id.clone(),
         });
     }

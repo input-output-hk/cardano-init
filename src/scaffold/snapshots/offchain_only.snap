@@ -113,7 +113,7 @@ CARDANO_NETWORK=preview
 # Chain connection details.
 # Populated by whichever component provisions a local endpoint during its
 # `just dev` — an infrastructure service, or a local devnet such as Yaci DevKit
-# in the testing role. Left empty otherwise, so consumers always find the keys
+# in the devnet role. Left empty otherwise, so consumers always find the keys
 # at a stable, predictable location and degrade gracefully when they're blank.
 INDEXER_URL=
 INDEXER_PORT=

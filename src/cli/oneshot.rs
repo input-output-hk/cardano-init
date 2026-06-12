@@ -13,7 +13,7 @@ pub fn build_selection(
     on_chain: Option<&str>,
     off_chain: Option<&str>,
     infra: &[String],
-    testing: Option<&str>,
+    devnet: Option<&str>,
     formal_methods: Option<&str>,
     network: &str,
     nix: bool,
@@ -54,10 +54,10 @@ pub fn build_selection(
         });
     }
 
-    if let Some(tool_id) = testing {
-        validate_tool_for_role(tool_id, Role::Testing, registry)?;
+    if let Some(tool_id) = devnet {
+        validate_tool_for_role(tool_id, Role::Devnet, registry)?;
         assignments.push(RoleAssignment {
-            role: Role::Testing,
+            role: Role::Devnet,
             tool_id: tool_id.to_string(),
         });
     }
@@ -167,7 +167,7 @@ mod tests {
             Some("aiken"),
             Some("meshjs"),
             &[],
-            Some("scalus"),
+            Some("yaci"),
             None,
             "preprod",
             true,

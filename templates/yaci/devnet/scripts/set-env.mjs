@@ -1,5 +1,5 @@
 // Publishes (or clears) the Yaci devnet connection details in the project's
-// shared ../.env, so off-chain/testing consumers find them at the standard
+// shared ../.env, so off-chain/devnet consumers find them at the standard
 // keys defined by the cardano-init interface contract.
 //
 //   node scripts/set-env.mjs            # write the devnet connection details

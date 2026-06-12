@@ -13,7 +13,7 @@ pub enum Role {
     OnChain,
     OffChain,
     Infrastructure,
-    Testing,
+    Devnet,
     FormalMethods,
 }
 
@@ -23,7 +23,7 @@ impl Role {
         Role::OnChain,
         Role::OffChain,
         Role::Infrastructure,
-        Role::Testing,
+        Role::Devnet,
         Role::FormalMethods,
     ];
 
@@ -33,7 +33,7 @@ impl Role {
             "on-chain" => Ok(Role::OnChain),
             "off-chain" => Ok(Role::OffChain),
             "infrastructure" => Ok(Role::Infrastructure),
-            "testing" => Ok(Role::Testing),
+            "devnet" => Ok(Role::Devnet),
             "formal-methods" => Ok(Role::FormalMethods),
             _ => Err(UnknownRoleError(s.to_string())),
         }
@@ -45,7 +45,7 @@ impl Role {
             Role::OnChain => "on-chain",
             Role::OffChain => "off-chain",
             Role::Infrastructure => "infrastructure",
-            Role::Testing => "testing",
+            Role::Devnet => "devnet",
             Role::FormalMethods => "formal-methods",
         }
     }
@@ -56,7 +56,7 @@ impl Role {
             Role::OnChain => contract::DIR_ON_CHAIN,
             Role::OffChain => contract::DIR_OFF_CHAIN,
             Role::Infrastructure => contract::DIR_INFRA,
-            Role::Testing => contract::DIR_TESTING,
+            Role::Devnet => contract::DIR_DEVNET,
             Role::FormalMethods => contract::DIR_FORMAL_METHODS,
         }
     }
@@ -69,7 +69,7 @@ impl fmt::Display for Role {
             Role::OnChain => write!(f, "On-chain"),
             Role::OffChain => write!(f, "Off-chain"),
             Role::Infrastructure => write!(f, "Infrastructure"),
-            Role::Testing => write!(f, "Testing"),
+            Role::Devnet => write!(f, "Devnet"),
             Role::FormalMethods => write!(f, "Formal methods"),
         }
     }
@@ -189,7 +189,7 @@ mod tests {
             Role::from_kebab("infrastructure").unwrap(),
             Role::Infrastructure
         );
-        assert_eq!(Role::from_kebab("testing").unwrap(), Role::Testing);
+        assert_eq!(Role::from_kebab("devnet").unwrap(), Role::Devnet);
         assert_eq!(
             Role::from_kebab("formal-methods").unwrap(),
             Role::FormalMethods
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(Role::OnChain.dir(), "on-chain");
         assert_eq!(Role::OffChain.dir(), "off-chain");
         assert_eq!(Role::Infrastructure.dir(), "infra");
-        assert_eq!(Role::Testing.dir(), "test");
+        assert_eq!(Role::Devnet.dir(), "devnet");
         assert_eq!(Role::FormalMethods.dir(), "formal-methods");
     }
 
@@ -226,7 +226,7 @@ mod tests {
         assert_eq!(Role::OnChain.to_string(), "On-chain");
         assert_eq!(Role::OffChain.to_string(), "Off-chain");
         assert_eq!(Role::Infrastructure.to_string(), "Infrastructure");
-        assert_eq!(Role::Testing.to_string(), "Testing");
+        assert_eq!(Role::Devnet.to_string(), "Devnet");
         assert_eq!(Role::FormalMethods.to_string(), "Formal methods");
     }
 

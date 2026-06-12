@@ -25,23 +25,18 @@ build-off-chain:
 test-off-chain:
     just -f off-chain/Justfile test
 
-# --- Testing (Scalus) ---
-test-integration:
-    just -f test/Justfile test
-
 # --- Aggregate tasks ---
 build: build-on-chain build-off-chain
     @echo '{{BOLD + GREEN}}✓ Build complete{{NORMAL}}'
 
 # Build the on-chain blueprint first (consumers read ../blueprint/plutus.json),
 # then run each component's tests in role order.
-test: build-on-chain test-on-chain test-off-chain test-integration
+test: build-on-chain test-on-chain test-off-chain
     @echo '{{BOLD + BLACK + BG_GREEN}}  ✓  All tests passed  {{NORMAL}}'
 
 clean:
     just -f on-chain/Justfile clean
     just -f off-chain/Justfile clean
-    just -f test/Justfile clean
     rm -f blueprint/plutus.json
     @echo '{{BOLD + GREEN}}✓ Clean complete{{NORMAL}}'
 
@@ -57,7 +52,6 @@ snap-project/
 ├── Justfile                    # Task orchestration
 ├── on-chain/                  # Scalus (scala)
 ├── off-chain/                 # Scalus (scala)
-├── test/                       # Scalus (scala)
 ├── blueprint/                  # CIP-57 Plutus blueprint (drop or build plutus.json here)
 └── README.md
 ```
@@ -100,14 +94,6 @@ just build-off-chain
 just test-off-chain
 ```
 
-## Testing: Scalus
-
-The `test/` directory contains integration tests using Scalus.
-
-```bash
-just test-integration
-```
-
 ## Network
 
 This project targets the **preview** network.
@@ -145,7 +131,7 @@ CARDANO_NETWORK=preview
 # Chain connection details.
 # Populated by whichever component provisions a local endpoint during its
 # `just dev` — an infrastructure service, or a local devnet such as Yaci DevKit
-# in the testing role. Left empty otherwise, so consumers always find the keys
+# in the devnet role. Left empty otherwise, so consumers always find the keys
 # at a stable, predictable location and degrade gracefully when they're blank.
 INDEXER_URL=
 INDEXER_PORT=
@@ -202,28 +188,5 @@ object Main {
   def main(args: Array[String]): Unit = {
     println("Scalus off-chain component (placeholder).")
   }
-}
-
-=== test/Justfile ===
-# Testing component (Scalus) — PLACEHOLDER
-# Part of snap-project
-
-build:
-    @echo "Nothing to build (Scalus testing placeholder)."
-
-test:
-    @echo "Scalus integration tests are a placeholder — not yet implemented."
-
-clean:
-    @echo "Nothing to clean (Scalus placeholder)."
-
-=== test/src/ExampleTest.scala ===
-// Scalus integration test — PLACEHOLDER
-// Replace this with your own test suite.
-//
-// When implemented, this runs validators locally against ../blueprint/plutus.json.
-
-object ExampleTest {
-  // test("validator accepts a valid transaction") { ... }
 }
 

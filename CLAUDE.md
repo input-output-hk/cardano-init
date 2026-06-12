@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`cardano-init` is a Rust CLI tool that scaffolds Cardano protocol projects. Users select tools for each functional role (on-chain, off-chain, infrastructure, testing, formal-methods) and the CLI generates a working monorepo. The authoritative docs live in `docs/`: read `docs/PRD.md` (product), `docs/ARCHITECTURE.md` (system design), and `docs/TECH_SPEC.md` (contracts, schemas, edge cases) before making any significant changes; `docs/ADDING_A_TOOL.md` is the contributor guide and `docs/ROADMAP.md` is the milestone plan.
+`cardano-init` is a Rust CLI tool that scaffolds Cardano protocol projects. Users select tools for each functional role (on-chain, off-chain, infrastructure, devnet, formal-methods) and the CLI generates a working monorepo. The authoritative docs live in `docs/`: read `docs/PRD.md` (product), `docs/ARCHITECTURE.md` (system design), and `docs/TECH_SPEC.md` (contracts, schemas, edge cases) before making any significant changes; `docs/ADDING_A_TOOL.md` is the contributor guide and `docs/ROADMAP.md` is the milestone plan.
 
 It's an early prototype: several capabilities (the dependency `doctor`, `list` / `--format json`, a hosted web builder) are **planned, not yet implemented**. `docs/ROADMAP.md` tracks what's real vs. upcoming.
 
@@ -54,8 +54,8 @@ Tool definitions live in `registry/tools/<tool>.toml`. Templates live in `templa
 
 The **interface contract** (`contract.rs`) is what enables any on-chain tool to compose with any off-chain tool without per-pair logic:
 - On-chain templates must produce `blueprint/plutus.json` during `build`.
-- Whichever component provisions a local chain endpoint writes the standard env vars (e.g., `INDEXER_URL`) to `.env` during `dev` — an infrastructure service, or a local devnet such as Yaci DevKit in the *testing* role. Consumers read them and degrade gracefully when blank. (The `.env` connection seam is role-agnostic: role = a tool's purpose; writing `.env` = the capability of exposing a local endpoint. These are orthogonal.)
-- All templates must expose `build`, `test`, `clean` Justfile targets and work standalone. `dev` is **optional** — a component provides it only when it has a real watch/daemon/devnet mode (no no-op `dev`s). The **top level** aggregates only `build`/`test`/`clean` (terminating, composable tasks); `test` builds on-chain first (blueprint), then runs each component's `test` in `Role::ALL` order (incl. formal `verify`). Long-running/interactive `dev`, where present, is **per-component** (run directly, e.g. `just -f test/Justfile dev`), never aggregated at the top level.
+- Whichever component provisions a local chain endpoint writes the standard env vars (e.g., `INDEXER_URL`) to `.env` during `dev` — an infrastructure service, or a local devnet such as Yaci DevKit in the *devnet* role. Consumers read them and degrade gracefully when blank. (The `.env` connection seam is role-agnostic: role = a tool's purpose; writing `.env` = the capability of exposing a local endpoint. These are orthogonal.)
+- All templates must expose `build`, `test`, `clean` Justfile targets and work standalone. `dev` is **optional** — a component provides it only when it has a real watch/daemon/devnet mode (no no-op `dev`s). The **top level** aggregates only `build`/`test`/`clean` (terminating, composable tasks); `test` builds on-chain first (blueprint), then runs each component's `test` in `Role::ALL` order (incl. formal `verify`). Long-running/interactive `dev`, where present, is **per-component** (run directly, e.g. `just -f devnet/Justfile dev`), never aggregated at the top level.
 
 ### Scaffolding pipeline
 

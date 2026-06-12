@@ -319,7 +319,7 @@ mod tests {
     fn no_blueprint_for_infra_only() {
         // Infrastructure-only → no blueprint dir. Exercised through the predicate
         // because the registry currently ships no infrastructure tool to plan
-        // end-to-end (Yaci moved to the testing role).
+        // end-to-end (Yaci fills the devnet role, not infra).
         let infra_only = selection(vec![RoleAssignment {
             role: Role::Infrastructure,
             tool_id: "some-infra".into(),
@@ -327,17 +327,17 @@ mod tests {
         assert!(!blueprint_dir_present(&infra_only));
 
         // Any non-infra role flips it on.
-        let testing_only = selection(vec![RoleAssignment {
-            role: Role::Testing,
+        let devnet_only = selection(vec![RoleAssignment {
+            role: Role::Devnet,
             tool_id: "yaci".into(),
         }]);
-        assert!(blueprint_dir_present(&testing_only));
+        assert!(blueprint_dir_present(&devnet_only));
     }
 
     #[test]
-    fn yaci_testing_entries() {
+    fn yaci_devnet_entries() {
         let sel = selection(vec![RoleAssignment {
-            role: Role::Testing,
+            role: Role::Devnet,
             tool_id: "yaci".into(),
         }]);
         let plan = plan(&sel, &registry()).unwrap();
@@ -347,12 +347,12 @@ mod tests {
             .iter()
             .map(|e| e.dest.to_str().unwrap())
             .collect();
-        // Testing role lives under test/, and still gets the blueprint dir.
+        // Devnet role lives under devnet/, and still gets the blueprint dir.
         assert!(dests.contains(&"blueprint/.gitkeep"));
-        assert!(dests.contains(&"test/Justfile"));
-        assert!(dests.contains(&"test/integration.test.mjs"));
-        assert!(dests.contains(&"test/scripts/devnet-test.sh"));
-        assert!(dests.contains(&"test/scripts/set-env.mjs"));
+        assert!(dests.contains(&"devnet/Justfile"));
+        assert!(dests.contains(&"devnet/integration.test.mjs"));
+        assert!(dests.contains(&"devnet/scripts/devnet-test.sh"));
+        assert!(dests.contains(&"devnet/scripts/set-env.mjs"));
     }
 
     #[test]

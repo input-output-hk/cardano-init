@@ -57,7 +57,7 @@ fn select_roles(theme: &ColorfulTheme) -> Result<Vec<Role>, CliError> {
         "On-chain        — Smart contract logic (validators) on the ledger",
         "Off-chain       — Code that builds and submits transactions",
         "Infrastructure  — Indexers and services that read chain data",
-        "Testing         — Frameworks for testing contracts locally",
+        "Devnet          — Local throwaway chain to develop and test against",
         "Formal methods  — Specification and automated verification tools",
     ];
 

@@ -6,7 +6,7 @@ pub const BLUEPRINT_PATH: &str = "blueprint/plutus.json";
 pub const DIR_ON_CHAIN: &str = "on-chain";
 pub const DIR_OFF_CHAIN: &str = "off-chain";
 pub const DIR_INFRA: &str = "infra";
-pub const DIR_TESTING: &str = "test";
+pub const DIR_DEVNET: &str = "devnet";
 pub const DIR_FORMAL_METHODS: &str = "formal-methods";
 
 /// Standard environment variable names for infrastructure.

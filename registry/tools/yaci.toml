@@ -10,11 +10,11 @@ built-in faucet tops up test wallets on demand. Run `just test` for an \
 integration smoke test, or `just dev` to start a persistent devnet that \
 off-chain components connect to automatically (it writes the standard \
 connection details into the project .env). Yaci DevKit is a dev/test tool — \
-you never deploy it — so it fills the testing role, not infrastructure."""
+you never deploy it — so it fills the devnet role, not infrastructure."""
 website = "https://devkit.yaci.xyz"
 languages = ["typescript"]
 system_deps = ["docker", "node"]
 nix_packages = []
 
-[roles.testing]
-template = "yaci/testing"
+[roles.devnet]
+template = "yaci/devnet"

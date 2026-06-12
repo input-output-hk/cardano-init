@@ -99,7 +99,7 @@ All core types live in `registry/types.rs` (and `scaffold/` for pipeline-interna
 ### 3.1 Roles
 
 ```rust
-pub enum Role { OnChain, OffChain, Infrastructure, Testing, FormalMethods }
+pub enum Role { OnChain, OffChain, Infrastructure, Devnet, FormalMethods }
 ```
 
 - `Role::ALL` defines the **canonical order** used for deterministic output.
@@ -119,7 +119,7 @@ pub struct ToolDef {
 pub struct RoleConfig { pub template: String }  // path under templates/
 ```
 
-`system_deps` is declared in the tool TOML and consumed by the **doctor** (§8). One tool can fill multiple roles (e.g. Scalus: on-chain + off-chain + testing), each with its own template path.
+`system_deps` is declared in the tool TOML and consumed by the **doctor** (§8). One tool can fill multiple roles (e.g. Scalus: on-chain + off-chain), each with its own template path.
 
 ### 3.3 Selection (the resolved user choice)
 
@@ -156,7 +156,7 @@ The contract is a set of constants every template conforms to. It is the seam th
 ```rust
 pub const BLUEPRINT_PATH: &str = "blueprint/plutus.json";
 pub const DIR_ON_CHAIN = "on-chain"; DIR_OFF_CHAIN = "off-chain";
-pub const DIR_INFRA = "infra"; DIR_TESTING = "test"; DIR_FORMAL_METHODS = "formal-methods";
+pub const DIR_INFRA = "infra"; DIR_DEVNET = "devnet"; DIR_FORMAL_METHODS = "formal-methods";
 pub const ENV_INDEXER_URL = "INDEXER_URL"; ENV_INDEXER_PORT = "INDEXER_PORT";
 pub const ENV_NODE_SOCKET_PATH = "NODE_SOCKET_PATH"; ENV_NETWORK = "CARDANO_NETWORK";
 ```
@@ -165,8 +165,8 @@ pub const ENV_NODE_SOCKET_PATH = "NODE_SOCKET_PATH"; ENV_NETWORK = "CARDANO_NETW
 
 - **Every template** ships a `Justfile` exposing `build`, `test`, `clean`, and works **independently** (its `just build` succeeds with no other roles present). A no-op-for-this-tool target among those three still exists (printing a message is fine). **`dev` is optional** — provided only when the tool has a real watch/daemon/devnet mode. The **top level** aggregates only `build`/`test`/`clean`; `dev`, where present, is per-component (§6.2 / TECH_SPEC §7.2), never aggregated.
 - **On-chain** produces the CIP-57 blueprint at `../blueprint/plutus.json` during `build`. Other roles read it from that path if present.
-- **The component that provisions a local chain endpoint** writes the standard connection vars to `../.env` during its `dev`. This is **role-agnostic** — usually an *infrastructure* service, but a local devnet such as Yaci DevKit in the *testing* role does it too. Role = a tool's *purpose*; writing `.env` = the orthogonal *capability* of exposing a local endpoint. Consumers react to the presence of `INDEXER_URL`, never to which role set it (principle 1).
-- **Off-chain / testing / formal-methods** read the blueprint and `.env` if present, and degrade gracefully when absent.
+- **The component that provisions a local chain endpoint** writes the standard connection vars to `../.env` during its `dev`. This is **role-agnostic** — usually an *infrastructure* service, but a local devnet such as Yaci DevKit in the *devnet* role does it too. Role = a tool's *purpose*; writing `.env` = the orthogonal *capability* of exposing a local endpoint. Consumers react to the presence of `INDEXER_URL`, never to which role set it (principle 1).
+- **Off-chain / devnet / formal-methods** read the blueprint and `.env` if present, and degrade gracefully when absent.
 
 The `blueprint/` **directory** is scaffolded whenever any blueprint-producing-or-consuming
 role is present, every project except infrastructure-only (§6.2), so the canonical
@@ -230,7 +230,7 @@ Produces the ordered `FilePlan`:
 
 No I/O: only embedded assets are read. `render` is set from the `.jinja` extension.
 
-The `blueprint/` directory gives every blueprint-consuming role (off-chain, testing, formal-methods) a stable, predictable path to read from, and lets a user drop a hand-supplied or externally-built `plutus.json` into the same place even when on-chain isn't scaffolded in this project. It is omitted only for infrastructure-only projects, where no role produces or consumes a blueprint. Only the directory (via `.gitkeep`) is created; the `plutus.json` *file* is produced by on-chain `build`, so consumers must still handle its absence gracefully (§4).
+The `blueprint/` directory gives every blueprint-consuming role (off-chain, devnet, formal-methods) a stable, predictable path to read from, and lets a user drop a hand-supplied or externally-built `plutus.json` into the same place even when on-chain isn't scaffolded in this project. It is omitted only for infrastructure-only projects, where no role produces or consumes a blueprint. Only the directory (via `.gitkeep`) is created; the `plutus.json` *file* is produced by on-chain `build`, so consumers must still handle its absence gracefully (§4).
 
 > **Code note:** the current `planner.rs` creates `blueprint/.gitkeep` only when on-chain is present (guarded by a `has_on_chain` check). The rule above broadens that guard to "any non-infrastructure role present".
 
