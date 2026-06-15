@@ -50,10 +50,10 @@ jobs:
       # --- per-tool toolchain (extend as the matrix grows) ---
       - name: Install Aiken
         if: matrix.tool == 'aiken'
-        # NOTE: verify the action ref/inputs against the current Aiken docs.
         uses: aiken-lang/setup-aiken@v1
         with:
-          version: latest
+          #Keep this in lockstep with templates/aiken/on-chain/aiken.toml.jinja.
+          version: v1.1.21
 
       - name: Install Node
         if: matrix.tool == 'meshjs'
@@ -66,9 +66,10 @@ jobs:
 
       - name: Build & test the generated project
         working-directory: smoke-${{ matrix.tool }}
+        # Each component's Justfile installs its own deps (e.g. meshjs `_install`
+        # runs `npm install` in off-chain/ on first build), so `just build` is
+        # self-sufficient from the project root — no per-tool dep step here.
         run: |
-          # Tools whose `just build` assumes deps are installed do it here.
-          if [ "${{ matrix.tool }}" = "meshjs" ]; then npm install; fi
           just build
           just test
 
