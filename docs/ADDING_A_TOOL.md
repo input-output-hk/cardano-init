@@ -22,12 +22,22 @@ One to three sentences. What does this tool do, and when should \
 someone choose it over alternatives?"""
 website     = "https://mytool.dev"
 languages   = ["typescript"]           # Languages the generated project uses
-system_deps = ["mytool-cli"]           # What the user needs installed on their machine
+system_deps = ["mytool-cli"]           # What the user needs installed (drives `doctor`; each id needs a registry/deps.toml entry)
 nix_packages = ["mytool"]              # Nix package name(s), if available (omit if none)
+detect      = ["mytool.config.js"]     # How `doctor` recognizes this tool in a scanned project (see below)
 
 [roles.off-chain]                      # The role this tool fills
 template = "mytool/off-chain"          # Path under templates/ for this role
 ```
+
+**`detect` signatures** tell `cardano-init doctor` how to recognize your tool inside a generated project's role directory (so it knows which `system_deps` to check). Each entry is either a **bare path** (matches if the file exists) or a table `{ file = "<path>", contains = "<substring>" }` (matches if the file exists *and* contains the substring). Use the `contains` form when the filename is generic — e.g. a `package.json` only means *your* tool if it references your package:
+
+```toml
+detect = ["mytool.config.js"]                              # distinctive filename → existence is enough
+detect = [{ file = "package.json", contains = "mytool" }]  # generic filename → require content
+```
+
+Only tools that declare a role are tested against that role's directory, so signatures only need to disambiguate *within* a role. A directory that matches nothing is reported as "unrecognized" — `doctor` checks dependencies, it does not validate that the component builds (that's `just test`).
 
 A tool can fill multiple roles. Add one `[roles.<role>]` section per role:
 
@@ -231,6 +241,7 @@ website     = "https://mytool.dev"
 languages   = ["typescript"]
 system_deps = ["node"]
 nix_packages = ["nodejs_20"]
+detect      = [{ file = "package.json", contains = "mytool" }]
 
 [roles.off-chain]
 template = "mytool/off-chain"

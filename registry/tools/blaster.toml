@@ -9,6 +9,7 @@ website = "https://example.com/blaster"
 languages = ["blaster-spec"]
 system_deps = []
 nix_packages = []
+detect = ["spec/example.spec"]
 
 [roles.formal-methods]
 template = "blaster/formal-methods"

@@ -97,6 +97,20 @@ pub struct RoleConfig {
     pub template: String,
 }
 
+/// A signature that identifies a tool's generated output inside a role
+/// directory (used by `doctor` to recognize the tool in a scanned project).
+///
+/// A signature matches when `file` (relative to the role dir) exists and, if
+/// `contains` is set, the file's text contains that substring. The substring
+/// form disambiguates generic filenames (e.g. a `package.json` is only MeshJS
+/// if it references `@meshsdk`), so foreign projects fall into the
+/// "unrecognized" bucket instead of being mislabeled (TECH_SPEC §9.6).
+#[derive(Debug, Clone)]
+pub struct DetectSignature {
+    pub file: String,
+    pub contains: Option<String>,
+}
+
 /// A loaded tool definition from the registry.
 #[derive(Debug, Clone)]
 pub struct ToolDef {
@@ -105,7 +119,15 @@ pub struct ToolDef {
     pub description: String,
     pub website: String,
     pub languages: Vec<String>,
+    /// Dependency ids this tool requires; each must have a `registry/deps.toml`
+    /// entry. Consumed by the dependency doctor (TECH_SPEC §9.1).
+    pub system_deps: Vec<String>,
     pub nix_packages: Vec<String>,
+    /// Signatures that identify this tool's generated output. Used by `doctor`
+    /// to recognize the tool in a scanned project. Only tools that declare a
+    /// role are candidates for that role's directory, which resolves
+    /// on-chain/off-chain ambiguity.
+    pub detect: Vec<DetectSignature>,
     pub roles: HashMap<Role, RoleConfig>,
 }
 

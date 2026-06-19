@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
-rust-embed = "8"
+rust-embed = { version = "8", features = ["include-exclude"] }
 thiserror = "2"
 minijinja = "2"
 clap = { version = "4", features = ["derive"] }

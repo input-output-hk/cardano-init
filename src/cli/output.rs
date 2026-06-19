@@ -1,8 +1,58 @@
 use console::style;
+use serde_json::json;
 
+use super::{CliError, Format};
+use crate::doctor::Report;
+use crate::doctor::installers::Installer;
+use crate::doctor::probe::{Environment, ScanResult};
 use crate::registry::loader::Registry;
 use crate::registry::types::{Role, Selection};
 use crate::scaffold::planner::FilePlan;
+
+// ---------------------------------------------------------------------------
+// JSON envelope (TECH_SPEC §2.4)
+// ---------------------------------------------------------------------------
+
+const SCHEMA_VERSION: u32 = 1;
+
+/// Print a success envelope to stdout: `{ schema_version, ok: true, data }`.
+fn emit_json_ok(data: serde_json::Value) {
+    let envelope = json!({ "schema_version": SCHEMA_VERSION, "ok": true, "data": data });
+    println!(
+        "{}",
+        serde_json::to_string(&envelope).expect("envelope serializes")
+    );
+}
+
+/// Render any error in the requested format.
+///
+/// In `json`, an error envelope `{ ok: false, error: { code, message, context } }`
+/// is written to stderr. In `human`, the styled `error: …` line is written to
+/// stderr — except for an interactive abort (exit code 0), which is silent.
+pub fn print_error(err: &CliError, format: Format) {
+    match format {
+        Format::Json => {
+            let envelope = json!({
+                "schema_version": SCHEMA_VERSION,
+                "ok": false,
+                "error": {
+                    "code": err.code(),
+                    "message": err.to_string(),
+                    "context": err.context(),
+                },
+            });
+            eprintln!(
+                "{}",
+                serde_json::to_string(&envelope).expect("envelope serializes")
+            );
+        }
+        Format::Human => {
+            if err.exit_code() != 0 {
+                eprintln!("{}: {}", style("error").red().bold(), err);
+            }
+        }
+    }
+}
 
 /// Print the welcome banner for interactive mode.
 pub fn print_welcome() {
@@ -74,8 +124,37 @@ pub fn print_summary(selection: &Selection, registry: &Registry) {
     println!();
 }
 
-/// Print the dry-run output: summary + nested file tree.
-pub fn print_dry_run(selection: &Selection, registry: &Registry, plan: &FilePlan) {
+/// Build the `[{ role, tool }]` component list for a selection.
+fn components_json(selection: &Selection) -> serde_json::Value {
+    let items: Vec<serde_json::Value> = selection
+        .assignments
+        .iter()
+        .map(|a| json!({ "role": a.role.as_kebab(), "tool": a.tool_id }))
+        .collect();
+    serde_json::Value::Array(items)
+}
+
+/// Print the dry-run output: summary + nested file tree (human), or the planned
+/// file list (json).
+pub fn print_dry_run(selection: &Selection, registry: &Registry, plan: &FilePlan, format: Format) {
+    if format == Format::Json {
+        let files: Vec<&str> = plan
+            .entries
+            .iter()
+            .map(|e| e.dest.to_str().expect("paths are UTF-8"))
+            .collect();
+        emit_json_ok(json!({
+            "project": selection.project_name,
+            "network": selection.network.to_string(),
+            "nix": selection.nix,
+            "dry_run": true,
+            "generated": false,
+            "components": components_json(selection),
+            "files": files,
+        }));
+        return;
+    }
+
     print_summary(selection, registry);
 
     println!("  {}", style(format!("{}/", selection.project_name)).bold());
@@ -159,8 +238,22 @@ fn print_tree(paths: &[Vec<&str>], depth: usize, _start: usize, indent: &mut Str
     }
 }
 
-/// Print success message after scaffolding.
-pub fn print_success(selection: &Selection) {
+/// Print success after scaffolding, including the dependency check-and-advise
+/// (TECH_SPEC §9). In `json`, emits one envelope carrying the selection plus the
+/// dependency report.
+pub fn print_success(selection: &Selection, report: &Report, format: Format) {
+    if format == Format::Json {
+        emit_json_ok(json!({
+            "project": selection.project_name,
+            "network": selection.network.to_string(),
+            "nix": selection.nix,
+            "generated": true,
+            "components": components_json(selection),
+            "dependencies": report,
+        }));
+        return;
+    }
+
     println!();
     println!(
         "  {} Created {}",
@@ -184,10 +277,178 @@ pub fn print_success(selection: &Selection) {
         );
     }
 
+    // Check-and-advise: surface any missing required deps before "Next steps".
+    print_dep_advice(report);
+
     println!();
     println!("  {}", style("Next steps:").bold());
     println!("    cd {}", selection.project_name);
+    if !report.all_required_present {
+        println!("    # install the missing dependencies listed above, then:");
+    }
     println!("    just build");
+    println!();
+}
+
+/// Print the dependency advice block (missing required deps + install plans).
+/// Silent when everything required is already present.
+fn print_dep_advice(report: &Report) {
+    if report.all_required_present {
+        println!();
+        println!(
+            "  {} All required dependencies are installed.",
+            style("✔").green().bold()
+        );
+        return;
+    }
+
+    println!();
+    println!("  {}", style("Missing dependencies:").yellow().bold());
+    for dep in report.missing_required() {
+        print_missing_dep(dep);
+    }
+}
+
+/// Render one missing dependency: its id, ordered install commands, and docs.
+fn print_missing_dep(dep: &crate::doctor::DepStatus) {
+    println!();
+    println!(
+        "  {} {} (required)",
+        style("✘").red().bold(),
+        style(&dep.id).bold()
+    );
+    for step in &dep.plan {
+        println!("      {}", style(&step.command).cyan());
+    }
+    if dep.plan.is_empty() {
+        println!(
+            "      {}",
+            style("(no install method detected for this system)").dim()
+        );
+    }
+    if let Some(docs) = &dep.docs {
+        println!(
+            "      {} {}",
+            style("Docs:").dim(),
+            style(docs).underlined()
+        );
+    }
+}
+
+/// Sorted installer keys detected on this host.
+fn detected_installers(env: &Environment) -> Vec<&'static str> {
+    let mut keys: Vec<&'static str> = Installer::ALL
+        .iter()
+        .filter(|i| env.installers.contains(i))
+        .map(|i| i.key())
+        .collect();
+    keys.sort_unstable();
+    keys
+}
+
+/// Print the standalone `doctor` report: environment + detected components +
+/// dependency status.
+pub fn print_doctor(
+    scan: &ScanResult,
+    report: &Report,
+    env: &Environment,
+    registry: &Registry,
+    format: Format,
+) {
+    let installers = detected_installers(env);
+
+    if format == Format::Json {
+        emit_json_ok(json!({
+            "all_required_present": report.all_required_present,
+            "environment": { "os": env.os, "installers": installers },
+            "components": scan.components,
+            "unrecognized": scan.unrecognized,
+            "deps": report.deps,
+        }));
+        return;
+    }
+
+    println!();
+    println!("  {}", style("Dependency check").bold().underlined());
+
+    // Environment.
+    println!();
+    let installer_list = if installers.is_empty() {
+        "none detected".to_string()
+    } else {
+        installers.join(", ")
+    };
+    println!(
+        "  {} {:?}   {} {}",
+        style("OS:").dim(),
+        env.os,
+        style("Installers:").dim(),
+        installer_list
+    );
+
+    // Detected components. The mark reflects whether the tool's required
+    // dependencies are present, not merely that the component was detected.
+    let present: std::collections::HashSet<&str> = report
+        .deps
+        .iter()
+        .filter(|d| d.present)
+        .map(|d| d.id.as_str())
+        .collect();
+
+    println!();
+    if scan.components.is_empty() && scan.unrecognized.is_empty() {
+        println!(
+            "  {}",
+            style("No generated components detected in this directory.").dim()
+        );
+    } else {
+        for comp in &scan.components {
+            let tool = registry.get(&comp.tool_id);
+            let name = tool.map(|t| t.name.as_str()).unwrap_or(&comp.tool_id);
+            let missing: Vec<&str> = tool
+                .map(|t| {
+                    t.system_deps
+                        .iter()
+                        .map(|d| d.as_str())
+                        .filter(|d| !present.contains(d))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            if missing.is_empty() {
+                println!(
+                    "  {} {}: {}",
+                    style("✔").green().bold(),
+                    comp.role,
+                    style(name).cyan()
+                );
+            } else {
+                println!(
+                    "  {} {}: {} {}",
+                    style("✘").red().bold(),
+                    comp.role,
+                    style(name).cyan(),
+                    style(format!("(missing: {})", missing.join(", "))).yellow()
+                );
+            }
+        }
+        for un in &scan.unrecognized {
+            println!(
+                "  {} {}/ — unrecognized (renamed or modified?)",
+                style("?").yellow().bold(),
+                un.dir
+            );
+        }
+    }
+
+    // Dependency status.
+    println!();
+    for dep in &report.deps {
+        if dep.present {
+            println!("  {} {}", style("✔").green().bold(), dep.id);
+        }
+    }
+    print_dep_advice(report);
     println!();
 }
 

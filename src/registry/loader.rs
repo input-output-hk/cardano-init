@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 
-use super::types::{Role, RoleConfig, ToolDef, UnknownRoleError};
+use super::types::{DetectSignature, Role, RoleConfig, ToolDef, UnknownRoleError};
 
 // ---------------------------------------------------------------------------
 // Embedded assets
@@ -57,15 +57,42 @@ struct ToolMetaToml {
     description: String,
     website: String,
     languages: Vec<String>,
-    #[allow(dead_code)] // present in TOML files; kept for deserialization
+    #[serde(default)]
     system_deps: Vec<String>,
     #[serde(default)]
     nix_packages: Vec<String>,
+    #[serde(default)]
+    detect: Vec<DetectToml>,
 }
 
 #[derive(Deserialize)]
 struct RoleConfigToml {
     template: String,
+}
+
+/// A `detect` entry is either a bare path (existence check) or a table with an
+/// optional `contains` substring (content check).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum DetectToml {
+    Simple(String),
+    Detailed {
+        file: String,
+        #[serde(default)]
+        contains: Option<String>,
+    },
+}
+
+impl DetectToml {
+    fn into_signature(self) -> DetectSignature {
+        match self {
+            DetectToml::Simple(file) => DetectSignature {
+                file,
+                contains: None,
+            },
+            DetectToml::Detailed { file, contains } => DetectSignature { file, contains },
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -94,7 +121,14 @@ fn to_tool_def(file_name: &str, raw: ToolFileToml) -> Result<ToolDef, RegistryEr
         description: raw.tool.description,
         website: raw.tool.website,
         languages: raw.tool.languages,
+        system_deps: raw.tool.system_deps,
         nix_packages: raw.tool.nix_packages,
+        detect: raw
+            .tool
+            .detect
+            .into_iter()
+            .map(DetectToml::into_signature)
+            .collect(),
         roles,
     })
 }

@@ -10,6 +10,7 @@ website = "https://aiken-lang.org"
 languages = ["aiken"]
 system_deps = ["aiken"]
 nix_packages = ["aiken"]
+detect = ["aiken.toml"]
 
 [roles.on-chain]
 template = "aiken/on-chain"

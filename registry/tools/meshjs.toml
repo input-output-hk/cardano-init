@@ -11,6 +11,9 @@ website = "https://meshjs.dev"
 languages = ["typescript"]
 system_deps = ["node"]
 nix_packages = ["nodejs"]
+# A package.json alone is ambiguous (any JS project has one); require the
+# MeshJS dependency so foreign projects read as "unrecognized" instead.
+detect = [{ file = "package.json", contains = "@meshsdk" }]
 
 [roles.off-chain]
 template = "meshjs/off-chain"

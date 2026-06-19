@@ -21,6 +21,7 @@
 ```
 cardano-init [INIT_FLAGS]            # default: one-shot if --name given, else interactive
 cardano-init web [--port <u16>]      # local web builder (default port 3000)
+cardano-init doctor                  # check this project's dependencies + advise installs (§9)
 cardano-init list [--format <fmt>]   # (planned) capability discovery
 ```
 
@@ -341,7 +342,16 @@ Renders from the same data as `web::build_registry_json`; `roles[].multiple` is 
 
 ---
 
-## 9. Dependency doctor (planned)
+## 9. Dependency doctor
+
+Implemented for DX.02: the standalone `cardano-init doctor` command plus check-and-advise after generation. Both run the same pure resolver (§9.4) over the same catalog (§9.2).
+
+**Scope — what the doctor *is*.** A **dependency checker and advisor**: it determines which required dependencies are present and, for missing ones, prints an OS-aware, ordered install plan (never just "go install it"). v1 prints the plan; v2 (DX.05) executes it with consent (same data, same resolver).
+
+**Out of scope — what the doctor is *not*.**
+- **A project validator.** The doctor does not verify that a component actually builds, type-checks, or is otherwise viable — that is the job of each component's `just build` / `just test` (the interface contract requires those to work standalone, §7). A directory that *looks* like a tool (matching signatures, §9.6) but isn't wired up correctly will still pass the doctor; it will fail `just test`. Keeping these separate avoids duplicating the build system's job in a fragile heuristic.
+- **Alternative runtimes / package managers.** Each template fixes its toolchain (e.g. the MeshJS/Yaci components invoke `npm`/`node`/`npx` directly in their Justfiles), so `node` is the honest required dep. The doctor reflects what the template needs; it does not offer to satisfy that with `bun`/`deno`/etc. Making a component runtime-agnostic is a template decision, not a doctor feature (and cuts against the fixed-convention philosophy, ARCHITECTURE §3.1).
+- **Version constraints.** Presence only in v1 (§9.3); minimum-version checks are a later item (ROADMAP Phase 3).
 
 ### 9.1 Dependency sets (required vs recommended)
 
@@ -444,19 +454,23 @@ resolve(dep_id, env, catalog, seen) -> Plan | Unresolved:
     if dep_id ∈ seen:                  return Unresolved          // cycle guard
     rec = catalog[dep_id]
     if any(rec.binaries on PATH):      return Plan([])            // already present
+
+    // Pass 1 (preferred): the first method whose installer is usable right now.
     for (installer, arg) in rec.install:                          // ordered preference
-        cmd = installer.template(arg)
         if installer ∈ env.installers:                            // usable right now
-            return Plan([ {installer, cmd} ])
+            return Plan([ {installer, installer.template(arg)} ])
+
+    // Pass 2: no installer is directly available — bootstrap one, in order.
+    for (installer, arg) in rec.install:
         for bdep in installer.bootstrap:                          // [] ⇒ skip (terminal)
             sub = resolve(bdep, env, catalog, seen ∪ {dep_id})
-            if sub is Plan:            return Plan(sub.steps + [ {installer, cmd} ])
+            if sub is Plan:            return Plan(sub.steps + [ {installer, installer.template(arg)} ])
     return Unresolved                                             // → docs fallback
 
 all_required_present = every required dep resolves to Plan([])   // i.e. already present
 ```
 
-Picking a single method per dep is exactly why the `nix` path for `aiken` needs no `aikup`. When neither `nix` nor `aikup` is present, the `aikup` installer is bootstrapped (via `node`/`npm`, etc.), producing a multi-step plan.
+The two passes are what make a directly-usable installer win over bootstrapping an earlier-listed one: this is exactly why the `nix` path for `aiken` needs no `aikup` when `nix` is present (Pass 1 picks it in one step). When neither `nix` nor `aikup` is present, no method's installer is directly available, so Pass 2 bootstraps the `aikup` installer (via `node`/`npm`, etc.), producing a multi-step plan. A single method is still chosen per dep. (A naive single-pass walk that tried bootstrapping each method before checking later methods' installers would wrongly bootstrap `aikup` even when `nix` is present.)
 
 ```json
 { "schema_version": 1, "ok": true, "data": {
@@ -483,6 +497,28 @@ Picking a single method per dep is exactly why the `nix` path for `aiken` needs 
 - Every installer named in any recipe is an `Installer` enum variant (also enforced at load).
 - Every dep id in any installer's `bootstrap` list has a recipe entry.
 - The dep graph resolves without infinite recursion (the resolver's cycle guard is exercised by a test).
+
+### 9.6 Project scan & tool detection (standalone `doctor`)
+
+The standalone `cardano-init doctor` takes **no flags describing the project**: it derives the dependency set by scanning the current directory. There is no generated metadata file — the project's structure *is* the source of truth (`probe::scan_project`, impure):
+
+1. For each role in `Role::ALL`, look for its contract directory (`contract::DIR_*`: `on-chain/`, `off-chain/`, `infra/`, `devnet/`, `formal-methods/`).
+2. For a present directory, the candidate tools are exactly those that declare that role (so `on-chain/` is tested only against on-chain tools — this resolves the on-chain/off-chain ambiguity without per-pair logic).
+3. A tool matches if **any** of its `detect` signatures matches. Exactly one match ⇒ the component is identified; zero (or an ambiguous multiple) ⇒ the directory is reported as **unrecognized** (renamed, modified, or a foreign project). A renamed *directory* simply isn't found, so that role is absent.
+4. The required set is `{just}` ∪ the `system_deps` of every identified tool (§9.1), fed to the resolver (§9.4).
+
+**Detect signatures (`detect` in `registry/tools/<tool>.toml`).** A list; each entry is either:
+- a **bare path** (relative to the role dir) — matches if the file exists; or
+- a **table** `{ file = "<path>", contains = "<substring>" }` — matches if the file exists *and* its text contains the substring.
+
+```toml
+# Distinctive filenames need only existence:
+detect = ["aiken.toml"]
+# Generic filenames need content to avoid false positives:
+detect = [{ file = "package.json", contains = "@meshsdk" }]
+```
+
+The `contains` form is what keeps detection **honest without overreaching** (per the scope note above): a from-scratch JS project (e.g. Next.js) has a `package.json`, but without `@meshsdk` it is *not* identified as MeshJS — it falls into the "unrecognized" bucket. This sharpens the label and the structure check; it does **not** attempt to prove the component is viable (still `just test`'s job). Signatures are tool-author data (no Rust), consistent with the registry's extensibility promise.
 
 ---
 

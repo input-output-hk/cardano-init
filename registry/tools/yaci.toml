@@ -15,6 +15,7 @@ website = "https://devkit.yaci.xyz"
 languages = ["typescript"]
 system_deps = ["docker", "node"]
 nix_packages = []
+detect = [{ file = "scripts/set-env.mjs", contains = "Yaci" }]
 
 [roles.devnet]
 template = "yaci/devnet"

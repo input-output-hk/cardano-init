@@ -14,12 +14,24 @@ use crate::scaffold::ScaffoldError;
 // CLI arguments
 // ---------------------------------------------------------------------------
 
+/// Output format. `json` implies non-interactive: it never prompts; if required
+/// input is missing it errors instead (TECH_SPEC §2.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Format {
+    Human,
+    Json,
+}
+
 /// Scaffold a new Cardano protocol project.
 #[derive(Parser, Debug)]
 #[command(name = "cardano-init", version, about)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
+
+    /// Output format (global): human-readable text or machine-readable JSON
+    #[arg(long, value_enum, global = true, default_value = "human")]
+    pub format: Format,
 
     #[command(flatten)]
     pub init: InitArgs,
@@ -33,6 +45,10 @@ pub enum Command {
         #[arg(long, default_value_t = 3000)]
         port: u16,
     },
+
+    /// Check that the dependencies this project needs are installed, and
+    /// advise how to install any that are missing
+    Doctor,
 }
 
 /// Arguments for the default init mode (interactive or one-shot).
@@ -104,14 +120,25 @@ pub enum CliError {
     #[error("{0}")]
     Web(#[from] crate::web::WebError),
 
+    #[error("{0}")]
+    Catalog(#[from] crate::doctor::catalog::CatalogError),
+
     #[error("directory '{}' already exists — refusing to overwrite", path)]
     DirectoryExists { path: String },
 
     #[error("unknown tool '{}' for role {}", tool_id, role)]
-    UnknownTool { tool_id: String, role: String },
+    UnknownTool {
+        tool_id: String,
+        role: String,
+        valid_tools: Vec<String>,
+    },
 
     #[error("tool '{}' does not support role '{}'", tool_id, role)]
-    ToolRoleMismatch { tool_id: String, role: String },
+    ToolRoleMismatch {
+        tool_id: String,
+        role: String,
+        valid_roles: Vec<String>,
+    },
 
     #[error("no roles selected — at least one role must be provided")]
     NoRolesSelected,
@@ -153,8 +180,63 @@ impl CliError {
             CliError::Registry(_)
             | CliError::Scaffold(_)
             | CliError::Web(_)
+            | CliError::Catalog(_)
             | CliError::DirectoryExists { .. }
             | CliError::Prompt(_) => 1,
+        }
+    }
+
+    /// Stable, machine-readable error code (TECH_SPEC §2.5). Part of the JSON
+    /// contract; never changes for a given error kind.
+    pub fn code(&self) -> &'static str {
+        match self {
+            CliError::Registry(_) | CliError::Catalog(_) => "registry_load",
+            CliError::Scaffold(_) => "scaffold_error",
+            CliError::Web(_) => "web_bind",
+            CliError::DirectoryExists { .. } => "dir_exists",
+            CliError::UnknownTool { .. } => "unknown_tool",
+            CliError::ToolRoleMismatch { .. } => "tool_role_mismatch",
+            CliError::NoRolesSelected => "no_roles_selected",
+            CliError::InvalidNetwork { .. } => "invalid_network",
+            CliError::InvalidProjectName { .. } => "invalid_project_name",
+            CliError::NameRequired => "name_required",
+            CliError::Aborted => "aborted",
+            CliError::Prompt(_) => "prompt_error",
+        }
+    }
+
+    /// Structured, agent-facing context: the offending input plus valid
+    /// alternatives where applicable (TECH_SPEC §2.5, PRD FR-15).
+    pub fn context(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            CliError::Registry(e) => json!({ "detail": e.to_string() }),
+            CliError::Catalog(e) => json!({ "detail": e.to_string() }),
+            CliError::Scaffold(e) => json!({ "detail": e.to_string() }),
+            CliError::Web(crate::web::WebError::Bind { port, source }) => {
+                json!({ "port": port, "detail": source.to_string() })
+            }
+            CliError::DirectoryExists { path } => json!({ "path": path }),
+            CliError::UnknownTool {
+                tool_id,
+                role,
+                valid_tools,
+            } => json!({ "tool_id": tool_id, "role": role, "valid_tools": valid_tools }),
+            CliError::ToolRoleMismatch {
+                tool_id,
+                role,
+                valid_roles,
+            } => json!({ "tool_id": tool_id, "role": role, "valid_roles": valid_roles }),
+            CliError::InvalidNetwork { value } => {
+                json!({ "value": value, "expected": ["preview", "preprod", "mainnet"] })
+            }
+            CliError::InvalidProjectName { name, reason } => {
+                json!({ "name": name, "reason": reason })
+            }
+            CliError::NoRolesSelected
+            | CliError::NameRequired
+            | CliError::Aborted
+            | CliError::Prompt(_) => json!({}),
         }
     }
 }
@@ -227,30 +309,76 @@ fn format_tool(out: &mut String, tool: &ToolDef) {
 // Entry point
 // ---------------------------------------------------------------------------
 
-/// Main CLI entry point. Parse args, dispatch to the appropriate mode,
-/// and run the scaffolding pipeline.
-pub fn run() -> Result<(), CliError> {
-    let registry = Registry::load()?;
+/// Main CLI entry point. Parse args, dispatch, and present the result (or a
+/// machine-readable error). Returns the process exit code.
+pub fn run() -> i32 {
+    let registry = match Registry::load() {
+        Ok(r) => r,
+        Err(e) => {
+            // Registry load happens before we know the requested format; this
+            // is a packaging bug (embedded data), so default to human output.
+            let err = CliError::from(e);
+            output::print_error(&err, Format::Human);
+            return err.exit_code();
+        }
+    };
 
     // Build clap command with dynamic after_help containing tool catalog
     let catalog = build_tool_catalog(&registry);
     let cmd = Cli::command().after_help(catalog);
     let matches = cmd.get_matches();
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated");
+    let format = cli.format;
 
-    match cli.command {
-        Some(Command::Web { port }) => {
-            crate::web::serve(&registry, port)?;
-            Ok(())
+    let result = match cli.command {
+        Some(Command::Web { port }) => crate::web::serve(&registry, port).map_err(CliError::from),
+        Some(Command::Doctor) => run_doctor(&registry, format),
+        None => run_init(cli.init, &registry, format),
+    };
+
+    match result {
+        Ok(()) => 0,
+        Err(e) => {
+            output::print_error(&e, format);
+            e.exit_code()
         }
-        None => run_init(cli.init, &registry),
     }
 }
 
+/// The required dependencies for a set of tool ids: the base dep `just`, plus
+/// the `system_deps` of each tool (deduped/sorted later by the resolver).
+fn required_deps<'a>(tool_ids: impl Iterator<Item = &'a str>, registry: &Registry) -> Vec<String> {
+    let mut deps = vec![crate::doctor::BASE_DEP.to_string()];
+    for id in tool_ids {
+        if let Some(tool) = registry.get(id) {
+            deps.extend(tool.system_deps.iter().cloned());
+        }
+    }
+    deps
+}
+
+/// Run the standalone `doctor`: scan the current directory for generated
+/// components, then report dependency status + install plans.
+fn run_doctor(registry: &Registry, format: Format) -> Result<(), CliError> {
+    use crate::doctor::{self, catalog::DepCatalog, probe};
+
+    let catalog = DepCatalog::load()?;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let scan = probe::scan_project(&cwd, registry);
+
+    let required = required_deps(scan.components.iter().map(|c| c.tool_id.as_str()), registry);
+    let env = probe::detect_environment(&catalog);
+    let report = doctor::resolve_all(&required, &catalog, &env);
+
+    output::print_doctor(&scan, &report, &env, registry, format);
+    Ok(())
+}
+
 /// Run the default init mode (interactive or one-shot).
-fn run_init(args: InitArgs, registry: &Registry) -> Result<(), CliError> {
-    // If flags are provided without --name, error out
-    if args.name.is_none() && args.has_oneshot_flags() {
+fn run_init(args: InitArgs, registry: &Registry, format: Format) -> Result<(), CliError> {
+    // `--name` is required for one-shot flags, and always in JSON mode (which
+    // is non-interactive and must never prompt — TECH_SPEC §2.1).
+    if args.name.is_none() && (args.has_oneshot_flags() || format == Format::Json) {
         return Err(CliError::NameRequired);
     }
 
@@ -287,13 +415,124 @@ fn run_init(args: InitArgs, registry: &Registry) -> Result<(), CliError> {
 
     if args.dry_run {
         let plan = crate::scaffold::dry_run(&selection, registry)?;
-        output::print_dry_run(&selection, registry, &plan);
+        output::print_dry_run(&selection, registry, &plan, format);
         return Ok(());
     }
 
-    output::print_summary(&selection, registry);
+    if format == Format::Human {
+        output::print_summary(&selection, registry);
+    }
     crate::scaffold::scaffold(&selection, registry, &root)?;
-    output::print_success(&selection);
+
+    // Check-and-advise: resolve the deps this selection needs (TECH_SPEC §9).
+    let report = resolve_selection_deps(&selection, registry)?;
+    output::print_success(&selection, &report, format);
 
     Ok(())
+}
+
+/// Resolve the dependency report for a generated selection (check-and-advise).
+fn resolve_selection_deps(
+    selection: &crate::registry::types::Selection,
+    registry: &Registry,
+) -> Result<crate::doctor::Report, CliError> {
+    use crate::doctor::{self, catalog::DepCatalog, probe};
+
+    let catalog = DepCatalog::load()?;
+    let required = required_deps(
+        selection.assignments.iter().map(|a| a.tool_id.as_str()),
+        registry,
+    );
+    let env = probe::detect_environment(&catalog);
+    Ok(doctor::resolve_all(&required, &catalog, &env))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_tool_error_code_and_context() {
+        let registry = Registry::load().unwrap();
+        // `bogus` is not a tool; one-shot validation should surface it with the
+        // stable code + the valid alternatives for the role.
+        let err = oneshot::build_selection(
+            "demo",
+            Some("bogus"),
+            None,
+            &[],
+            None,
+            None,
+            "preview",
+            false,
+            &registry,
+        )
+        .unwrap_err();
+
+        assert_eq!(err.code(), "unknown_tool");
+        let ctx = err.context();
+        assert_eq!(ctx["tool_id"], "bogus");
+        assert_eq!(ctx["role"], "On-chain");
+        // on-chain is fillable by aiken + scalus.
+        let valid: Vec<&str> = ctx["valid_tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(valid, vec!["aiken", "scalus"]);
+    }
+
+    #[test]
+    fn tool_role_mismatch_lists_valid_roles() {
+        let registry = Registry::load().unwrap();
+        // aiken is on-chain only; asking it to fill off-chain is a mismatch.
+        let err = oneshot::build_selection(
+            "demo",
+            None,
+            Some("aiken"),
+            &[],
+            None,
+            None,
+            "preview",
+            false,
+            &registry,
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "tool_role_mismatch");
+        let ctx = err.context();
+        assert_eq!(ctx["valid_roles"], serde_json::json!(["on-chain"]));
+    }
+
+    #[test]
+    fn invalid_network_context_lists_expected() {
+        let registry = Registry::load().unwrap();
+        let err = oneshot::build_selection(
+            "demo",
+            Some("aiken"),
+            None,
+            &[],
+            None,
+            None,
+            "badnet",
+            false,
+            &registry,
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "invalid_network");
+        assert_eq!(
+            err.context()["expected"],
+            serde_json::json!(["preview", "preprod", "mainnet"])
+        );
+    }
+
+    #[test]
+    fn required_deps_unions_just_with_tool_deps() {
+        let registry = Registry::load().unwrap();
+        // aiken → ["aiken"], meshjs → ["node"]; plus the base dep "just".
+        let deps = required_deps(["aiken", "meshjs"].into_iter(), &registry);
+        assert!(deps.contains(&"just".to_string()));
+        assert!(deps.contains(&"aiken".to_string()));
+        assert!(deps.contains(&"node".to_string()));
+    }
 }

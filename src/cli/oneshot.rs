@@ -114,14 +114,30 @@ pub fn validate_project_name(name: &str) -> Result<(), CliError> {
 }
 
 fn validate_tool_for_role(tool_id: &str, role: Role, registry: &Registry) -> Result<(), CliError> {
-    let tool = registry.get(tool_id).ok_or_else(|| CliError::UnknownTool {
-        tool_id: tool_id.to_string(),
-        role: role.to_string(),
+    let tool = registry.get(tool_id).ok_or_else(|| {
+        let mut valid_tools: Vec<String> = registry
+            .tools_for_role(role)
+            .iter()
+            .map(|t| t.id.clone())
+            .collect();
+        valid_tools.sort();
+        CliError::UnknownTool {
+            tool_id: tool_id.to_string(),
+            role: role.to_string(),
+            valid_tools,
+        }
     })?;
     if !tool.roles.contains_key(&role) {
+        let mut valid_roles: Vec<String> = tool
+            .roles
+            .keys()
+            .map(|r| r.as_kebab().to_string())
+            .collect();
+        valid_roles.sort();
         return Err(CliError::ToolRoleMismatch {
             tool_id: tool_id.to_string(),
             role: role.to_string(),
+            valid_roles,
         });
     }
     Ok(())

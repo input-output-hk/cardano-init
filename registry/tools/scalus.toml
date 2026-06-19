@@ -10,6 +10,7 @@ website = "https://scalus.org"
 languages = ["scala"]
 system_deps = ["sbt", "jvm"]
 nix_packages = ["sbt", "jdk"]
+detect = ["src/Validator.scala", "src/Main.scala"]
 
 [roles.on-chain]
 template = "scalus/on-chain"
