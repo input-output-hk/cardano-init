@@ -22,7 +22,7 @@
 cardano-init [INIT_FLAGS]            # default: one-shot if --name given, else interactive
 cardano-init web [--port <u16>]      # local web builder (default port 3000)
 cardano-init doctor                  # check this project's dependencies + advise installs (§9)
-cardano-init list [--format <fmt>]   # (planned) capability discovery
+cardano-init list [--format <fmt>]   # capability discovery: roles + tools (§8)
 ```
 
 `--format human|json` (planned) is a global flag; default `human`. `json` **implies non-interactive**: it never prompts; if required input is missing it errors instead.
@@ -319,7 +319,7 @@ A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) 
 
 ---
 
-## 8. `list` subcommand schema (planned)
+## 8. `list` subcommand schema
 
 `cardano-init list` (human default) / `cardano-init list --format json`:
 
@@ -338,7 +338,7 @@ A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) 
 }}
 ```
 
-Renders from the same data as `web::build_registry_json`; `roles[].multiple` is `true` only for infrastructure.
+Both `list` and `web::build_registry_json` render from one shared model (`registry::view`: `role_views()` / `tool_views()`), so they cannot drift. `roles[].multiple` is `true` only for infrastructure (`Role::multiple`).
 
 ---
 

@@ -23,17 +23,7 @@ pub enum WebError {
 
 #[derive(serde::Serialize)]
 struct RegistryResponse {
-    tools: Vec<ToolResponse>,
-}
-
-#[derive(serde::Serialize)]
-struct ToolResponse {
-    id: String,
-    name: String,
-    description: String,
-    website: String,
-    languages: Vec<String>,
-    roles: Vec<String>,
+    tools: Vec<crate::registry::view::ToolView>,
 }
 
 #[derive(serde::Serialize)]
@@ -172,28 +162,7 @@ fn respond_404(stream: &mut std::net::TcpStream) {
 // ---------------------------------------------------------------------------
 
 fn build_registry_json(registry: &Registry) -> String {
-    let tools: Vec<ToolResponse> = registry
-        .all_tools()
-        .iter()
-        .map(|tool| {
-            let mut roles: Vec<String> = tool
-                .roles
-                .keys()
-                .map(|r| r.as_kebab().to_string())
-                .collect();
-            roles.sort();
-
-            ToolResponse {
-                id: tool.id.clone(),
-                name: tool.name.clone(),
-                description: tool.description.clone(),
-                website: tool.website.clone(),
-                languages: tool.languages.clone(),
-                roles,
-            }
-        })
-        .collect();
-
+    let tools = crate::registry::view::tool_views(registry);
     serde_json::to_string(&RegistryResponse { tools }).expect("registry serialization cannot fail")
 }
 

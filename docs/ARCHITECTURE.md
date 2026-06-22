@@ -255,21 +255,21 @@ Render processes each entry whose source is a `.jinja` template through MiniJinj
 - **One-shot** (`--name` + role flags): flags → `Selection` in `oneshot.rs`, non-interactive, deterministic. Primary path for agents and CI.
 - **Interactive** (no `--name`): guided `dialoguer` flow in `interactive.rs`.
 - **`web` subcommand**: launches the local builder server (§10).
-- **`list` subcommand** (planned): capability discovery; lists roles/tools, human by default, `--format json` for agents (see §7.3).
+- **`list` subcommand**: capability discovery; lists roles/tools, human by default, `--format json` for agents (see §7.3).
 
 A safety check refuses to overwrite an existing target directory.
 
-### 7.2 Output model: `--format` + presenter (planned)
+### 7.2 Output model: `--format` + presenter
 
-Today output is human-styled text printed directly. To serve both humans and agents without scattering format branches, the architecture introduces:
+To serve both humans and agents without scattering format branches:
 
 - A global **`--format human|json`** flag (default `human`; `json` implies non-interactive: JSON mode never prompts).
-- **`output.rs` as a presenter**: the pure core returns *structured results* and *typed errors*; only the presenter knows about colors, tables, or JSON. Adding a new output is a presenter change, nothing else.
+- **`output.rs` as a presenter**: the core returns *structured results* and *typed errors*; only the presenter knows about colors, tables, or JSON. Every command's JSON wraps in the §2.4 envelope via `output::emit_json_ok` / `print_error`. Adding a new output is a presenter change, nothing else.
 
-### 7.3 Machine-readable errors & discovery (planned, PRD FR-13/FR-15)
+### 7.3 Machine-readable errors & discovery (PRD FR-13/FR-15)
 
-- **Errors** carry a **stable string code** (e.g. `unknown_tool`, `tool_role_mismatch`, `name_required`, `dir_exists`) plus context (offending input + valid alternatives) and map to **meaningful exit codes**. In `--format json`, errors serialize to a stable shape on stderr; the core never falls back to interactive prompting in non-interactive mode. `CliError` already enumerates these cases; this work adds the code + serializable representation.
-- **Discovery** is a dedicated **`list` subcommand** (`cardano-init list`) that emits the registry (roles, tools, the roles each fills, languages, deps). It defaults to human-readable output and accepts **`--format json`** for structured/agent consumption; both forms render from the same data. `web::build_registry_json` and `cli::build_tool_catalog` are the existing JSON/human renderers to converge here.
+- **Errors** carry a **stable string code** (e.g. `unknown_tool`, `tool_role_mismatch`, `name_required`, `dir_exists`) plus context (offending input + valid alternatives) and map to **meaningful exit codes**. In `--format json`, errors serialize to a stable shape on stderr; the core never falls back to interactive prompting in non-interactive mode. `CliError::code()`/`context()` carry the code + serializable context (§2.5).
+- **Discovery** is the **`list` subcommand** (`cardano-init list`) that emits the registry (roles, tools, the roles each fills, languages). Human by default, **`--format json`** for agents (§8 schema). Both `list` and `web::build_registry_json` render from one shared model, `registry::view` (`role_views()` / `tool_views()`), so the JSON cannot drift; the human tool block reuses `cli::format_tool` (shared with `--help`).
 
 ---
 

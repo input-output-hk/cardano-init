@@ -452,6 +452,48 @@ pub fn print_doctor(
     println!();
 }
 
+/// Print the registry (roles + tools) for `cardano-init list`: human-readable
+/// by default, or the TECH_SPEC §8 JSON payload with `--format json`.
+pub fn print_list(registry: &Registry, format: Format) {
+    use crate::registry::view;
+
+    if format == Format::Json {
+        emit_json_ok(json!({
+            "roles": view::role_views(),
+            "tools": view::tool_views(registry),
+        }));
+        return;
+    }
+
+    println!();
+    println!("  {}", style("Roles").bold().underlined());
+    println!();
+    for role in view::role_views() {
+        let multi = if role.multiple { "  (multiple)" } else { "" };
+        println!(
+            "  {:<16}{:<18}{}{}",
+            style(role.id).cyan(),
+            role.display,
+            style(format!("dir: {}", role.dir)).dim(),
+            style(multi).dim()
+        );
+    }
+
+    println!();
+    println!("  {}", style("Tools").bold().underlined());
+    // Reuse the same per-tool block as `--help` so the two can't drift; sort by
+    // id to match the JSON ordering.
+    let mut tools: Vec<&crate::registry::types::ToolDef> = registry.all_tools().iter().collect();
+    tools.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut block = String::new();
+    for tool in tools {
+        block.push('\n');
+        super::format_tool(&mut block, tool);
+    }
+    print!("{block}");
+    println!();
+}
+
 /// Truncate a tool description to the first sentence for use in prompts.
 pub fn first_sentence(desc: &str) -> &str {
     // Find the first period followed by whitespace or end-of-string

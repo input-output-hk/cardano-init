@@ -49,6 +49,9 @@ pub enum Command {
     /// Check that the dependencies this project needs are installed, and
     /// advise how to install any that are missing
     Doctor,
+
+    /// List the available roles and tools (use --format json for agents)
+    List,
 }
 
 /// Arguments for the default init mode (interactive or one-shot).
@@ -277,7 +280,7 @@ fn build_tool_catalog(registry: &Registry) -> String {
     out
 }
 
-fn format_tool(out: &mut String, tool: &ToolDef) {
+pub(super) fn format_tool(out: &mut String, tool: &ToolDef) {
     use std::fmt::Write;
 
     let mut roles: Vec<&str> = tool.roles.keys().map(|r| r.as_kebab()).collect();
@@ -333,6 +336,10 @@ pub fn run() -> i32 {
     let result = match cli.command {
         Some(Command::Web { port }) => crate::web::serve(&registry, port).map_err(CliError::from),
         Some(Command::Doctor) => run_doctor(&registry, format),
+        Some(Command::List) => {
+            output::print_list(&registry, format);
+            Ok(())
+        }
         None => run_init(cli.init, &registry, format),
     };
 

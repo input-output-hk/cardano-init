@@ -50,6 +50,12 @@ impl Role {
         }
     }
 
+    /// Whether this role may be filled by multiple tools at once. Only
+    /// Infrastructure is multi-tool; every other role takes at most one tool.
+    pub fn multiple(&self) -> bool {
+        matches!(self, Role::Infrastructure)
+    }
+
     /// The directory name for this role, as defined by the interface contract.
     pub fn dir(&self) -> &'static str {
         match self {
