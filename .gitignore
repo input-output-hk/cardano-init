@@ -6,3 +6,5 @@ my-protocol
 
 yaci-cli.history
 logs/
+
+.direnv
