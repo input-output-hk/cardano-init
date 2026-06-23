@@ -123,7 +123,7 @@ id          = "aiken"          # required, unique across registry, kebab
 name        = "Aiken"          # required, human display
 description = "…"              # required, newcomer-facing
 website      = "https://…"     # required
-languages    = ["aiken"]       # required, ≥1
+languages    = ["aiken"]       # required, ≥1 — except infra tools, which may use [] (no user-facing language)
 system_deps  = ["aiken"]       # required (may be []); abstract dep ids → registry/deps.toml (§9)
 nix_packages = ["aiken"]       # optional (default []); nixpkgs attrs for the dev shell
 
@@ -131,11 +131,27 @@ nix_packages = ["aiken"]       # optional (default []); nixpkgs attrs for the de
 template = "aiken/on-chain"    # required; path under templates/
 ```
 
+Tools filling the **infrastructure** role additionally require an `[infra]` table
+(validated at load: `[roles.infrastructure]` present ⇒ `[infra]` required, else
+`RegistryError::InfraConfigMissing`). It declares the `cardano-up` package and the
+output→`.env`-key mappings the aggregated driver writes (see the infra-via-cardano-up proposal):
+
+```toml
+[roles.infrastructure]
+template = "_infra/cardano-up"        # the shared driver template (all infra tools use this)
+
+[infra]
+cardano_up_package = "kupo"           # package id passed to `cardano-up install`
+env = [{ from = "KUPO_URL", to = "INDEXER_URL" }]   # cardano-up output → contract .env key
+```
+
 `system_deps` is **per-tool, flat** (§9.1): it applies whenever the tool is selected for any role.
 
 ```rust
 RoleConfig { template }
-ToolDef { id, name, description, website, languages, nix_packages, roles: HashMap<Role, RoleConfig> }
+EnvMapping { from, to }
+InfraConfig { cardano_up_package, env: Vec<EnvMapping> }
+ToolDef { id, name, description, website, languages, nix_packages, detect, roles: HashMap<Role, RoleConfig>, infra: Option<InfraConfig> }
 ```
 
 Load-time validation (`registry/loader.rs`), all fatal:
@@ -206,7 +222,7 @@ MiniJinja environment (planned config):
 
 ### 4.4 Path safety & destinations
 
-- `dest` is resolved **relative to the role dir** (`on-chain/`, `off-chain/`, `test/`, `formal-methods/`); for infrastructure, relative to `infra/<tool_id>/`.
+- `dest` is resolved **relative to the role dir** (`on-chain/`, `off-chain/`, `test/`, `formal-methods/`); for infrastructure, relative to `infra/` (the aggregated component — no per-tool subdir, §6.1).
 - `dest` MUST be relative and MUST NOT contain `..` or a leading `/` (no escaping the project root). Enforced + tested. (Manifests are first-party today, but the check is cheap insurance and required if templates ever become third-party.)
 - Base/optional layer dests are fixed (§6).
 
@@ -228,9 +244,12 @@ struct TemplateContext {
 
     on_chain: Option<RoleContext>,
     off_chain: Option<RoleContext>,
-    infra_tools: Vec<RoleContext>,   // 0..n, canonical order (§11)
+    infra_tools: Vec<InfraToolContext>,  // 0..n, canonical order (§11); aggregated infra component
     devnet: Option<RoleContext>,
     formal_methods: Option<RoleContext>,
+
+    infra_context_name: String,      // cardano-up context the infra driver targets (= project_name)
+    infra_env: Vec<EnvMapping>,      // resolved, key-unique .env emissions for infra (proposal §5.4)
 
     blueprint_path: String,          // "blueprint/plutus.json" (contract constant)
     env_vars: <ordered map>,         // see §6.3; iterated in sorted-key order
@@ -240,6 +259,8 @@ struct TemplateContext {
 }
 
 struct RoleContext { tool_id, tool_name, language, dir }   // language = tool.languages[0]
+struct InfraToolContext { tool_id, tool_name, cardano_up_package, env: Vec<EnvMapping> }
+struct EnvMapping { from, to }   // cardano-up output var → contract .env key
 ```
 
 This struct is the contract. Adding a field is additive; renaming/removing is a breaking template-API change.
@@ -262,7 +283,7 @@ Determinism note: any consumer that emits tools/roles must sort (§11), since `b
 
 1. **Base layer** (always): `Justfile`, `README.md`, `.gitignore`, `.env`.
 2. **Blueprint dir**: `blueprint/.gitkeep`, **if  any non-infrastructure role is present** (§6.2). Source is `TemplateSource::Inline(empty)`.
-3. **Role layers**: assignments processed in **`Role::ALL` order** (not flag order). For each, read the template manifest and append its files (rendered per §4.2). Infra tools nested under `infra/<tool_id>/`, **tools sorted by `tool_id`** (§11).
+3. **Role layers**: assignments processed in **`Role::ALL` order** (not flag order). For each, read the template manifest and append its files (rendered per §4.2). **Infrastructure aggregates**: all selected infra tools share one driver template (`_infra/cardano-up`), emitted **once** at `infra/` on the first infra assignment (the rest are contiguous after the canonical sort and skipped); they are still sorted by `tool_id` for the rendered `infra_tools`/`infra_env` order (§11). All infra tools must resolve to the same template path, else `ScaffoldError::InfraTemplateMismatch`. See `docs/proposals/infra-via-cardano-up.md`.
 4. **Optional layer**: if `nix`, `flake.nix` (rendered) + `.envrc` (`Inline "use flake\n"`).
 
 `--dry-run` returns this `FilePlan` (no rendering, no I/O).
@@ -311,7 +332,7 @@ The top level aggregates only the tasks that **terminate and compose**:
 
 ### 7.2 No top-level `dev`
 
-There is **no top-level `dev` target**. Long-running / interactive tasks (watch modes, local devnets, REPLs) do not aggregate into one foreground command — that is exactly why a multi-service launcher is awkward — so they are **per-component**: the developer runs `just -f <role>/Justfile dev` (or `just -f infra/<tool>/Justfile dev`) directly, documented in the README.
+There is **no top-level `dev` target**. Long-running / interactive tasks (watch modes, local devnets, REPLs) do not aggregate into one foreground command — that is exactly why a multi-service launcher is awkward — so they are **per-component**: the developer runs `just -f <role>/Justfile dev` (or `just -f infra/Justfile dev` for the aggregated infra stack) directly, documented in the README.
 
 `dev` is **optional per component** (§7): a tool provides it only when it has a genuine watch/daemon/devnet mode. Because the top level never aggregates `dev`, a component without one costs nothing — and we don't ship no-op `dev` targets just to fill the slot.
 
@@ -506,6 +527,8 @@ The standalone `cardano-init doctor` takes **no flags describing the project**: 
 2. For a present directory, the candidate tools are exactly those that declare that role (so `on-chain/` is tested only against on-chain tools — this resolves the on-chain/off-chain ambiguity without per-pair logic).
 3. A tool matches if **any** of its `detect` signatures matches. Exactly one match ⇒ the component is identified; zero (or an ambiguous multiple) ⇒ the directory is reported as **unrecognized** (renamed, modified, or a foreign project). A renamed *directory* simply isn't found, so that role is absent.
 4. The required set is `{just}` ∪ the `system_deps` of every identified tool (§9.1), fed to the resolver (§9.4).
+
+**Infrastructure is the exception.** The aggregated `infra/` component has no per-tool subdirs (it's the single cardano-up driver), so it is *not* matched against per-tool `detect` signatures. Instead the scan recognizes it by a driver marker — `infra/Justfile` referencing `cardano-up` — and reports a synthetic `cardano-up` component (`doctor::INFRA_DRIVER_ID`). Its contribution to the required set is the **union of all registered infra tools' `system_deps`** (`{docker, cardano-up}`), data-driven from the registry. So infra tools carry `detect = []`.
 
 **Detect signatures (`detect` in `registry/tools/<tool>.toml`).** A list; each entry is either:
 - a **bare path** (relative to the role dir) — matches if the file exists; or

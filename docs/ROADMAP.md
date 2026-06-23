@@ -33,7 +33,7 @@ Deliverables below are tracked as checklists (`[ ]` = not yet done).
 **The tool: all five roles present, four building green, formal-methods preview:**
 - [ ] **On-chain:** Aiken; make the template genuinely `build`+`test` green (blueprint at canonical path).
 - [ ] **Off-chain:** MeshJS + Tx3; both generate and build.
-- [ ] **Infrastructure:** no tool ships yet — the role is present in the vocabulary but unfilled (a real deployable service such as Kupo+Ogmios or a node provider is a follow-up). Yaci DevKit fills the **devnet** role instead (it is a dev/test kit, never deployed).
+- [x] **Infrastructure:** filled via `cardano-up` — **Kupo, Ogmios, Dolos, Tx Submit API, Cardano Node, Cardano Node API, and Dingo** ship as selectable providers that aggregate into a single `infra/` component (one cardano-up context per project). Adding further providers is pure data (a registry TOML, no template). Uses `cardano-up`'s released `--context` flag (blinklabs-io#294; see `docs/proposals/infra-via-cardano-up.md`). Yaci DevKit remains in the **devnet** role (it is a dev/test kit, never deployed).
 - [ ] **Devnet:** Yaci DevKit (local devnet — its `dev` starts a Blockfrost-compatible devnet and writes the standard `.env` connection vars, so off-chain connects to it automatically; `test` runs an integration smoke test).
 - [ ] **Formal-methods:** preview; visible in the registry/UI as "coming soon"; the Blaster placeholder is not a build-green deliverable yet (made real at DX.05).
 

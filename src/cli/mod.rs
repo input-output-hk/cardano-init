@@ -354,10 +354,18 @@ pub fn run() -> i32 {
 
 /// The required dependencies for a set of tool ids: the base dep `just`, plus
 /// the `system_deps` of each tool (deduped/sorted later by the resolver).
+///
+/// The aggregated infra component is reported by the scan under the synthetic
+/// `INFRA_DRIVER_ID`; it contributes the union of every infra tool's
+/// `system_deps` (data-driven from the registry — `{docker, cardano-up}`).
 fn required_deps<'a>(tool_ids: impl Iterator<Item = &'a str>, registry: &Registry) -> Vec<String> {
     let mut deps = vec![crate::doctor::BASE_DEP.to_string()];
     for id in tool_ids {
-        if let Some(tool) = registry.get(id) {
+        if id == crate::doctor::INFRA_DRIVER_ID {
+            for tool in registry.tools_for_role(crate::registry::types::Role::Infrastructure) {
+                deps.extend(tool.system_deps.iter().cloned());
+            }
+        } else if let Some(tool) = registry.get(id) {
             deps.extend(tool.system_deps.iter().cloned());
         }
     }
@@ -541,5 +549,16 @@ mod tests {
         assert!(deps.contains(&"just".to_string()));
         assert!(deps.contains(&"aiken".to_string()));
         assert!(deps.contains(&"node".to_string()));
+    }
+
+    #[test]
+    fn required_deps_resolves_infra_driver_to_union() {
+        let registry = Registry::load().unwrap();
+        // The aggregated infra component (reported under INFRA_DRIVER_ID by the
+        // scan) contributes the union of infra tools' system_deps.
+        let deps = required_deps([crate::doctor::INFRA_DRIVER_ID].into_iter(), &registry);
+        assert!(deps.contains(&"just".to_string()));
+        assert!(deps.contains(&"docker".to_string()));
+        assert!(deps.contains(&"cardano-up".to_string()));
     }
 }

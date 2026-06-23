@@ -27,6 +27,16 @@ build-off-chain:
 test-off-chain:
     just -f {{ off_chain.dir }}/Justfile test
 {%- endif %}
+{%- if has_infra %}
+
+# --- Infrastructure (cardano-up) ---
+# Provision the local stack (long-running): `just -f infra/Justfile dev`.
+build-infra:
+    just -f infra/Justfile build
+
+test-infra:
+    just -f infra/Justfile test
+{%- endif %}
 {%- if has_devnet %}
 
 # --- Devnet ({{ devnet.tool_name }}) ---
@@ -44,6 +54,7 @@ verify:
 build:
 {%- if has_on_chain %} build-on-chain{% endif %}
 {%- if has_off_chain %} build-off-chain{% endif %}
+{%- if has_infra %} build-infra{% endif %}
     @echo '{{ "{{BOLD + GREEN}}✓ Build complete{{NORMAL}}" }}'
 
 # Build the on-chain blueprint first (consumers read ../blueprint/plutus.json),
@@ -51,6 +62,7 @@ build:
 test:
 {%- if has_on_chain %} build-on-chain test-on-chain{% endif %}
 {%- if has_off_chain %} test-off-chain{% endif %}
+{%- if has_infra %} test-infra{% endif %}
 {%- if has_devnet %} test-integration{% endif %}
 {%- if has_formal_methods %} verify{% endif %}
     @echo '{{ "{{BOLD + BLACK + BG_GREEN}}  ✓  All tests passed  {{NORMAL}}" }}'
@@ -61,6 +73,9 @@ clean:
 {%- endif %}
 {%- if has_off_chain %}
     just -f {{ off_chain.dir }}/Justfile clean
+{%- endif %}
+{%- if has_infra %}
+    just -f infra/Justfile clean
 {%- endif %}
 {%- if has_devnet %}
     just -f {{ devnet.dir }}/Justfile clean

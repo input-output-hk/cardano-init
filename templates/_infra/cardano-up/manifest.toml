@@ -1,0 +1,14 @@
+[manifest]
+summary = "Infrastructure stack via cardano-up — `dev` provisions the selected providers (kupo/ogmios/…) together as one cardano-up context and writes connection details to .env; `clean` stops them. All --infra providers aggregate into this single component."
+
+[[files]]
+source = "Justfile.jinja"
+dest = "Justfile"
+
+[[files]]
+source = "README.md.jinja"
+dest = "README.md"
+
+[[files]]
+source = "scripts/write-env.sh.jinja"
+dest = "scripts/write-env.sh"

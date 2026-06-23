@@ -346,6 +346,57 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_infra_kupo_ogmios() {
+        // Aggregated infrastructure: two providers collapse into one infra/
+        // component (the cardano-up driver). Infra-only ⇒ no blueprint dir.
+        assert_snapshot(
+            "infra_kupo_ogmios",
+            &sel(
+                vec![
+                    a(Role::Infrastructure, "kupo"),
+                    a(Role::Infrastructure, "ogmios"),
+                ],
+                Network::Preprod,
+                false,
+            ),
+        );
+    }
+
+    #[test]
+    fn snapshot_infra_dolos() {
+        // Dolos provides its own node socket (no cardano-node dependency), so it
+        // OVERRIDES the base NODE_SOCKET_PATH default (DOLOS_SOCKET_PATH) and adds
+        // DOLOS_GRPC_URL — locks the §5.4 explicit-over-default resolution.
+        assert_snapshot(
+            "infra_dolos",
+            &sel(
+                vec![a(Role::Infrastructure, "dolos")],
+                Network::Preprod,
+                false,
+            ),
+        );
+    }
+
+    #[test]
+    fn snapshot_aiken_meshjs_kupo_ogmios() {
+        // Full stack: on-chain + off-chain + aggregated infra. Locks the .env
+        // wiring (MeshJS reads INDEXER_URL/OGMIOS_URL written by the infra driver).
+        assert_snapshot(
+            "aiken_meshjs_kupo_ogmios",
+            &sel(
+                vec![
+                    a(Role::OnChain, "aiken"),
+                    a(Role::OffChain, "meshjs"),
+                    a(Role::Infrastructure, "kupo"),
+                    a(Role::Infrastructure, "ogmios"),
+                ],
+                Network::Preprod,
+                false,
+            ),
+        );
+    }
+
+    #[test]
     fn snapshot_scalus_multi_role() {
         assert_snapshot(
             "scalus_multi_role",

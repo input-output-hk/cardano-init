@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use serde::Serialize;
+
 use crate::contract;
 
 // ---------------------------------------------------------------------------
@@ -103,6 +105,29 @@ pub struct RoleConfig {
     pub template: String,
 }
 
+/// A single `cardano-up context env` output → contract `.env` key mapping,
+/// declared by an infrastructure tool (`[[infra.env]]`). `from` is the
+/// `cardano-up` output var name (e.g. `KUPO_URL`); `to` is the `.env` key the
+/// generated infra component writes (e.g. `INDEXER_URL`). See the
+/// infra-via-cardano-up proposal §5.1.
+#[derive(Debug, Clone, Serialize)]
+pub struct EnvMapping {
+    pub from: String,
+    pub to: String,
+}
+
+/// Infrastructure-specific config for a tool that fills the infrastructure role.
+/// Infra tools are thin data: a `cardano-up` package id plus the env mappings
+/// that translate its outputs into the `.env` contract keys. All infra tools
+/// share a single driver template and aggregate into one `infra/` component.
+#[derive(Debug, Clone)]
+pub struct InfraConfig {
+    /// The package id passed to `cardano-up install`.
+    pub cardano_up_package: String,
+    /// `cardano-up` output → `.env` contract key mappings.
+    pub env: Vec<EnvMapping>,
+}
+
 /// A signature that identifies a tool's generated output inside a role
 /// directory (used by `doctor` to recognize the tool in a scanned project).
 ///
@@ -135,6 +160,9 @@ pub struct ToolDef {
     /// on-chain/off-chain ambiguity.
     pub detect: Vec<DetectSignature>,
     pub roles: HashMap<Role, RoleConfig>,
+    /// Infrastructure config. Required when the tool fills the infrastructure
+    /// role (validated at load), `None` otherwise.
+    pub infra: Option<InfraConfig>,
 }
 
 // ---------------------------------------------------------------------------

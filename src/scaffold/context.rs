@@ -5,7 +5,14 @@ use serde::Serialize;
 use super::ScaffoldError;
 use crate::contract;
 use crate::registry::loader::Registry;
-use crate::registry::types::{Role, Selection};
+use crate::registry::types::{EnvMapping, Role, Selection};
+
+/// `cardano-up`'s output var for the cardano-node UNIX socket path. It appears in
+/// `cardano-up context env` whenever a node-backed package (kupo/ogmios/…) is
+/// installed, so it is the default source for the contract's `NODE_SOCKET_PATH`.
+/// A provider that supplies its own node socket (e.g. dolos) overrides this via
+/// its own `[infra].env` mapping (infra-via-cardano-up proposal §5.4).
+const CARDANO_UP_NODE_SOCKET_VAR: &str = "CARDANO_NODE_SOCKET_PATH";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,6 +25,18 @@ pub struct RoleContext {
     pub tool_name: String,
     pub language: String,
     pub dir: String,
+}
+
+/// One selected infrastructure provider, available to the shared cardano-up
+/// driver template. Infra tools aggregate into a single `infra/` component, so
+/// this carries the data the driver needs: the `cardano-up` package id (for the
+/// install set) and the tool's env mappings (folded into `infra_env`).
+#[derive(Debug, Clone, Serialize)]
+pub struct InfraToolContext {
+    pub tool_id: String,
+    pub tool_name: String,
+    pub cardano_up_package: String,
+    pub env: Vec<EnvMapping>,
 }
 
 /// The complete context passed to MiniJinja templates.
@@ -39,9 +58,16 @@ pub struct TemplateContext {
 
     pub on_chain: Option<RoleContext>,
     pub off_chain: Option<RoleContext>,
-    pub infra_tools: Vec<RoleContext>,
+    pub infra_tools: Vec<InfraToolContext>,
     pub devnet: Option<RoleContext>,
     pub formal_methods: Option<RoleContext>,
+
+    /// The `cardano-up` context name the infra component drives (= project name).
+    pub infra_context_name: String,
+    /// Resolved, key-unique `.env` emissions for the infra driver: the base node
+    /// socket default plus each provider's mappings, explicit-over-default, in
+    /// canonical order (proposal §5.4). Empty when no infra role is present.
+    pub infra_env: Vec<EnvMapping>,
 
     pub blueprint_path: String,
     /// Backed by a `BTreeMap` so it serializes in sorted-key order (determinism, §11).
@@ -54,6 +80,16 @@ pub struct TemplateContext {
 // ---------------------------------------------------------------------------
 // Builder
 // ---------------------------------------------------------------------------
+
+/// Insert or replace an env mapping keyed by its `.env` target (`to`). A later
+/// mapping for an already-present key replaces the earlier one, giving explicit
+/// provider mappings precedence over the base default (proposal §5.4).
+fn upsert_env(env: &mut Vec<EnvMapping>, mapping: EnvMapping) {
+    match env.iter_mut().find(|e| e.to == mapping.to) {
+        Some(existing) => *existing = mapping,
+        None => env.push(mapping),
+    }
+}
 
 /// Build a `TemplateContext` from a `Selection` and the tool `Registry`.
 pub fn build_context(
@@ -82,31 +118,65 @@ pub fn build_context(
             });
         }
 
-        let rc = RoleContext {
-            tool_id: tool.id.clone(),
-            tool_name: tool.name.clone(),
-            language: tool.languages.first().cloned().unwrap_or_default(),
-            dir: assignment.role.dir().to_string(),
-        };
-
         for pkg in &tool.nix_packages {
             if !nix_packages.contains(pkg) {
                 nix_packages.push(pkg.clone());
             }
         }
 
+        // Infrastructure tools aggregate into a single component, so they carry
+        // cardano-up data rather than a per-component RoleContext.
+        if assignment.role == Role::Infrastructure {
+            let infra = tool
+                .infra
+                .as_ref()
+                .expect("infra tool must declare [infra] (validated at registry load)");
+            infra_tools.push(InfraToolContext {
+                tool_id: tool.id.clone(),
+                tool_name: tool.name.clone(),
+                cardano_up_package: infra.cardano_up_package.clone(),
+                env: infra.env.clone(),
+            });
+            continue;
+        }
+
+        let rc = RoleContext {
+            tool_id: tool.id.clone(),
+            tool_name: tool.name.clone(),
+            language: tool.languages.first().cloned().unwrap_or_default(),
+            dir: assignment.role.dir().to_string(),
+        };
         match assignment.role {
             Role::OnChain => on_chain = Some(rc),
             Role::OffChain => off_chain = Some(rc),
-            Role::Infrastructure => infra_tools.push(rc),
             Role::Devnet => devnet = Some(rc),
             Role::FormalMethods => formal_methods = Some(rc),
+            Role::Infrastructure => unreachable!("infra handled above"),
         }
     }
 
     // Canonical order for the only multi-tool role: sorted by tool id (§11).
     // Mirrors the planner's infra ordering so context and plan agree.
     infra_tools.sort_by(|a, b| a.tool_id.cmp(&b.tool_id));
+
+    // Resolve the infra `.env` emissions once, at generation time (§5.4): the
+    // base node-socket default, then each provider's mappings in canonical order,
+    // key-unique by `to` so an explicit mapping replaces the default.
+    let mut infra_env: Vec<EnvMapping> = Vec::new();
+    if !infra_tools.is_empty() {
+        upsert_env(
+            &mut infra_env,
+            EnvMapping {
+                from: CARDANO_UP_NODE_SOCKET_VAR.to_string(),
+                to: contract::ENV_NODE_SOCKET_PATH.to_string(),
+            },
+        );
+        for t in &infra_tools {
+            for m in &t.env {
+                upsert_env(&mut infra_env, m.clone());
+            }
+        }
+    }
 
     let mut env_vars = BTreeMap::new();
     env_vars.insert(
@@ -116,6 +186,13 @@ pub fn build_context(
     env_vars.insert(contract::ENV_INDEXER_URL.to_string(), String::new());
     env_vars.insert(contract::ENV_INDEXER_PORT.to_string(), String::new());
     env_vars.insert(contract::ENV_NODE_SOCKET_PATH.to_string(), String::new());
+    env_vars.insert(contract::ENV_OGMIOS_URL.to_string(), String::new());
+    env_vars.insert(contract::ENV_TX_SUBMIT_URL.to_string(), String::new());
+    env_vars.insert(contract::ENV_DOLOS_GRPC_URL.to_string(), String::new());
+    env_vars.insert(
+        contract::ENV_CARDANO_NODE_API_URL.to_string(),
+        String::new(),
+    );
 
     Ok(TemplateContext {
         project_name: selection.project_name.clone(),
@@ -137,6 +214,9 @@ pub fn build_context(
         infra_tools,
         devnet,
         formal_methods,
+
+        infra_context_name: selection.project_name.clone(),
+        infra_env,
 
         blueprint_path: contract::BLUEPRINT_PATH.to_string(),
         env_vars,
@@ -314,6 +394,78 @@ mod tests {
         }]);
         let ctx = build_context(&sel, &registry()).unwrap();
         assert!(ctx.nix_packages.contains(&"aiken".to_string()));
+    }
+
+    #[test]
+    fn infra_context_aggregates_providers() {
+        let sel = selection(vec![
+            RoleAssignment {
+                role: Role::Infrastructure,
+                tool_id: "ogmios".into(),
+            },
+            RoleAssignment {
+                role: Role::Infrastructure,
+                tool_id: "kupo".into(),
+            },
+        ]);
+        let ctx = build_context(&sel, &registry()).unwrap();
+
+        assert!(ctx.has_infra);
+        assert_eq!(ctx.infra_context_name, "test-project");
+        // Canonical order: sorted by tool_id (kupo before ogmios).
+        let ids: Vec<&str> = ctx.infra_tools.iter().map(|t| t.tool_id.as_str()).collect();
+        assert_eq!(ids, vec!["kupo", "ogmios"]);
+
+        // Resolved infra_env: base NODE_SOCKET_PATH default, then kupo→INDEXER_URL,
+        // then ogmios→OGMIOS_URL — key-unique, in canonical order (§5.4).
+        let env: Vec<(&str, &str)> = ctx
+            .infra_env
+            .iter()
+            .map(|m| (m.to.as_str(), m.from.as_str()))
+            .collect();
+        assert_eq!(
+            env,
+            vec![
+                ("NODE_SOCKET_PATH", "CARDANO_NODE_SOCKET_PATH"),
+                ("INDEXER_URL", "KUPO_URL"),
+                ("OGMIOS_URL", "OGMIOS_URL"),
+            ]
+        );
+    }
+
+    #[test]
+    fn no_infra_env_without_infra() {
+        let sel = selection(vec![RoleAssignment {
+            role: Role::OnChain,
+            tool_id: "aiken".into(),
+        }]);
+        let ctx = build_context(&sel, &registry()).unwrap();
+        assert!(ctx.infra_env.is_empty());
+        // OGMIOS_URL is still seeded into the always-present .env vocabulary.
+        assert!(ctx.env_vars.contains_key("OGMIOS_URL"));
+    }
+
+    #[test]
+    fn upsert_env_replaces_on_duplicate_key() {
+        // Explicit-over-default: a later mapping for the same `to` replaces the
+        // earlier one (the dolos-style node-socket override path, §5.4).
+        let mut env = Vec::new();
+        upsert_env(
+            &mut env,
+            EnvMapping {
+                from: "CARDANO_NODE_SOCKET_PATH".into(),
+                to: "NODE_SOCKET_PATH".into(),
+            },
+        );
+        upsert_env(
+            &mut env,
+            EnvMapping {
+                from: "DOLOS_SOCKET_PATH".into(),
+                to: "NODE_SOCKET_PATH".into(),
+            },
+        );
+        assert_eq!(env.len(), 1);
+        assert_eq!(env[0].from, "DOLOS_SOCKET_PATH");
     }
 
     #[test]

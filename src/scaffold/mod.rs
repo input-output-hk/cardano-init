@@ -42,6 +42,16 @@ pub enum ScaffoldError {
     #[error("tool '{tool_id}' does not support role '{role}'")]
     RoleMismatch { tool_id: String, role: String },
 
+    #[error(
+        "infrastructure tools must share one driver template, but '{tool_id}' uses '{template}' \
+         (expected '{expected}'); the infra role emits a single aggregated component"
+    )]
+    InfraTemplateMismatch {
+        tool_id: String,
+        template: String,
+        expected: String,
+    },
+
     #[error("template rendering failed for '{path}': {source}")]
     Render {
         path: String,

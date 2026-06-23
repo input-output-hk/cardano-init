@@ -1,0 +1,40 @@
+# Infrastructure component (cardano-up) — provisions a local Cardano stack.
+# Part of {{ project_name }}.
+#
+# This component lives at infra/, so the project root is one level up (../).
+#
+# The providers you selected with --infra are brought up together as a single
+# cardano-up context named "{{ infra_context_name }}":
+{%- for t in infra_tools %}
+#   - {{ t.tool_name }} ({{ t.cardano_up_package }})
+{%- endfor %}
+#
+# Requires Docker running and `cardano-up` on your PATH (see `cardano-init
+# doctor`). The `-c/--context` flag targets this project's stack without
+# touching your global active cardano-up context, so multiple projects coexist.
+
+# Infrastructure is a runtime stack — there is nothing to build.
+build:
+    @echo "Nothing to build — infrastructure is a runtime stack. Run 'just dev' to provision it."
+
+# Nothing to test without a running stack; kept as a no-op so the top-level
+# `just test` stays green in CI (which has no Docker / running services).
+test:
+    @echo "Nothing to test — run 'just dev' to provision the stack."
+
+# Provision the stack and publish its connection details to ../.env.
+# Long-running: cardano-up brings up the Docker services for the context.
+dev:
+    cardano-up context create {{ infra_context_name }} -n {{ network }} 2>/dev/null || true
+{%- for t in infra_tools %}
+    cardano-up install {{ t.cardano_up_package }} --context {{ infra_context_name }}
+{%- endfor %}
+    cardano-up up --context {{ infra_context_name }}
+    sh scripts/write-env.sh
+    @echo "Stack '{{ infra_context_name }}' is up. Connection details written to ../.env."
+
+# Stop the stack's containers. Chain data is preserved (no re-sync next time);
+# for a full teardown run `cardano-up uninstall <pkg> --context {{ infra_context_name }}`.
+clean:
+    cardano-up down --context {{ infra_context_name }}
+    @echo "Stopped the '{{ infra_context_name }}' stack."

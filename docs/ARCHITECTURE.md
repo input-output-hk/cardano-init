@@ -145,7 +145,7 @@ pub struct FileEntry { dest: PathBuf, source: TemplateSource, render: bool }
 pub enum TemplateSource { Base(String), Role(String), Optional(String), Inline(Vec<u8>) }
 ```
 
-`TemplateContext` is `Serialize` and is the entire surface templates can see. It carries `has_*` booleans per role, an `Option<RoleContext>` per single-tool role, `infra_tools: Vec<RoleContext>`, the contract constants (`blueprint_path`, `env_vars`), and Nix info. `render` is derived from the `.jinja` extension.
+`TemplateContext` is `Serialize` and is the entire surface templates can see. It carries `has_*` booleans per role, an `Option<RoleContext>` per single-tool role, `infra_tools: Vec<InfraToolContext>` plus `infra_context_name` and the resolved `infra_env` (the aggregated infra component, TECH_SPEC §4.6), the contract constants (`blueprint_path`, `env_vars`), and Nix info. `render` is derived from the `.jinja` extension.
 
 ---
 
@@ -225,7 +225,7 @@ Walks `selection.assignments`, resolves each tool against the registry, and buil
 Produces the ordered `FilePlan`:
 1. **Base layer** (always): `Justfile`, `README.md`, `.gitignore`, `.env`.
 2. **Blueprint dir**: `blueprint/.gitkeep`, emitted whenever the selection includes any blueprint-producing-or-consuming role: i.e., any role **except** infrastructure (equivalently: present unless the project is infrastructure-only).
-3. **Role layers**: for each assignment, read the template's `manifest.toml` and add its files. Infrastructure tools each nest under `infra/<tool_id>/`.
+3. **Role layers**: for each assignment, read the template's `manifest.toml` and add its files. **Infrastructure is special — it aggregates**: all selected infra tools share one driver template (`_infra/cardano-up`) emitted **once** at `infra/`, rendered over the full set (`TemplateContext.infra_tools`). This is because the infra engine (`cardano-up`) manages the whole stack as a single unit, not per service. Every other role is one tool → one directory. See `docs/proposals/infra-via-cardano-up.md`.
 4. **Optional layer**: `flake.nix` + `.envrc` when `nix` is set.
 
 No I/O: only embedded assets are read. `render` is set from the `.jinja` extension.

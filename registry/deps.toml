@@ -53,8 +53,8 @@ install = [{ npm = "@aiken-lang/aikup" }, { curl = "https://install.aiken-lang.o
 
 [cardano-up]
 binaries = ["cardano-up"]
-docs = "https://github.com/cardano-foundation/cardano-up"
-install = [{ npm = "@cardano-foundation/cardano-up" }, { nix = "cardano-up" }]
+docs = "https://github.com/blinklabs-io/cardano-up"
+install = [{ go = "github.com/blinklabs-io/cardano-up/cmd/cardano-up@latest" }]
 
 [rustup]
 binaries = ["rustup"]

@@ -1,0 +1,37 @@
+# Infrastructure ({{ project_name }})
+
+This component provisions a local Cardano infrastructure stack using
+[`cardano-up`](https://github.com/blinklabs-io/cardano-up). The providers you
+selected are managed together as a single cardano-up **context** named
+`{{ infra_context_name }}` (network: `{{ network }}`):
+
+{% for t in infra_tools %}- **{{ t.tool_name }}** — cardano-up package `{{ t.cardano_up_package }}`
+{% endfor %}
+## Prerequisites
+
+- **Docker** running.
+- **`cardano-up`** on your `PATH` — run `cardano-init doctor` for install help.
+
+## Usage
+
+```sh
+just -f infra/Justfile dev      # provision the stack and write ../.env (long-running)
+just -f infra/Justfile clean    # stop the stack (chain data is preserved)
+```
+
+`dev` creates/uses the `{{ infra_context_name }}` context, installs the
+providers (cardano-up resolves dependencies such as `cardano-node`
+automatically), brings the Docker services up, and writes the connection
+details into the project's `../.env`. Off-chain components read those values
+(`INDEXER_URL`, `OGMIOS_URL`, `NODE_SOCKET_PATH`, …) and connect automatically.
+
+The `-c/--context` flag scopes every command to this project's stack, so it
+never disturbs your global active cardano-up context or other projects.
+
+## Notes
+
+- This component aggregates **all** `--infra` providers into one stack; there is
+  no per-provider subdirectory.
+- `cardano-up`'s state is machine-global (under `~/.config/cardano-up` and
+  `~/.local/share/cardano-up`), not stored in this repo. The Justfile here is
+  just a thin, project-scoped driver over it.

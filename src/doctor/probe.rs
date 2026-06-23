@@ -134,6 +134,16 @@ pub struct ScanResult {
     pub unrecognized: Vec<UnrecognizedDir>,
 }
 
+/// True if `dir` holds the aggregated cardano-up infra driver: a `Justfile`
+/// that references `cardano-up`. The infra component has no per-tool subdirs to
+/// match against `detect` signatures, so it is recognized by this driver marker
+/// (infra-via-cardano-up proposal §9.3).
+fn infra_driver_present(dir: &Path) -> bool {
+    std::fs::read_to_string(dir.join("Justfile"))
+        .map(|text| text.contains("cardano-up"))
+        .unwrap_or(false)
+}
+
 /// True if a detect signature matches under `dir`: the file exists and, when a
 /// `contains` substring is given, the file's text includes it.
 fn signature_matches(dir: &Path, sig: &DetectSignature) -> bool {
@@ -159,6 +169,24 @@ pub fn scan_project(root: &Path, registry: &Registry) -> ScanResult {
     for &role in Role::ALL {
         let dir = root.join(role.dir());
         if !dir.is_dir() {
+            continue;
+        }
+
+        // Infrastructure aggregates into a single cardano-up-driven component
+        // (no per-tool subdirs), so it is recognized by the driver marker rather
+        // than per-tool `detect` signatures.
+        if role == Role::Infrastructure {
+            if infra_driver_present(&dir) {
+                components.push(DetectedComponent {
+                    role,
+                    tool_id: super::INFRA_DRIVER_ID.to_string(),
+                });
+            } else {
+                unrecognized.push(UnrecognizedDir {
+                    role,
+                    dir: role.dir().to_string(),
+                });
+            }
             continue;
         }
 
@@ -286,6 +314,41 @@ mod tests {
             .find(|c| c.role == Role::OnChain)
             .unwrap();
         assert_eq!(onchain.tool_id, "scalus");
+    }
+
+    #[test]
+    fn scan_recognizes_aggregated_infra_by_driver_marker() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // Aggregated infra/: a single Justfile referencing cardano-up, no subdirs.
+        fs::create_dir_all(root.join("infra")).unwrap();
+        fs::write(
+            root.join("infra/Justfile"),
+            "dev:\n    cardano-up up --context demo\n",
+        )
+        .unwrap();
+
+        let result = scan_project(root, &registry());
+        let infra = result
+            .components
+            .iter()
+            .find(|c| c.role == Role::Infrastructure)
+            .expect("infra should be detected via the driver marker");
+        assert_eq!(infra.tool_id, crate::doctor::INFRA_DRIVER_ID);
+        assert!(result.unrecognized.is_empty());
+    }
+
+    #[test]
+    fn scan_infra_without_marker_is_unrecognized() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("infra")).unwrap();
+        fs::write(root.join("infra/Justfile"), "dev:\n    echo nope\n").unwrap();
+
+        let result = scan_project(root, &registry());
+        assert!(result.components.is_empty());
+        assert_eq!(result.unrecognized.len(), 1);
+        assert_eq!(result.unrecognized[0].role, Role::Infrastructure);
     }
 
     #[test]

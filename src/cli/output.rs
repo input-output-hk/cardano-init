@@ -103,8 +103,12 @@ pub fn print_summary(selection: &Selection, registry: &Registry) {
         };
 
         let tool_info = if let Some(tool) = registry.get(&assignment.tool_id) {
-            let lang = tool.languages.first().map(|s| s.as_str()).unwrap_or("?");
-            format!("{} ({})", tool.name, lang)
+            // Infra providers carry no user-facing language, so omit the
+            // parenthetical rather than printing an empty "(?)".
+            match tool.languages.first() {
+                Some(lang) => format!("{} ({})", tool.name, lang),
+                None => tool.name.clone(),
+            }
         } else {
             assignment.tool_id.clone()
         };

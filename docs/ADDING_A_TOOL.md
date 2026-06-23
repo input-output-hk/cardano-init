@@ -174,6 +174,33 @@ dev:
 
 Write the keys idempotently (replace in place rather than appending) so repeated `just dev` runs don't accumulate duplicate lines. Off-chain/devnet consumers read these and never need to know which tool wrote them.
 
+**Infrastructure providers are added as data, not a new template.** The infra role is backed by a single shared `cardano-up` driver (`templates/_infra/cardano-up`), and all selected providers aggregate into one `infra/` component. To add a provider (e.g. `dolos`), you write only a `registry/tools/<provider>.toml` — no template:
+
+```toml
+[tool]
+id = "dolos"
+name = "Dolos"
+description = "…"
+website = "https://…"
+languages = []                       # infra providers have no user-facing language
+system_deps = ["docker", "cardano-up"]
+detect = []                          # infra is scanned by a driver marker, not per-tool
+
+[roles.infrastructure]
+template = "_infra/cardano-up"       # always the shared driver
+
+[infra]
+cardano_up_package = "dolos"         # the `cardano-up install` package id
+# Map cardano-up's `context env` outputs → contract .env keys. A mapping for an
+# existing key (e.g. NODE_SOCKET_PATH) overrides the default at generation time.
+env = [{ from = "DOLOS_SOCKET_PATH", to = "NODE_SOCKET_PATH" }]
+```
+
+If a mapping targets a contract `.env` key that isn't seeded yet (a brand-new
+connection var), promote it: add a `contract::ENV_*` constant and a seeded
+`KEY=` line in `templates/_base/env.jinja` so every project always carries it.
+See `docs/proposals/infra-via-cardano-up.md` for the full model.
+
 **Devnet tools** provision a local throwaway chain. They should read both the blueprint and the `.env` if they are present, but must work if neither exists, and write the connection vars above during `dev` — that is how off-chain components reach the devnet, and it composes with any off-chain tool without per-pair code.
 
 **Formal-methods tools** have no extra contract beyond the four Justfile targets.

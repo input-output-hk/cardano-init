@@ -173,6 +173,14 @@ pub fn plan(selection: &Selection, registry: &Registry) -> Result<FilePlan, Scaf
         ai.cmp(&bi).then_with(|| a.tool_id.cmp(&b.tool_id))
     });
 
+    // Infrastructure aggregates into a single component: all selected infra tools
+    // share one driver template (`_infra/cardano-up`) emitted once at `infra/`,
+    // rendered over the full set via `TemplateContext.infra_tools`. The shared
+    // template's manifest is read on the first infra assignment; the rest are
+    // skipped (they are contiguous after the canonical sort). See the
+    // infra-via-cardano-up proposal §4–§6.
+    let mut infra_template: Option<String> = None;
+
     for assignment in ordered {
         let tool =
             registry
@@ -192,9 +200,25 @@ pub fn plan(selection: &Selection, registry: &Registry) -> Result<FilePlan, Scaf
         let template_path = &role_config.template; // e.g., "aiken/on-chain"
         let role_dir = assignment.role.dir(); // e.g., "on-chain"
 
-        // For infrastructure, each tool gets its own subdirectory
         let dest_prefix = if assignment.role == Role::Infrastructure {
-            PathBuf::from(role_dir).join(&assignment.tool_id)
+            // All infra tools must resolve to the same shared driver template.
+            match &infra_template {
+                Some(first) => {
+                    if first != template_path {
+                        return Err(ScaffoldError::InfraTemplateMismatch {
+                            tool_id: assignment.tool_id.clone(),
+                            template: template_path.clone(),
+                            expected: first.clone(),
+                        });
+                    }
+                    // Already emitted the aggregated component; skip duplicates.
+                    continue;
+                }
+                None => {
+                    infra_template = Some(template_path.clone());
+                    PathBuf::from(role_dir)
+                }
+            }
         } else {
             PathBuf::from(role_dir)
         };
@@ -469,6 +493,44 @@ mod tests {
             plan(&sel, &registry()),
             Err(ScaffoldError::ToolNotFound { .. })
         ));
+    }
+
+    #[test]
+    fn infra_aggregates_into_single_component() {
+        // Multiple --infra providers emit ONE aggregated infra/ component (the
+        // shared cardano-up driver), not per-tool infra/<tool>/ subdirs.
+        let sel = selection(vec![
+            RoleAssignment {
+                role: Role::Infrastructure,
+                tool_id: "kupo".into(),
+            },
+            RoleAssignment {
+                role: Role::Infrastructure,
+                tool_id: "ogmios".into(),
+            },
+        ]);
+        let plan = plan(&sel, &registry()).unwrap();
+
+        let dests: Vec<String> = plan
+            .entries
+            .iter()
+            .map(|e| e.dest.to_string_lossy().into_owned())
+            .collect();
+
+        // Single aggregated component at infra/, emitted once.
+        assert!(dests.contains(&"infra/Justfile".to_string()));
+        assert!(dests.contains(&"infra/README.md".to_string()));
+        assert!(dests.contains(&"infra/scripts/write-env.sh".to_string()));
+        assert_eq!(
+            dests.iter().filter(|d| *d == "infra/Justfile").count(),
+            1,
+            "infra driver must be emitted exactly once"
+        );
+        // No per-tool subdirs.
+        assert!(!dests.iter().any(|d| d.starts_with("infra/kupo/")));
+        assert!(!dests.iter().any(|d| d.starts_with("infra/ogmios/")));
+        // Infra-only project: no blueprint dir.
+        assert!(!dests.iter().any(|d| d.starts_with("blueprint/")));
     }
 
     #[test]

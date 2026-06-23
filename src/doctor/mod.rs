@@ -25,6 +25,12 @@ use probe::Environment;
 /// tool; has a `registry/deps.toml` entry like any dep (TECH_SPEC §9.1).
 pub const BASE_DEP: &str = "just";
 
+/// Synthetic component id the project scan reports for the aggregated `infra/`
+/// component (which has no per-tool subdirs to identify). It represents the
+/// cardano-up driver; its required deps are the union of all infra tools'
+/// `system_deps` (infra-via-cardano-up proposal §9.3).
+pub const INFRA_DRIVER_ID: &str = "cardano-up";
+
 // ---------------------------------------------------------------------------
 // Report types (serialize to the §9.4 JSON `data` payload)
 // ---------------------------------------------------------------------------

@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 
-use super::types::{DetectSignature, Role, RoleConfig, ToolDef, UnknownRoleError};
+use super::types::{
+    DetectSignature, EnvMapping, InfraConfig, Role, RoleConfig, ToolDef, UnknownRoleError,
+};
 
 // ---------------------------------------------------------------------------
 // Embedded assets
@@ -35,6 +37,11 @@ pub enum RegistryError {
     #[error("duplicate tool id '{id}'")]
     DuplicateId { id: String },
 
+    #[error(
+        "tool '{file}' fills the infrastructure role but is missing the required [infra] table"
+    )]
+    InfraConfigMissing { file: String },
+
     #[error("no tool definitions found in registry")]
     Empty,
 }
@@ -48,6 +55,21 @@ struct ToolFileToml {
     tool: ToolMetaToml,
     #[serde(default)]
     roles: HashMap<String, RoleConfigToml>,
+    #[serde(default)]
+    infra: Option<InfraToml>,
+}
+
+#[derive(Deserialize)]
+struct InfraToml {
+    cardano_up_package: String,
+    #[serde(default)]
+    env: Vec<EnvMappingToml>,
+}
+
+#[derive(Deserialize)]
+struct EnvMappingToml {
+    from: String,
+    to: String,
 }
 
 #[derive(Deserialize)]
@@ -115,6 +137,26 @@ fn to_tool_def(file_name: &str, raw: ToolFileToml) -> Result<ToolDef, RegistryEr
         );
     }
 
+    // A tool that fills the infrastructure role must declare [infra] (its
+    // cardano-up package + env mappings). The driver template aggregates these.
+    if roles.contains_key(&Role::Infrastructure) && raw.infra.is_none() {
+        return Err(RegistryError::InfraConfigMissing {
+            file: file_name.to_string(),
+        });
+    }
+
+    let infra = raw.infra.map(|i| InfraConfig {
+        cardano_up_package: i.cardano_up_package,
+        env: i
+            .env
+            .into_iter()
+            .map(|m| EnvMapping {
+                from: m.from,
+                to: m.to,
+            })
+            .collect(),
+    });
+
     Ok(ToolDef {
         id: raw.tool.id,
         name: raw.tool.name,
@@ -130,6 +172,7 @@ fn to_tool_def(file_name: &str, raw: ToolFileToml) -> Result<ToolDef, RegistryEr
             .map(DetectToml::into_signature)
             .collect(),
         roles,
+        infra,
     })
 }
 
@@ -230,7 +273,9 @@ mod tests {
 
     #[test]
     fn load_tool_count() {
-        assert_eq!(registry().all_tools().len(), 5);
+        // aiken, scalus, meshjs, yaci, blaster + infra: kupo, ogmios, dolos,
+        // tx-submit-api, cardano-node, cardano-node-api, dingo
+        assert_eq!(registry().all_tools().len(), 12);
     }
 
     #[test]
@@ -275,12 +320,49 @@ mod tests {
     }
 
     #[test]
-    fn no_infrastructure_tools_yet() {
-        // The registry currently ships no infrastructure tool (Yaci fills the
-        // devnet role, not infra). The role itself still exists in the vocabulary.
-        // Update this when a real infrastructure tool is added.
+    fn infrastructure_tools_present() {
+        // Infra is filled by cardano-up-backed providers. Each shares the single
+        // driver template and declares an [infra] config.
         let reg = registry();
-        assert!(reg.tools_for_role(Role::Infrastructure).is_empty());
+        let mut ids: Vec<&str> = reg
+            .tools_for_role(Role::Infrastructure)
+            .iter()
+            .map(|t| t.id.as_str())
+            .collect();
+        ids.sort();
+        assert_eq!(
+            ids,
+            vec![
+                "cardano-node",
+                "cardano-node-api",
+                "dingo",
+                "dolos",
+                "kupo",
+                "ogmios",
+                "tx-submit-api",
+            ]
+        );
+    }
+
+    #[test]
+    fn infra_tools_declare_infra_config() {
+        let reg = registry();
+        for tool in reg.tools_for_role(Role::Infrastructure) {
+            let infra = tool
+                .infra
+                .as_ref()
+                .unwrap_or_else(|| panic!("infra tool '{}' must declare [infra]", tool.id));
+            assert!(
+                !infra.cardano_up_package.is_empty(),
+                "infra tool '{}' needs a cardano_up_package",
+                tool.id
+            );
+            // All infra tools share the single aggregated driver template.
+            assert_eq!(
+                tool.roles.get(&Role::Infrastructure).unwrap().template,
+                "_infra/cardano-up"
+            );
+        }
     }
 
     #[test]
@@ -303,7 +385,13 @@ mod tests {
                 "description should not be empty"
             );
             assert!(!tool.website.is_empty(), "website should not be empty");
-            assert!(!tool.languages.is_empty(), "languages should not be empty");
+            // Infrastructure providers (e.g. kupo, ogmios) are not authored in a
+            // user-facing language — they're cardano-up packages — so `languages`
+            // may legitimately be empty for an infra-only tool. Every other tool
+            // must declare at least one language.
+            if !tool.roles.contains_key(&Role::Infrastructure) {
+                assert!(!tool.languages.is_empty(), "languages should not be empty");
+            }
             assert!(!tool.roles.is_empty(), "roles should not be empty");
 
             for (role, cfg) in &tool.roles {
