@@ -13,7 +13,21 @@ Built for newcomers and coding agents alike.
 
 ## Quick start (pre-release)
 
-Requires a recent Rust toolchain (2024 edition). From a clone:
+### Install with Nix (flake)
+
+```bash
+# Install the CLI into your profile
+nix profile add github:input-output-hk/cardano-init
+
+# Or run it without installing
+nix run github:input-output-hk/cardano-init -- --help
+```
+
+Then invoke `cardano-init` directly (e.g. `cardano-init --name my-protocol --on-chain aiken`).
+
+### From a clone
+
+Requires a recent Rust toolchain (2024 edition).
 
 ```bash
 # Interactive guided setup
@@ -123,3 +137,5 @@ cargo test        # run tests
 cargo fmt         # format
 cargo clippy      # lint
 ```
+
+A Nix flake is provided. Use `nix develop` for a dev shell with the Rust toolchain, or `nix build .#cardano-init` to build the package.
