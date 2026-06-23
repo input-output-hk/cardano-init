@@ -13,7 +13,9 @@ Built for newcomers and coding agents alike.
 
 ## Quick start (pre-release)
 
-### Install with Nix (flake)
+### Install
+
+With Nix (flake):
 
 ```bash
 # Install the CLI into your profile
@@ -23,24 +25,30 @@ nix profile add github:input-output-hk/cardano-init
 nix run github:input-output-hk/cardano-init -- --help
 ```
 
-Then invoke `cardano-init` directly (e.g. `cardano-init --name my-protocol --on-chain aiken`).
+With Cargo (requires a recent Rust toolchain, 2024 edition):
 
-### From a clone
+```bash
+# From the published repo
+cargo install --git https://github.com/input-output-hk/cardano-init
 
-Requires a recent Rust toolchain (2024 edition).
+# Or from a clone
+cargo install --path .
+```
+
+### Usage
 
 ```bash
 # Interactive guided setup
-cargo run
+cardano-init
 
 # One-shot (non-interactive)
-cargo run -- --name my-protocol --on-chain aiken --off-chain meshjs --devnet yaci
+cardano-init --name my-protocol --on-chain aiken --off-chain meshjs --devnet yaci
 
 # Preview what would be generated, without writing
-cargo run -- --name my-protocol --on-chain aiken --dry-run
+cardano-init --name my-protocol --on-chain aiken --dry-run
 
 # Local web builder (visual configurator → copyable command)
-cargo run -- web
+cardano-init web
 ```
 
 A generated project is driven by [`just`](https://just.systems): `just build`, `just test`, `just dev`, `just clean`.
@@ -107,7 +115,7 @@ The **infrastructure** role is backed by [`cardano-up`](https://github.com/blink
 
 ```bash
 # An indexer + query bridge over a shared node (cardano-up pulls in cardano-node):
-cargo run -- --name my-protocol --off-chain meshjs --infra kupo --infra ogmios
+cardano-init --name my-protocol --off-chain meshjs --infra kupo --infra ogmios
 
 # Bring the stack up (provisions the services and writes connection details into .env. Long-running):
 just -f infra/Justfile dev
