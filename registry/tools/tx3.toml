@@ -14,13 +14,8 @@ website = "https://docs.txpipe.io/tx3"
 languages = ["tx3", "typescript", "rust", "go", "python"]
 system_deps = ["node", "tx3"]
 nix_packages = []
-# A trix.toml is the tx3 project manifest — distinctive enough on its own (no
-# generic file like package.json to disambiguate).
-detect = [{ file = "trix.toml", contains = "family" }]
-# Verified end-to-end (create+redeem against Dolos 1.6) on the current stable
-# toolchain, but kept opt-in: tx3 is pre-1.0 (tii v1beta0) and its toolchain
-# isn't a nixpkgs package — it's installed via tx3up (curl/brew), outside the
-# nix/CI smoke path.
+# A trix.toml is the tx3 project manifest 
+detect = ["trix.toml"]
 experimental = true
 
 [roles.off-chain]
