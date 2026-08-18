@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 # Rendered for each release (Tera template).
 body = """
 {% if version %}\
-## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+## [{{ version }}] - {{ timestamp | date(format="%Y-%m-%d") }}
 {% else %}\
 ## [Unreleased]
 {% endif %}\
@@ -32,11 +32,11 @@ body = """
 footer = """
 {% for release in releases -%}
     {% if release.version and release.previous.version -%}
-        [{{ release.version | trim_start_matches(pat="v") }}]: \
+        [{{ release.version }}]: \
             https://github.com/input-output-hk/cardano-init/compare/\
             {{ release.previous.version }}..{{ release.version }}
     {% elif release.version -%}
-        [{{ release.version | trim_start_matches(pat="v") }}]: \
+        [{{ release.version }}]: \
             https://github.com/input-output-hk/cardano-init/releases/tag/{{ release.version }}
     {% endif -%}
 {% endfor %}
