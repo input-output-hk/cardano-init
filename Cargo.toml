@@ -1,6 +1,6 @@
 [package]
 name = "cardano-init"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Scaffold a complete, runnable Cardano protocol project in seconds."
 repository = "https://github.com/input-output-hk/cardano-init"
