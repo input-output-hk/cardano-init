@@ -1,0 +1,71 @@
+# git-cliff configuration
+# Generates CHANGELOG.md from Conventional Commit history.
+# cargo-dist reads CHANGELOG.md and injects the matching version's section
+# into the GitHub Release body (above its own Install/Download tables).
+# Docs: https://git-cliff.org/docs/configuration
+
+[changelog]
+# Rendered once at the top of the file.
+header = """
+# Changelog
+
+All notable changes to this project are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).\n
+"""
+# Rendered for each release (Tera template).
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | upper_first | trim }}\
+{% if commit.remote.username %} by @{{ commit.remote.username }}{% endif %}\
+{% endfor %}
+{% endfor %}\n
+"""
+footer = """
+{% for release in releases -%}
+    {% if release.version and release.previous.version -%}
+        [{{ release.version | trim_start_matches(pat="v") }}]: \
+            https://github.com/input-output-hk/cardano-init/compare/\
+            {{ release.previous.version }}..{{ release.version }}
+    {% elif release.version -%}
+        [{{ release.version | trim_start_matches(pat="v") }}]: \
+            https://github.com/input-output-hk/cardano-init/releases/tag/{{ release.version }}
+    {% endif -%}
+{% endfor %}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+# Order matters: first matching rule wins.
+commit_parsers = [
+    { message = "^feat", group = "Features" },
+    { message = "^fix", group = "Fixes" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Refactor" },
+    { message = "^docs", group = "Documentation" },
+    # Noise: kept out of user-facing notes.
+    { message = "^test", skip = true },
+    { message = "^chore", skip = true },
+    { message = "^ci", skip = true },
+    { message = "^build", skip = true },
+    { message = "^style", skip = true },
+    { message = "^revert", group = "Reverted" },
+    # Drop merge commits entirely.
+    { message = "^Merge ", skip = true },
+]
+# Anything that isn't a conventional commit (and survives the parsers) is dropped.
+filter_commits = true
+tag_pattern = "v[0-9]*"
+topo_order = false
+sort_commits = "oldest"
