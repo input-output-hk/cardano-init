@@ -14,50 +14,60 @@ default:
 # --- Protocol ({{ fullstack.tool_name }}, fullstack: on-chain + off-chain) ---
 # One component produces the blueprint AND builds transactions.
 build-protocol:
-    just -f {{ fullstack.dir }}/Justfile build
+    @echo '{{ "{{BOLD + CYAN}}▶ protocol · building · " }}{{ fullstack.tool_name }}{{ "{{NORMAL}}" }}'
+    @just -f {{ fullstack.dir }}/Justfile build
 
 test-protocol:
-    just -f {{ fullstack.dir }}/Justfile test
+    @echo '{{ "{{BOLD + CYAN}}▶ protocol · testing · " }}{{ fullstack.tool_name }}{{ "{{NORMAL}}" }}'
+    @just -f {{ fullstack.dir }}/Justfile test
 {%- endif %}
 {%- if has_on_chain %}
 
 # --- On-chain ({{ on_chain.tool_name }}) ---
 build-on-chain:
-    just -f {{ on_chain.dir }}/Justfile build
+    @echo '{{ "{{BOLD + CYAN}}▶ on-chain · building · " }}{{ on_chain.tool_name }}{{ "{{NORMAL}}" }}'
+    @just -f {{ on_chain.dir }}/Justfile build
 
 test-on-chain:
-    just -f {{ on_chain.dir }}/Justfile test
+    @echo '{{ "{{BOLD + CYAN}}▶ on-chain · testing · " }}{{ on_chain.tool_name }}{{ "{{NORMAL}}" }}'
+    @just -f {{ on_chain.dir }}/Justfile test
 {%- endif %}
 {%- if has_off_chain %}
 
 # --- Off-chain ({{ off_chain.tool_name }}) ---
 build-off-chain:
-    just -f {{ off_chain.dir }}/Justfile build
+    @echo '{{ "{{BOLD + CYAN}}▶ off-chain · building · " }}{{ off_chain.tool_name }}{{ "{{NORMAL}}" }}'
+    @just -f {{ off_chain.dir }}/Justfile build
 
 test-off-chain:
-    just -f {{ off_chain.dir }}/Justfile test
+    @echo '{{ "{{BOLD + CYAN}}▶ off-chain · testing · " }}{{ off_chain.tool_name }}{{ "{{NORMAL}}" }}'
+    @just -f {{ off_chain.dir }}/Justfile test
 {%- endif %}
 {%- if has_infra %}
 
 # --- Infrastructure (cardano-up) ---
 # Provision the local stack (long-running): `just -f infra/Justfile dev`.
 build-infra:
-    just -f infra/Justfile build
+    @echo '{{ "{{BOLD + CYAN}}▶ infrastructure · building{{NORMAL}}" }}'
+    @just -f infra/Justfile build
 
 test-infra:
-    just -f infra/Justfile test
+    @echo '{{ "{{BOLD + CYAN}}▶ infrastructure · testing{{NORMAL}}" }}'
+    @just -f infra/Justfile test
 {%- endif %}
 {%- if has_devnet %}
 
 # --- Devnet ({{ devnet.tool_name }}) ---
 test-integration:
-    just -f {{ devnet.dir }}/Justfile test
+    @echo '{{ "{{BOLD + CYAN}}▶ devnet · integration test · " }}{{ devnet.tool_name }}{{ "{{NORMAL}}" }}'
+    @just -f {{ devnet.dir }}/Justfile test
 {%- endif %}
 {%- if has_formal_methods %}
 
 # --- Formal methods ({{ formal_methods.tool_name }}) ---
 verify:
-    just -f {{ formal_methods.dir }}/Justfile test
+    @echo '{{ "{{BOLD + CYAN}}▶ formal-methods · verifying · " }}{{ formal_methods.tool_name }}{{ "{{NORMAL}}" }}'
+    @just -f {{ formal_methods.dir }}/Justfile test
 {%- endif %}
 
 # --- Aggregate tasks ---

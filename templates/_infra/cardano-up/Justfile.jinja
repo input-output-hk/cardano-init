@@ -40,5 +40,5 @@ dev:
 # Stop the stack's containers. Chain data is preserved (no re-sync next time);
 # for a full teardown run `cardano-up uninstall <pkg> --context {{ infra_context_name }}`.
 clean:
-    cardano-up down --context {{ infra_context_name }}
+    @cardano-up down --context {{ infra_context_name }}
     @echo "Stopped the '{{ infra_context_name }}' stack."

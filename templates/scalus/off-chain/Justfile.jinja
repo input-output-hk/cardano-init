@@ -15,13 +15,13 @@
 
 # Compile the off-chain sources.
 build:
-    sbt compile
+    @sbt compile
 
 # Emulator tests of the create/redeem flow — no blockchain, milliseconds per
 # test. They parameterise the blueprint's validators, so they run only once an
 # on-chain component has produced ../{{ blueprint_path }} (skipped otherwise).
 test:
-    sbt test
+    @sbt test
 
 # Run the gift-card REST API against whatever ../.env points at (local devnet or
 # Blockfrost). Swagger UI at http://localhost:8088/docs. Long-running: Ctrl-C.
@@ -29,4 +29,4 @@ dev:
     sbt "runMain app.start"
 
 clean:
-    sbt clean
+    @sbt clean

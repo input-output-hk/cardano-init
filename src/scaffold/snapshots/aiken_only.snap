@@ -13,10 +13,12 @@ default:
 
 # --- On-chain (Aiken) ---
 build-on-chain:
-    just -f on-chain/Justfile build
+    @echo '{{BOLD + CYAN}}▶ on-chain · building · Aiken{{NORMAL}}'
+    @just -f on-chain/Justfile build
 
 test-on-chain:
-    just -f on-chain/Justfile test
+    @echo '{{BOLD + CYAN}}▶ on-chain · testing · Aiken{{NORMAL}}'
+    @just -f on-chain/Justfile test
 
 # --- Aggregate tasks ---
 build: build-on-chain
@@ -234,15 +236,15 @@ source = "github"
 # Part of snap-project
 
 build:
-    aiken build
-    cp -f plutus.json ../blueprint/plutus.json
+    @aiken build
+    @cp -f plutus.json ../blueprint/plutus.json
 
 test:
-    aiken check
+    @aiken check
 
 clean:
-    rm -rf build/
-    rm -f plutus.json
+    @rm -rf build/
+    @rm -f plutus.json
 
 === on-chain/lib/helpers.ak ===
 use cardano/address

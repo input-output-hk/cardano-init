@@ -14,10 +14,12 @@ default:
 # --- Infrastructure (cardano-up) ---
 # Provision the local stack (long-running): `just -f infra/Justfile dev`.
 build-infra:
-    just -f infra/Justfile build
+    @echo '{{BOLD + CYAN}}▶ infrastructure · building{{NORMAL}}'
+    @just -f infra/Justfile build
 
 test-infra:
-    just -f infra/Justfile test
+    @echo '{{BOLD + CYAN}}▶ infrastructure · testing{{NORMAL}}'
+    @just -f infra/Justfile test
 
 # --- Aggregate tasks ---
 build: build-infra
@@ -252,7 +254,7 @@ dev:
 # Stop the stack's containers. Chain data is preserved (no re-sync next time);
 # for a full teardown run `cardano-up uninstall <pkg> --context snap-project`.
 clean:
-    cardano-up down --context snap-project
+    @cardano-up down --context snap-project
     @echo "Stopped the 'snap-project' stack."
 
 === infra/README.md ===

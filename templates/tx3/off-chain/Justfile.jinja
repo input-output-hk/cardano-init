@@ -16,15 +16,15 @@ _install:
 # Compile the .tx3 protocol and (re)generate the typed TypeScript client under
 # .tx3/codegen/ts-client/ (gitignored).
 build: _install
-    trix build
-    trix codegen --plugin ts-client
+    @trix build
+    @trix codegen --plugin ts-client
 
 # End-to-end tests: each test boots its own throwaway Dolos devnet (via the
 # harness in devnet/utils.ts) and drives the generated client. Needs the `dolos`
 # binary (from tx3up, or set DOLOS_BIN) and ../blueprint/plutus.json.
 test: _install
-    trix codegen --plugin ts-client
-    npx vitest run
+    @trix codegen --plugin ts-client
+    @npx vitest run
 
 # Start a local, self-hosted Dolos devnet (serves TRP on http://localhost:8164)
 # for interactive create/redeem. Long-running — Ctrl-C to stop. Tx3 self-hosts
@@ -44,4 +44,4 @@ redeem locked: _install
     npx tsx src/cli.ts redeem {{ "{{locked}}" }}
 
 clean:
-    rm -rf node_modules .tx3
+    @rm -rf node_modules .tx3

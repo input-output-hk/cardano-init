@@ -10,12 +10,12 @@
 
 # Compile the validators and write the CIP-57 blueprint to ../{{ blueprint_path }}.
 build:
-    sbt "runMain app.genBlueprint ../{{ blueprint_path }}"
+    @sbt "runMain app.genBlueprint ../{{ blueprint_path }}"
 
 # Unit tests: run the validators as Scala functions AND as compiled Plutus
 # scripts on the built-in evaluator — no blockchain, milliseconds per test.
 test:
-    sbt test
+    @sbt test
 
 clean:
-    sbt clean
+    @sbt clean

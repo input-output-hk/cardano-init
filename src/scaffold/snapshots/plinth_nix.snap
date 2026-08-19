@@ -13,10 +13,12 @@ default:
 
 # --- On-chain (Plinth) ---
 build-on-chain:
-    just -f on-chain/Justfile build
+    @echo '{{BOLD + CYAN}}▶ on-chain · building · Plinth{{NORMAL}}'
+    @just -f on-chain/Justfile build
 
 test-on-chain:
-    just -f on-chain/Justfile test
+    @echo '{{BOLD + CYAN}}▶ on-chain · testing · Plinth{{NORMAL}}'
+    @just -f on-chain/Justfile test
 
 # --- Aggregate tasks ---
 build: build-on-chain
@@ -224,18 +226,18 @@ CARDANO_NODE_API_URL=
 
 # Compile the validators and write the CIP-57 blueprint to ../blueprint/plutus.json.
 build:
-    cabal update
-    cabal build all
-    cabal run -v0 gen-blueprint -- ../blueprint/plutus.json
+    @cabal update
+    @cabal build all
+    @cabal run -v0 gen-blueprint -- ../blueprint/plutus.json
 
 # Compile both validators to Plutus Core and assert they serialise — the plugin
 # does the on-chain compilation, so this catches errors a plain build might defer.
 test:
-    cabal test all
+    @cabal test all
 
 clean:
-    cabal clean
-    rm -f ../blueprint/plutus.json
+    @cabal clean
+    @rm -f ../blueprint/plutus.json
 
 === on-chain/onchain.cabal ===
 cabal-version:   3.0

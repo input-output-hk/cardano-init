@@ -14,10 +14,12 @@ default:
 # --- Protocol (Scalus, fullstack: on-chain + off-chain) ---
 # One component produces the blueprint AND builds transactions.
 build-protocol:
-    just -f protocol/Justfile build
+    @echo '{{BOLD + CYAN}}▶ protocol · building · Scalus{{NORMAL}}'
+    @just -f protocol/Justfile build
 
 test-protocol:
-    just -f protocol/Justfile test
+    @echo '{{BOLD + CYAN}}▶ protocol · testing · Scalus{{NORMAL}}'
+    @just -f protocol/Justfile test
 
 # --- Aggregate tasks ---
 build: build-protocol
@@ -234,11 +236,11 @@ CARDANO_NODE_API_URL=
 
 # Compile the Scala sources and write the CIP-57 blueprint to ../blueprint/plutus.json.
 build:
-    sbt "runMain app.genBlueprint ../blueprint/plutus.json"
+    @sbt "runMain app.genBlueprint ../blueprint/plutus.json"
 
 # Unit tests on the built-in emulator — no blockchain, milliseconds per test.
 test:
-    sbt test
+    @sbt test
 
 # Run the gift-card REST API against whatever ../.env points at (local devnet or
 # Blockfrost). Swagger UI at http://localhost:8088/docs. Long-running: Ctrl-C.
@@ -246,7 +248,7 @@ dev:
     sbt "runMain app.start"
 
 clean:
-    sbt clean
+    @sbt clean
 
 === protocol/build.sbt ===
 val scalusVersion = "0.18.2"

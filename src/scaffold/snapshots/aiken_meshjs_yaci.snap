@@ -13,21 +13,26 @@ default:
 
 # --- On-chain (Aiken) ---
 build-on-chain:
-    just -f on-chain/Justfile build
+    @echo '{{BOLD + CYAN}}▶ on-chain · building · Aiken{{NORMAL}}'
+    @just -f on-chain/Justfile build
 
 test-on-chain:
-    just -f on-chain/Justfile test
+    @echo '{{BOLD + CYAN}}▶ on-chain · testing · Aiken{{NORMAL}}'
+    @just -f on-chain/Justfile test
 
 # --- Off-chain (MeshJS) ---
 build-off-chain:
-    just -f off-chain/Justfile build
+    @echo '{{BOLD + CYAN}}▶ off-chain · building · MeshJS{{NORMAL}}'
+    @just -f off-chain/Justfile build
 
 test-off-chain:
-    just -f off-chain/Justfile test
+    @echo '{{BOLD + CYAN}}▶ off-chain · testing · MeshJS{{NORMAL}}'
+    @just -f off-chain/Justfile test
 
 # --- Devnet (Yaci DevKit) ---
 test-integration:
-    just -f devnet/Justfile test
+    @echo '{{BOLD + CYAN}}▶ devnet · integration test · Yaci DevKit{{NORMAL}}'
+    @just -f devnet/Justfile test
 
 # --- Aggregate tasks ---
 build: build-on-chain build-off-chain
@@ -290,15 +295,15 @@ source = "github"
 # Part of snap-project
 
 build:
-    aiken build
-    cp -f plutus.json ../blueprint/plutus.json
+    @aiken build
+    @cp -f plutus.json ../blueprint/plutus.json
 
 test:
-    aiken check
+    @aiken check
 
 clean:
-    rm -rf build/
-    rm -f plutus.json
+    @rm -rf build/
+    @rm -f plutus.json
 
 === on-chain/lib/helpers.ak ===
 use cardano/address
@@ -561,10 +566,10 @@ _install:
 
 # Build the importable library into dist/ (JS + type declarations).
 build: _install
-    npm run build
+    @npm run --silent build
 
 test: _install
-    npm run test
+    @npm run --silent test
 
 # Status: show the loaded blueprint and whether the env is ready for txs.
 dev: _install
@@ -582,7 +587,7 @@ redeem txhash: _install
     npx tsx src/cli.ts redeem {{txhash}}
 
 clean:
-    rm -rf node_modules dist
+    @rm -rf node_modules dist
 
 === off-chain/.env.example ===
 # Off-chain secrets for submitting transactions.
@@ -1558,7 +1563,7 @@ build:
 # the assertions live in integration.test.mjs (standalone, Node built-in fetch,
 # reads ../blueprint/plutus.json if present).
 test:
-    sh scripts/devnet-test.sh
+    @sh scripts/devnet-test.sh
 
 # Start a PERSISTENT local devnet and publish its connection details to ../.env
 # so off-chain consumers can find it (use this when iterating on transactions,
@@ -1578,7 +1583,7 @@ dev:
 # connection details it published to ../.env.
 clean:
     @pkill -f "$HOME/.yaci-cli/" 2>/dev/null || true
-    node scripts/set-env.mjs --clear
+    @node scripts/set-env.mjs --clear
     @echo "Cleared the devnet connection details from ../.env."
 
 === devnet/README.md ===

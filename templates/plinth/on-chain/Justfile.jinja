@@ -12,15 +12,15 @@
 
 # Compile the validators and write the CIP-57 blueprint to ../{{ blueprint_path }}.
 build:
-    cabal update
-    cabal build all
-    cabal run -v0 gen-blueprint -- ../{{ blueprint_path }}
+    @cabal update
+    @cabal build all
+    @cabal run -v0 gen-blueprint -- ../{{ blueprint_path }}
 
 # Compile both validators to Plutus Core and assert they serialise — the plugin
 # does the on-chain compilation, so this catches errors a plain build might defer.
 test:
-    cabal test all
+    @cabal test all
 
 clean:
-    cabal clean
-    rm -f ../{{ blueprint_path }}
+    @cabal clean
+    @rm -f ../{{ blueprint_path }}

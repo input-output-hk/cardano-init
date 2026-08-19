@@ -13,7 +13,8 @@ default:
 
 # --- Devnet (Yaci DevKit) ---
 test-integration:
-    just -f devnet/Justfile test
+    @echo '{{BOLD + CYAN}}▶ devnet · integration test · Yaci DevKit{{NORMAL}}'
+    @just -f devnet/Justfile test
 
 # --- Aggregate tasks ---
 build:
@@ -239,7 +240,7 @@ build:
 # the assertions live in integration.test.mjs (standalone, Node built-in fetch,
 # reads ../blueprint/plutus.json if present).
 test:
-    sh scripts/devnet-test.sh
+    @sh scripts/devnet-test.sh
 
 # Start a PERSISTENT local devnet and publish its connection details to ../.env
 # so off-chain consumers can find it (use this when iterating on transactions,
@@ -259,7 +260,7 @@ dev:
 # connection details it published to ../.env.
 clean:
     @pkill -f "$HOME/.yaci-cli/" 2>/dev/null || true
-    node scripts/set-env.mjs --clear
+    @node scripts/set-env.mjs --clear
     @echo "Cleared the devnet connection details from ../.env."
 
 === devnet/README.md ===

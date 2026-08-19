@@ -2,12 +2,12 @@
 # Part of {{ project_name }}
 
 build:
-    aiken build
-    cp -f plutus.json ../{{ blueprint_path }}
+    @aiken build
+    @cp -f plutus.json ../{{ blueprint_path }}
 
 test:
-    aiken check
+    @aiken check
 
 clean:
-    rm -rf build/
-    rm -f plutus.json
+    @rm -rf build/
+    @rm -f plutus.json

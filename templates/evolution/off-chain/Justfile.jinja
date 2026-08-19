@@ -11,10 +11,10 @@ _install:
 
 # Build the importable library into dist/ (JS + type declarations).
 build: _install
-    npm run build
+    @npm run --silent build
 
 test: _install
-    npm run test
+    @npm run --silent test
 
 # Status: show the loaded blueprint and whether the env is ready for txs.
 dev: _install
@@ -33,4 +33,4 @@ redeem address: _install
     npx tsx src/cli.ts redeem {{ "{{address}}" }}
 
 clean:
-    rm -rf node_modules dist
+    @rm -rf node_modules dist

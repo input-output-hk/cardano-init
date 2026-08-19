@@ -13,25 +13,31 @@ default:
 
 # --- On-chain (Aiken) ---
 build-on-chain:
-    just -f on-chain/Justfile build
+    @echo '{{BOLD + CYAN}}▶ on-chain · building · Aiken{{NORMAL}}'
+    @just -f on-chain/Justfile build
 
 test-on-chain:
-    just -f on-chain/Justfile test
+    @echo '{{BOLD + CYAN}}▶ on-chain · testing · Aiken{{NORMAL}}'
+    @just -f on-chain/Justfile test
 
 # --- Off-chain (MeshJS) ---
 build-off-chain:
-    just -f off-chain/Justfile build
+    @echo '{{BOLD + CYAN}}▶ off-chain · building · MeshJS{{NORMAL}}'
+    @just -f off-chain/Justfile build
 
 test-off-chain:
-    just -f off-chain/Justfile test
+    @echo '{{BOLD + CYAN}}▶ off-chain · testing · MeshJS{{NORMAL}}'
+    @just -f off-chain/Justfile test
 
 # --- Infrastructure (cardano-up) ---
 # Provision the local stack (long-running): `just -f infra/Justfile dev`.
 build-infra:
-    just -f infra/Justfile build
+    @echo '{{BOLD + CYAN}}▶ infrastructure · building{{NORMAL}}'
+    @just -f infra/Justfile build
 
 test-infra:
-    just -f infra/Justfile test
+    @echo '{{BOLD + CYAN}}▶ infrastructure · testing{{NORMAL}}'
+    @just -f infra/Justfile test
 
 # --- Aggregate tasks ---
 build: build-on-chain build-off-chain build-infra
@@ -296,15 +302,15 @@ source = "github"
 # Part of snap-project
 
 build:
-    aiken build
-    cp -f plutus.json ../blueprint/plutus.json
+    @aiken build
+    @cp -f plutus.json ../blueprint/plutus.json
 
 test:
-    aiken check
+    @aiken check
 
 clean:
-    rm -rf build/
-    rm -f plutus.json
+    @rm -rf build/
+    @rm -f plutus.json
 
 === on-chain/lib/helpers.ak ===
 use cardano/address
@@ -567,10 +573,10 @@ _install:
 
 # Build the importable library into dist/ (JS + type declarations).
 build: _install
-    npm run build
+    @npm run --silent build
 
 test: _install
-    npm run test
+    @npm run --silent test
 
 # Status: show the loaded blueprint and whether the env is ready for txs.
 dev: _install
@@ -588,7 +594,7 @@ redeem txhash: _install
     npx tsx src/cli.ts redeem {{txhash}}
 
 clean:
-    rm -rf node_modules dist
+    @rm -rf node_modules dist
 
 === off-chain/.env.example ===
 # Off-chain secrets for submitting transactions.
@@ -1577,7 +1583,7 @@ dev:
 # Stop the stack's containers. Chain data is preserved (no re-sync next time);
 # for a full teardown run `cardano-up uninstall <pkg> --context snap-project`.
 clean:
-    cardano-up down --context snap-project
+    @cardano-up down --context snap-project
     @echo "Stopped the 'snap-project' stack."
 
 === infra/README.md ===
