@@ -2,15 +2,14 @@
 
 [![CI](https://github.com/input-output-hk/cardano-init/actions/workflows/ci.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/ci.yml)
 [![Code Quality](https://github.com/input-output-hk/cardano-init/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/github-code-scanning/codeql)
-[![Scheduled Smoke](https://github.com/input-output-hk/cardano-init/actions/workflows/scheduled-smoke.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/scheduled-smoke.yml)
-[![Installer Recipes](https://github.com/input-output-hk/cardano-init/actions/workflows/installer-recipes.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/installer-recipes.yml)
-[![Devnet Smoke](https://github.com/input-output-hk/cardano-init/actions/workflows/devnet-smoke.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/devnet-smoke.yml)
 
-**Go from zero to a running Cardano protocol in one command.**
+### Go from zero to a running Cardano protocol in one command.
 
-Pick a tool for each role you need (on-chain, off-chain, devnet, infrastructure, formal-methods) and `cardano-init` generates a monorepo where every component is already wired together, plus a small end-to-end example that **builds and passes its tests out of the box**.
+Pick a tool for each role you need — on-chain, off-chain, devnet, infrastructure, formal-methods — and `cardano-init` generates a monorepo where every component is **already wired together**, plus a worked end-to-end example that **builds and passes its tests out of the box**.
 
-Built for newcomers and coding agents alike.
+<p align="center">
+  <img src="assets/demo.gif" alt="cardano-init scaffolds a full stack in one command, then just test passes out of the box" width="800">
+</p>
 
 ```console
 $ cardano-init --name my-protocol --on-chain aiken --off-chain meshjs --devnet yaci
@@ -29,8 +28,16 @@ $ cd my-protocol && just test
   ✓  All tests passed
 ```
 
+## Why `cardano-init`?
+
+- ⚡ **Zero to running in one command.** A wired-together monorepo that builds and passes its tests immediately — no glue code, no "step 12 of 30" setup guide.
+- 🧩 **Mix and match, freely.** Any on-chain tool composes with any off-chain tool because components talk to a shared *contract*, not to each other. Swap MeshJS for Evolution SDK without touching your validators.
+- 🤖 **Agent-native.** Machine-readable JSON on every command and a generated `AGENTS.md` in every project, so coding agents know what the project is and what to do next.
+- 🩺 **Never stuck on setup.** A built-in dependency `doctor` detects your toolchains and tells you the exact installer to run for anything missing.
+- 🧪 **Real example, not a stub.** Every stack ships the same worked gift-card scenario end-to-end, so what you generate actually runs.
+
 > [!WARNING]
-> **Prototype: do not use yet.** This is an early POC under active design; scope, CLI flags, templates, and generated output **will change** without notice. Targeting a working showcase build (DX.02) and a public Release Candidate (DX.05). See the [Roadmap](docs/ROADMAP.md).
+> **Early prototype — not for production yet.** Scope, flags, templates, and generated output **will change** without notice. Targeting a showcase build (DX.02) and a public Release Candidate (DX.05) — see the [Roadmap](docs/ROADMAP.md).
 
 ## Quick start (pre-release)
 
@@ -106,6 +113,16 @@ You choose tools for **roles**. Only the directories for selected roles are crea
 
 The magic is the **interface contract**: on-chain components always emit `blueprint/plutus.json`, and whatever provisions a local endpoint writes standard vars (like `INDEXER_URL`) into `.env`. Consumers read those and degrade gracefully when blank. Because components talk to the *contract* rather than to each other, mixing and matching tools Just Works.
 
+```mermaid
+flowchart LR
+    OC["on-chain<br/>(validators)"] -->|"blueprint/plutus.json"| BP[["blueprint/"]]
+    BP --> OFF["off-chain<br/>(tx building)"]
+    INFRA["devnet / infrastructure<br/>(local endpoint)"] -->|"INDEXER_URL, …"| ENV[[".env"]]
+    ENV --> OFF
+```
+
+Every tool writes to and reads from those two seams (`blueprint/` and `.env`) — never from each other — so a swap on one side never breaks the other.
+
 Every on-chain and off-chain template ships the **same worked example — a gift card**: a one-shot minting policy that mints a unique token gated by a specific UTxO, plus a `redeem` validator that releases a locked gift when the token is burned. Because all tools demonstrate the same scenario with a shared parameter ABI, a generated project builds and tests end-to-end, and any on-chain tool composes with any off-chain one (e.g. an Aiken contract driven by the Scalus off-chain, or a Scalus contract driven by the MeshJS off-chain).
 
 **Fullstack tools.** Some tools (e.g. Scalus) implement both on-chain and off-chain in one language. Pick such a tool for both roles (e.g., `--fullstack scalus`, or `--on-chain scalus --off-chain scalus`) and instead of two folders you get a single unified **`protocol/`** component. It still writes the standard `blueprint/plutus.json` and reads `.env`, so it composes with devnet, formal-methods, and infrastructure.
@@ -174,6 +191,11 @@ So far, this README is the only user docs.
 
 ## Development Documentation
 
+Internal CI (smoke tests, installer recipes, devnet):
+
+[![Scheduled Smoke](https://github.com/input-output-hk/cardano-init/actions/workflows/scheduled-smoke.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/scheduled-smoke.yml)
+[![Installer Recipes](https://github.com/input-output-hk/cardano-init/actions/workflows/installer-recipes.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/installer-recipes.yml)
+[![Devnet Smoke](https://github.com/input-output-hk/cardano-init/actions/workflows/devnet-smoke.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/devnet-smoke.yml)
 
 | Doc | Purpose |
 |-----|---------|
