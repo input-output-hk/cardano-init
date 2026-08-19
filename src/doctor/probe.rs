@@ -15,7 +15,7 @@ use super::catalog::DepCatalog;
 use super::installers::Installer;
 use crate::contract;
 use crate::registry::loader::Registry;
-use crate::registry::types::{DetectSignature, Network, Role, RoleAssignment, Selection};
+use crate::registry::types::{DetectSignature, Network, Role, RoleAssignment, Selection, ToolDef};
 
 /// Detected operating system family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -185,6 +185,47 @@ fn signature_matches(dir: &Path, sig: &DetectSignature) -> bool {
     }
 }
 
+/// True if `tool` matches `dir` via a **definitive** signature: an
+/// existence-only check (no `contains` needle) on a manifest file that is
+/// unique to the tool (e.g. `trix.toml`, `aiken.toml`). These are stronger than
+/// `contains` needles on shared files (`package.json` → `@meshsdk`), which only
+/// prove that a *generic* file mentions the tool.
+fn matches_definitively(dir: &Path, tool: &ToolDef) -> bool {
+    tool.detect
+        .iter()
+        .any(|sig| sig.contains.is_none() && signature_matches(dir, sig))
+}
+
+/// Identify the single tool from `candidates` whose generated output occupies
+/// `dir`. A tool matches if **any** of its `detect` signatures matches (§9.6);
+/// exactly one match ⇒ identified. On an ambiguous multiple, a definitive
+/// manifest match wins over tools matched only by a shared-file `contains`
+/// needle — a `trix.toml` is unmistakably a Tx3 project even when its
+/// `package.json` also pulls in `@meshsdk` as a library. If the definitive
+/// matchers still don't narrow to exactly one, the directory is unrecognized.
+fn identify_tool<'a>(dir: &Path, candidates: &[&'a ToolDef]) -> Option<&'a str> {
+    let matched: Vec<&'a ToolDef> = candidates
+        .iter()
+        .copied()
+        .filter(|tool| tool.detect.iter().any(|sig| signature_matches(dir, sig)))
+        .collect();
+
+    match matched.as_slice() {
+        [tool] => Some(tool.id.as_str()),
+        [] => None,
+        _ => {
+            let definitive: Vec<&&ToolDef> = matched
+                .iter()
+                .filter(|tool| matches_definitively(dir, tool))
+                .collect();
+            match definitive.as_slice() {
+                [tool] => Some(tool.id.as_str()),
+                _ => None,
+            }
+        }
+    }
+}
+
 /// Scan a project root for role directories and identify the tool in each.
 ///
 /// For each contract role directory present, the candidate tools are exactly
@@ -219,17 +260,11 @@ pub fn scan_project(root: &Path, registry: &Registry) -> ScanResult {
             continue;
         }
 
-        let matched: Vec<&str> = registry
-            .tools_for_role(role)
-            .into_iter()
-            .filter(|tool| tool.detect.iter().any(|sig| signature_matches(&dir, sig)))
-            .map(|tool| tool.id.as_str())
-            .collect();
-
-        if matched.len() == 1 {
+        let candidates = registry.tools_for_role(role);
+        if let Some(tool_id) = identify_tool(&dir, &candidates) {
             components.push(DetectedComponent {
                 kind: ComponentKind::Role(role),
-                tool_id: matched[0].to_string(),
+                tool_id: tool_id.to_string(),
             });
         } else {
             unrecognized.push(UnrecognizedDir {
@@ -245,22 +280,16 @@ pub fn scan_project(root: &Path, registry: &Registry) -> ScanResult {
     // feed the required set through the normal path (TECH_SPEC §9.6).
     let protocol_dir = root.join(contract::DIR_PROTOCOL);
     if protocol_dir.is_dir() {
-        let matched: Vec<&str> = registry
+        let candidates: Vec<&ToolDef> = registry
             .all_tools()
             .iter()
             .filter(|tool| tool.fullstack.is_some())
-            .filter(|tool| {
-                tool.detect
-                    .iter()
-                    .any(|sig| signature_matches(&protocol_dir, sig))
-            })
-            .map(|tool| tool.id.as_str())
             .collect();
 
-        if matched.len() == 1 {
+        if let Some(tool_id) = identify_tool(&protocol_dir, &candidates) {
             components.push(DetectedComponent {
                 kind: ComponentKind::Protocol,
-                tool_id: matched[0].to_string(),
+                tool_id: tool_id.to_string(),
             });
         } else {
             unrecognized.push(UnrecognizedDir {
@@ -511,6 +540,34 @@ mod tests {
             result.unrecognized[0].kind,
             ComponentKind::Role(Role::OffChain)
         );
+    }
+
+    #[test]
+    fn scan_identifies_tx3_despite_meshsdk_dependency() {
+        // The Tx3 off-chain template legitimately depends on @meshsdk/core (it
+        // imports it in blueprint.ts), so its package.json trips MeshJS's
+        // `contains = "@meshsdk"` needle. Both tools match the dir — but a
+        // trix.toml is a definitive, Tx3-unique manifest, so it must win over
+        // the shared-file MeshJS match rather than reading as ambiguous.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("off-chain")).unwrap();
+        fs::write(root.join("off-chain/trix.toml"), "[protocol]\n").unwrap();
+        fs::write(
+            root.join("off-chain/package.json"),
+            r#"{ "dependencies": { "@meshsdk/core": "^1.9.0", "tx3-sdk": "^0.15.0" } }"#,
+        )
+        .unwrap();
+
+        let result = scan_project(root, &registry());
+
+        assert!(result.unrecognized.is_empty());
+        let offchain = result
+            .components
+            .iter()
+            .find(|c| c.kind == ComponentKind::Role(Role::OffChain))
+            .expect("off-chain component identified");
+        assert_eq!(offchain.tool_id, "tx3");
     }
 
     #[test]

@@ -608,7 +608,9 @@ pub fn print_success(
     // not have seen the pre-generation summary warning scroll past).
     print_experimental_warning(selection, registry);
 
-    print_git_note(git);
+    // The git repo is initialized silently: opening the project shows it's a
+    // git repo, so a "git initialized" note would just be noise. The outcome is
+    // still reported in the JSON output's `git` field for agents.
 
     // Check-and-advise: surface any missing required deps before "Next steps".
     print_dep_advice(report);
@@ -845,28 +847,6 @@ pub fn print_update_success(
         theme::command("just build")
     );
     println!();
-}
-
-/// Note the git repo status after generation (human output). Silent when the
-/// project was created inside an existing repository.
-fn print_git_note(git: crate::cli::git::InitOutcome) {
-    use crate::cli::git::InitOutcome;
-    println!();
-    match git {
-        InitOutcome::Committed => println!(
-            "  {}  git repository initialized with an initial commit",
-            theme::badge_ok("GIT")
-        ),
-        InitOutcome::InitializedNoCommit => println!(
-            "  {}  git repository initialized — set git user.name/user.email, then commit",
-            theme::badge_warn("GIT")
-        ),
-        InitOutcome::GitMissing => println!(
-            "  {}",
-            theme::dim("git not found — skipped repo setup (add/remove want a clean git tree)")
-        ),
-        InitOutcome::AlreadyRepo => {} // inside an existing repo — leave it alone
-    }
 }
 
 /// Print the dependency advice block (missing required deps + install plans).

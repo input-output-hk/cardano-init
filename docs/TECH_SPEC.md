@@ -666,7 +666,7 @@ The standalone `cardano-init doctor` takes **no flags describing the project**: 
 
 1. For each role in `Role::ALL`, look for its contract directory (`contract::DIR_*`: `on-chain/`, `off-chain/`, `infra/`, `devnet/`, `formal-methods/`).
 2. For a present directory, the candidate tools are exactly those that declare that role (so `on-chain/` is tested only against on-chain tools — this resolves the on-chain/off-chain ambiguity without per-pair logic).
-3. A tool matches if **any** of its `detect` signatures matches. Exactly one match ⇒ the component is identified; zero (or an ambiguous multiple) ⇒ the directory is reported as **unrecognized** (renamed, modified, or a foreign project). A renamed *directory* simply isn't found, so that role is absent.
+3. A tool matches if **any** of its `detect` signatures matches. Exactly one match ⇒ the component is identified. On an ambiguous multiple, a **definitive** match wins: a bare-path (existence-only) signature is a tool-unique manifest (e.g. `trix.toml`), whereas a `contains` needle only proves a *shared* file mentions the tool (e.g. a Tx3 project's `package.json` pulls in `@meshsdk` as a library, tripping MeshJS's needle). If exactly one candidate matched via a bare-path signature, that tool is identified; otherwise (zero matches, or still-ambiguous after this tiebreak) the directory is reported as **unrecognized** (renamed, modified, or a foreign project). A renamed *directory* simply isn't found, so that role is absent.
 4. The required set is `{just}` ∪ the `system_deps` of every identified tool (§9.1), fed to the resolver (§9.4).
 
 **Infrastructure is the exception.** The aggregated `infra/` component has no per-tool subdirs (it's the single cardano-up driver), so it is *not* matched against per-tool `detect` signatures. Instead the scan recognizes it by a driver marker — `infra/Justfile` referencing `cardano-up` — and reports a synthetic `cardano-up` component (`doctor::INFRA_DRIVER_ID`). Its contribution to the required set is the **union of all registered infra tools' `system_deps`** (`{docker, cardano-up}`), data-driven from the registry. So infra tools carry `detect = []`.
@@ -895,7 +895,7 @@ Error codes are defined in §2.5. This extends the init matrix (§12) for `add`/
 | 13 | Infra provider set changes | RE-RENDER `infra/` in place from the new set; other slots untouched. |
 | 14 | Unchanged slot (e.g. Aiken while off-chain changes) | KEEP — provably untouched (§15.5). |
 | 15 | Unrecognized/renamed/foreign component dir | Interactive: surfaced, then a confirm to proceed with the detected stack (the odd dir is left in place, ignored). Non-interactive: `project_unrecognized` (fatal). |
-| 16 | Ambiguous detection (2+ tools match one dir) | Treated as unrecognized (existing `scan_project` behavior). |
+| 16 | Ambiguous detection (2+ tools match one dir) | Resolved by definitive-match tiebreak (§9.6): a single bare-path/manifest match wins over shared-file `contains` matches. Only if that leaves 2+ still tied is the dir treated as unrecognized. |
 | 17 | `infra/Justfile` hand-edited so providers unparseable | Recovered set shown in confirm; user corrects; non-interactive → treat as unrecognized. |
 | 18 | Unknown `cardano-up` package in `infra/Justfile` | Surfaced, not dropped; user confirms/removes. |
 | 19 | `.env` missing/edited `CARDANO_NETWORK` | Field marked low-confidence; asked/defaulted in confirm. |
