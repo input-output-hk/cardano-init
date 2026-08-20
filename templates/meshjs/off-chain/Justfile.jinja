@@ -3,11 +3,11 @@
 
 # Install dependencies only when needed — node_modules is missing, or
 # package.json changed since the last install. Keeps repeat runs fast and quiet
-# (no npm output at all when deps are already up to date). `--no-fund --no-audit`
-# trims npm's noise when it does run. Delete node_modules (or `just clean`) to
-# force a fresh install.
+# (no npm output at all when deps are already up to date). 
+#`--no-fund --no-audit --loglevel=error` trims npm's noise when it does run.
+# Delete node_modules (or `just clean`) to force a fresh install.
 _install:
-    @if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install --no-fund --no-audit; fi
+    @if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install --no-fund --no-audit --loglevel=error; fi
 
 # Build the importable library into dist/ (JS + type declarations).
 build: _install

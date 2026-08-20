@@ -10,8 +10,9 @@
 # `../blueprint/plutus.json`, so build the on-chain component first.
 
 # Install node deps only when needed (node_modules missing, or package.json newer).
+# `--loglevel=error` hides warnings to remove noise
 _install:
-    @if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install --no-fund --no-audit; fi
+    @if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install --no-fund --no-audit --loglevel=error; fi
 
 # Compile the .tx3 protocol and (re)generate the typed TypeScript client under
 # .tx3/codegen/ts-client/ (gitignored).

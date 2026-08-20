@@ -20,6 +20,12 @@ Set Theme "Catppuccin Mocha"
 Set TypingSpeed 45ms
 Set PlaybackSpeed 1.0
 
+# --- Show available tooling ---
+Type "cardano-init list --table"
+Sleep 600ms
+Enter
+Sleep 3s
+
 # --- Scaffold a full stack in one command ---
 Type "cardano-init --name my-protocol --on-chain aiken --off-chain meshjs --devnet yaci"
 Sleep 600ms
@@ -30,7 +36,7 @@ Sleep 3s
 Type "cd my-protocol && just test"
 Sleep 600ms
 Enter
-Sleep 50s
+Sleep 60s
 
 # --- Cleanup ---
 Hide
