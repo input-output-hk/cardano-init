@@ -21,7 +21,7 @@
 ```
 cardano-init [INIT_FLAGS]            # default: one-shot if --name given, else interactive
 cardano-init doctor                  # check this project's dependencies + advise installs (§9)
-cardano-init list [--format <fmt>]   # capability discovery: roles + tools (§8)
+cardano-init list [--table] [--format <fmt>]   # capability discovery: roles + tools (§8)
 cardano-init add [ROLE_FLAGS]        # add/swap tools in the project in the cwd (see proposal)
 cardano-init remove [ROLE_FLAGS]     # remove a role / infra provider from the cwd project
 ```
@@ -497,7 +497,7 @@ A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) 
 }}
 ```
 
-`list` renders from a shared model (`registry::view`: `role_views()` / `tool_views()`). `roles[].multiple` is `true` only for infrastructure (`Role::multiple`). `tools[].fullstack` is `true` when the tool declares a `[fullstack]` template (i.e. `--fullstack <tool>` is valid); it is an additive field (no `schema_version` bump). `fullstack` is a capability, **not** a role — it never appears in `tools[].roles` or in the `roles` array. `tools[].experimental` is `true` for tools that are unstable and/or not yet build-green (§3.2.1); selecting one needs `--allow-experimental` — also additive.
+`list` renders from a shared model (`registry::view`: `role_views()` / `tool_views()`). The human output has two forms: the default (a Roles table plus a per-tool block shared with `--help`), and a compact **`--table`** view — a full-grid matrix with one column per role (in `Role::ALL` order), each role's tools stacked and experimental ones tagged `🧪`. `--table` is a human-presentation flag only; it has no effect under `--format json` (the JSON already carries the same data). `roles[].multiple` is `true` only for infrastructure (`Role::multiple`). `tools[].fullstack` is `true` when the tool declares a `[fullstack]` template (i.e. `--fullstack <tool>` is valid); it is an additive field (no `schema_version` bump). `fullstack` is a capability, **not** a role — it never appears in `tools[].roles` or in the `roles` array. `tools[].experimental` is `true` for tools that are unstable and/or not yet build-green (§3.2.1); selecting one needs `--allow-experimental` — also additive.
 
 ---
 

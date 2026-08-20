@@ -1066,7 +1066,76 @@ pub fn print_doctor(
 
 /// Print the registry (roles + tools) for `cardano-init list`: human-readable
 /// by default, or the TECH_SPEC §8 JSON payload with `--format json`.
-pub fn print_list(registry: &Registry, format: Format) {
+/// Per-role columns for the `list --table` matrix: one entry per role in
+/// `Role::ALL` order, each carrying the role's tool names (name-sorted, with
+/// experimental tools tagged). Pure so it can be asserted on directly.
+fn list_matrix_columns(registry: &Registry) -> Vec<(String, Vec<String>)> {
+    use crate::registry::types::Role;
+
+    Role::ALL
+        .iter()
+        .map(|&role| {
+            let mut tools = registry.tools_for_role(role);
+            tools.sort_by(|a, b| a.name.cmp(&b.name));
+            let cells = tools
+                .iter()
+                .map(|t| {
+                    if t.experimental {
+                        format!("{} 🧪", t.name)
+                    } else {
+                        t.name.clone()
+                    }
+                })
+                .collect();
+            (role.to_string(), cells)
+        })
+        .collect()
+}
+
+/// Compact matrix of tools by role: one column per role (in `Role::ALL` order),
+/// each role's tools stacked down its column and experimental ones tagged, in a
+/// full-grid framed table so the columns read cleanly (`list --table`).
+fn print_list_table(registry: &Registry) {
+    use comfy_table::{ContentArrangement, Table, presets};
+
+    let columns = list_matrix_columns(registry);
+    let depth = columns.iter().map(|(_, c)| c.len()).max().unwrap_or(0);
+
+    let mut table = Table::new();
+    table
+        .load_preset(presets::UTF8_FULL)
+        .set_content_arrangement(ContentArrangement::Dynamic);
+    table.set_header(
+        columns
+            .iter()
+            .map(|(header, _)| theme::accent(header).to_string())
+            .collect::<Vec<_>>(),
+    );
+    for i in 0..depth {
+        table.add_row(
+            columns
+                .iter()
+                .map(|(_, cells)| cells.get(i).cloned().unwrap_or_default())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    println!();
+    print_rule("Tools by role");
+    println!();
+    for line in table.to_string().lines() {
+        println!("{}{}", theme::PAD, line);
+    }
+    println!();
+    println!(
+        "{}{}",
+        theme::PAD,
+        theme::dim("🧪 experimental — needs --allow-experimental")
+    );
+    println!();
+}
+
+pub fn print_list(registry: &Registry, format: Format, table: bool) {
     use crate::registry::view;
 
     if format == Format::Json {
@@ -1074,6 +1143,11 @@ pub fn print_list(registry: &Registry, format: Format) {
             "roles": view::role_views(),
             "tools": view::tool_views(registry),
         }));
+        return;
+    }
+
+    if table {
+        print_list_table(registry);
         return;
     }
 
@@ -1164,6 +1238,42 @@ mod tests {
             network: Network::Preview,
             nix: false,
         }
+    }
+
+    #[test]
+    fn list_matrix_columns_group_tools_by_role_and_tag_experimental() {
+        let reg = Registry::load().unwrap();
+        let cols = list_matrix_columns(&reg);
+
+        // One column per role, in canonical Role::ALL order.
+        let headers: Vec<&str> = cols.iter().map(|(h, _)| h.as_str()).collect();
+        assert_eq!(
+            headers,
+            vec![
+                "On-chain",
+                "Off-chain",
+                "Infrastructure",
+                "Devnet",
+                "Formal methods"
+            ]
+        );
+
+        let col = |name: &str| -> &Vec<String> { &cols.iter().find(|(h, _)| h == name).unwrap().1 };
+
+        // A tool filling two roles appears in both columns (e.g. Scalus).
+        assert!(col("On-chain").iter().any(|t| t == "Scalus"));
+        assert!(col("Off-chain").iter().any(|t| t == "Scalus"));
+
+        // Experimental tools are tagged; stable ones are not.
+        assert!(col("Off-chain").iter().any(|t| t == "Tx3 🧪"));
+        assert!(col("Formal methods").iter().any(|t| t == "Blaster 🧪"));
+        assert!(col("On-chain").iter().any(|t| t == "Aiken"));
+
+        // Cells are name-sorted within a column.
+        let infra = col("Infrastructure");
+        let mut sorted = infra.clone();
+        sorted.sort();
+        assert_eq!(infra, &sorted);
     }
 
     #[test]

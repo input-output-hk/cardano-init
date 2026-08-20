@@ -47,7 +47,7 @@ pub enum Command {
     Doctor,
 
     /// List the available roles and tools (use --format json for agents)
-    List,
+    List(ListArgs),
 
     /// Add or swap a tool/role in the project in the current directory
     Add(AddArgs),
@@ -55,6 +55,15 @@ pub enum Command {
     /// Remove a role (or an infrastructure provider) from the project in the
     /// current directory
     Remove(RemoveArgs),
+}
+
+/// Arguments for `list`.
+#[derive(clap::Args, Debug, Default)]
+pub struct ListArgs {
+    /// Show a compact matrix of tools by role (human output only; `--format
+    /// json` is unaffected)
+    #[arg(long)]
+    pub table: bool,
 }
 
 /// Flags shared by the update commands (add / remove).
@@ -593,8 +602,8 @@ pub fn run() -> i32 {
 
     let result = match cli.command {
         Some(Command::Doctor) => run_doctor(&registry, format),
-        Some(Command::List) => {
-            output::print_list(&registry, format);
+        Some(Command::List(args)) => {
+            output::print_list(&registry, format, args.table);
             Ok(())
         }
         Some(Command::Add(args)) => update::run_add(args, &registry, format),
