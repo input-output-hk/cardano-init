@@ -5,7 +5,7 @@
 
 ### Go from zero to a running Cardano protocol in one command.
 
-Pick a tool for each role you need — on-chain, off-chain, devnet, infrastructure, formal-methods — and `cardano-init` generates a monorepo where every component is **already wired together**, plus a worked end-to-end example that **builds and passes its tests out of the box**.
+Pick a tool for each role you need (on-chain, off-chain, devnet, infrastructure, formal-methods) and `cardano-init` generates a monorepo where every component is **already wired together**, plus a worked end-to-end example that **builds and passes its tests out of the box**.
 
 <p align="center">
   <img src="assets/demo.gif" alt="cardano-init scaffolds a full stack in one command, then just test passes out of the box" width="800">
@@ -36,7 +36,7 @@ $ cd my-protocol && just test
 - 🩺 **Never stuck on setup:** A built-in dependency `doctor` detects your toolchains and tells you the exact installer to run for anything missing.
 - 🧪 **Real example:** Every stack ships the same worked gift-card scenario end-to-end, so what you generate actually runs.
 
-## Quick start (pre-release)
+## Quick start
 
 ### Run without installing
 
@@ -91,25 +91,55 @@ cargo install --path .
 
 ### Usage
 
+#### Normal workflow
+
 ```bash
+# 1. Create your project
+cardano-init --name my-protocol --on-chain aiken --off-chain meshjs --devnet yaci
+
+# 2. Enter Modify the protocol to you liking
+cd my-protocol 
+
+# 3. Run tests often
+just test
+```
+
+Every generated project is driven by [`just`](https://just.systems): `just build`, `just test`, `just clean`. 
+Missing a dependency? Run the built-in dependency doctor [`cardano-init doctor`](docs/ROADMAP.md) and it tells you exactly how to solve it.
+
+#### Other useful commands
+
+```bash
+# Check how to use it
+cardano-init help
+
+# Check available tooling
+cardano-init list
+
 # Interactive guided setup — the easiest way to start
 cardano-init
-
-# One-shot (non-interactive)
-cardano-init --name my-protocol --on-chain aiken --off-chain meshjs --devnet yaci
 
 # Fullstack: one tool for both on-chain and off-chain, as a single `protocol/` component
 cardano-init --name my-protocol --fullstack scalus
 
 # Preview what would be generated, without writing
 cardano-init --name my-protocol --on-chain aiken --dry-run
+
+#Check if you have all dependencies needed (inside generated project)
+cardano-init doctor
+
+# Add/replace tool
+cardano-init add --on-chain plinth
+
+# Remove a tool
+cardano-init remove --devnet yaci
 ```
 
-Every generated project is driven by [`just`](https://just.systems): `just build`, `just test`, `just clean` (and per-component `just -f <dir>/Justfile dev` where a watch/daemon mode exists). Missing a toolchain? Run the built-in dependency [`doctor`](docs/ROADMAP.md) and it tells you exactly which installer to use.
 
 ## Tools
 
-Tools currently in the registry (✅ available · 🧪 experimental, opt-in via `--allow-experimental` · ⬜ planned). Infrastructure is multi-tool and provisioned via `cardano-up`; every other role takes one tool.
+Tools currently in the registry (✅ available · ⬜ planned· 🧪 experimental):
+
 
 | On-chain | Off-chain | Devnet | Infrastructure | Formal methods |
 |----------|-----------|--------|----------------|----------------|
@@ -121,6 +151,10 @@ Tools currently in the registry (✅ available · 🧪 experimental, opt-in via 
 | ⬜ Opshin | ⬜ Blaze | | ✅ Cardano Node API | |
 | | ⬜ Elm Cardano | | ✅ Dingo | |
 | | ⬜ PyCardano | | | |
+
+
+You can also check locally with `cardano-init list --table`.
+Infrastructure provisioned via [cardano-up](https://github.com/blinklabs-io/cardano-up).
 
 ## User Documentation
 
