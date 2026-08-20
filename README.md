@@ -105,7 +105,7 @@ just test
 ```
 
 Every generated project is driven by [`just`](https://just.systems): `just build`, `just test`, `just clean`. 
-Missing a dependency? Run the built-in dependency doctor [`cardano-init doctor`](docs/ROADMAP.md) and it tells you exactly how to solve it.
+Missing a dependency? Run the built-in dependency doctor `cardano-init doctor` and it tells you exactly how to solve it.
 
 #### Other useful commands
 
@@ -116,7 +116,7 @@ cardano-init help
 # Check available tooling
 cardano-init list
 
-# Interactive guided setup — the easiest way to start
+# Interactive guided setup (the easiest way to start)
 cardano-init
 
 # Fullstack: one tool for both on-chain and off-chain, as a single `protocol/` component
