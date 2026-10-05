@@ -736,7 +736,16 @@ fn run_doctor(registry: &Registry, format: Format) -> Result<(), CliError> {
     let (env, report, tooling) = with_spinner("Probing environment…", format, || {
         let env = probe::detect_environment(&catalog);
         let report = doctor::resolve_all(&required, &catalog, &env);
-        let tooling = doctor::present_tooling(&catalog, registry, &env);
+        let tooling = if scan.components.is_empty() && scan.unrecognized.is_empty() {
+            doctor::present_tooling(&catalog, registry, &env)
+        } else {
+            report
+                .deps
+                .iter()
+                .filter(|d| d.present)
+                .map(|d| d.id.clone())
+                .collect()
+        };
         (env, report, tooling)
     });
 
