@@ -953,15 +953,18 @@ pub fn print_doctor(
     scan: &ScanResult,
     report: &Report,
     env: &Environment,
+    tooling: &[String],
     registry: &Registry,
     format: Format,
 ) {
     let installers = detected_installers(env);
+    let project_detected = !(scan.components.is_empty() && scan.unrecognized.is_empty());
 
     if format == Format::Json {
         emit_json_ok(json!({
             "all_required_present": report.all_required_present,
-            "environment": { "os": env.os, "installers": installers },
+            "environment": { "os": env.os, "installers": installers, "tooling": tooling },
+            "project_detected": project_detected,
             "components": scan.components,
             "unrecognized": scan.unrecognized,
             "deps": report.deps,
@@ -969,9 +972,8 @@ pub fn print_doctor(
         return;
     }
 
-    // The dependency binaries already present on PATH. Surfaced as the panel's
-    // `tooling` row (a missing one shows up in "Missing dependencies", not here)
-    // and reused below to mark each component's readiness.
+    // The required deps already present on PATH, used below to mark each
+    // component's readiness.
     let present: std::collections::HashSet<&str> = report
         .deps
         .iter()
@@ -986,12 +988,10 @@ pub fn print_doctor(
     } else {
         installers.join(", ")
     };
-    let mut present_list: Vec<&str> = present.iter().copied().collect();
-    present_list.sort_unstable();
-    let tooling = if present_list.is_empty() {
+    let tooling = if tooling.is_empty() {
         "none detected".to_string()
     } else {
-        present_list.join(", ")
+        tooling.join(", ")
     };
     let env_label_w = "installers".len();
     let env_rows = vec![
@@ -1013,10 +1013,18 @@ pub fn print_doctor(
     // dependencies are present, not merely that the component was detected.
 
     println!();
-    if scan.components.is_empty() && scan.unrecognized.is_empty() {
+    if !project_detected {
         println!(
-            "  {}",
-            theme::dim("No generated components detected in this directory.")
+            "  {} {}",
+            theme::warn_mark(),
+            theme::strong("No Cardano project detected in this directory.")
+        );
+        println!(
+            "    {} {} {} {}",
+            theme::accent("→"),
+            theme::dim("run"),
+            theme::command("cardano-init"),
+            theme::dim("to scaffold one, or cd into a generated project")
         );
     } else {
         let mut table = borderless_table();
@@ -1060,7 +1068,9 @@ pub fn print_doctor(
     }
 
     // Missing-dependency advice (present tooling is shown in the panel above).
-    print_dep_advice(report);
+    if project_detected || !report.all_required_present {
+        print_dep_advice(report);
+    }
     println!();
 }
 
