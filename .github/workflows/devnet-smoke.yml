@@ -41,6 +41,8 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.label.name == 'run-devnet-smoke'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      failed: ${{ steps.failed.outputs.failed }}
     steps:
       - uses: actions/checkout@v5
 
@@ -97,10 +99,17 @@ jobs:
           just build
           just test
 
+      # Set only when a step failed or the job timed out. A lost runner runs no
+      # steps, so it leaves this unset and doesn't file an issue.
+      - name: Mark failure
+        id: failed
+        if: failure() || cancelled()
+        run: echo "failed=true" >> "$GITHUB_OUTPUT"
+
   notify-on-failure:
     needs: devnet
     # Only file an issue for the unattended scheduled run, not manual debugging.
-    if: failure() && github.event_name == 'schedule'
+    if: failure() && github.event_name == 'schedule' && needs.devnet.outputs.failed == 'true'
     runs-on: ubuntu-latest
     permissions:
       issues: write
