@@ -733,13 +733,23 @@ fn run_doctor(registry: &Registry, format: Format) -> Result<(), CliError> {
     let scan = probe::scan_project(&cwd, registry);
 
     let required = required_deps(scan.components.iter().map(|c| c.tool_id.as_str()), registry);
-    let (env, report) = with_spinner("Probing environment…", format, || {
+    let (env, report, tooling) = with_spinner("Probing environment…", format, || {
         let env = probe::detect_environment(&catalog);
         let report = doctor::resolve_all(&required, &catalog, &env);
-        (env, report)
+        let tooling = if scan.components.is_empty() && scan.unrecognized.is_empty() {
+            doctor::present_tooling(&catalog, registry, &env)
+        } else {
+            report
+                .deps
+                .iter()
+                .filter(|d| d.present)
+                .map(|d| d.id.clone())
+                .collect()
+        };
+        (env, report, tooling)
     });
 
-    output::print_doctor(&scan, &report, &env, registry, format);
+    output::print_doctor(&scan, &report, &env, &tooling, registry, format);
     Ok(())
 }
 
