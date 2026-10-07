@@ -594,7 +594,7 @@ install=[ {brew="process-compose"}, {go="github.com/f1bonacc1/process-compose@la
 ```
 
 ```rust
-struct DepRecipe { binaries: Vec<String>, docs: String, install: Vec<(Installer, String)> /* ordered */, support: Vec<SupportLink> }
+struct DepRecipe { binaries: Vec<String>, docs: String, install: Vec<(Installer, String)>, support: Vec<SupportLink> } // ordered
 struct SupportLink { name: String, url: String }   // optional `support` list; defaults to empty
 type DepCatalog = HashMap<String, DepRecipe>;   // dep id → recipe (loaded from registry/deps.toml)
 ```
