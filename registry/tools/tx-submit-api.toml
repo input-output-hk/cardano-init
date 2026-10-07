@@ -8,6 +8,9 @@ you don't have to speak the node's submission protocol directly. Run as \
 infrastructure via cardano-up (which pulls in a Cardano node automatically). \
 Its endpoint is published to the project .env as TX_SUBMIT_URL."""
 website = "https://github.com/blinklabs-io/tx-submit-api"
+community = [
+  { name = "Discord (Blink Labs)", url = "https://discord.gg/5fPRZnX4qW" },
+]
 languages = []
 system_deps = ["docker", "cardano-up"]
 nix_packages = []

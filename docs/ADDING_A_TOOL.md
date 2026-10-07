@@ -21,6 +21,10 @@ description = """\
 One to three sentences. What does this tool do, and when should \
 someone choose it over alternatives?"""
 website     = "https://mytool.dev"
+community   = [                        # Optional: official help channels, shown by `doctor` and `list --format json`
+  { name = "Discord", url = "https://discord.gg/…" },
+  { name = "GitHub Discussions", url = "https://github.com/acme/mytool/discussions" },
+]
 languages   = ["typescript"]           # Languages the generated project uses
 system_deps = ["mytool-cli"]           # What the user needs installed (drives `doctor`; each id needs a registry/deps.toml entry)
 nix_packages = ["mytool"]              # Nix package name(s), if available (omit if none)
@@ -39,6 +43,19 @@ detect = [{ file = "package.json", contains = "mytool" }]  # generic filename �
 ```
 
 Only tools that declare a role are tested against that role's directory, so signatures only need to disambiguate *within* a role. A directory that matches nothing is reported as "unrecognized" — `doctor` checks dependencies, it does not validate that the component builds (that's `just test`).
+
+**Supporting tools.** In the dep's `registry/deps.toml` entry, you can add an optional `support` list pointing users at your language's editor tooling (VS Code / Neovim extensions, a language server, a playground). `cardano-init doctor` lists these for every detected tool:
+
+```toml
+[mytool-cli]
+binaries = ["mytool"]
+docs = "https://mytool.dev/install"
+install = [{ npm = "mytool-cli" }]
+support = [
+  { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=acme.mytool" },
+  { name = "Neovim plugin", url = "https://github.com/acme/mytool.nvim" },
+]
+```
 
 A tool can fill multiple roles. Add one `[roles.<role>]` section per role:
 

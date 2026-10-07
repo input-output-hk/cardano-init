@@ -9,6 +9,9 @@ cardano-up (it does not run a separate cardano-node). Its Blockfrost-compatible 
 API is published to the project .env as INDEXER_URL and its socket as \
 NODE_SOCKET_PATH, so off-chain components connect to it automatically."""
 website = "https://github.com/blinklabs-io/dingo"
+community = [
+  { name = "Discord (Blink Labs)", url = "https://discord.gg/5fPRZnX4qW" },
+]
 languages = []
 system_deps = ["docker", "cardano-up"]
 nix_packages = []

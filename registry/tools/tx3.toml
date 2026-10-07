@@ -11,6 +11,9 @@ devnet role — it speaks TRP, not the Blockfrost API that Yaci serves. This \
 template ships the Gift Card example with a bundled ephemeral-devnet test \
 harness."""
 website = "https://docs.txpipe.io/tx3"
+community = [
+  { name = "Discord (TxPipe)", url = "https://discord.gg/eVc6HJrYmP" },
+]
 languages = ["tx3", "typescript", "rust", "go", "python"]
 system_deps = ["node", "tx3"]
 nix_packages = []

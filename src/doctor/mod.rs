@@ -17,7 +17,7 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
-use catalog::{DepCatalog, DepRecipe};
+use catalog::{DepCatalog, DepRecipe, SupportLink};
 use installers::Installer;
 use probe::Environment;
 
@@ -71,6 +71,8 @@ pub struct DepStatus {
     /// Omitted only when the dep is already present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub support: Vec<SupportLink>,
 }
 
 /// The full doctor report for a set of required dependencies.
@@ -216,6 +218,7 @@ pub fn resolve_all(required: &[String], catalog: &DepCatalog, env: &Environment)
             plan,
             alternatives,
             docs,
+            support: recipe.map_or_else(Vec::new, |r| r.support.clone()),
         });
     }
 

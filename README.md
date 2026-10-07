@@ -164,6 +164,8 @@ Full user docs live in **[docs/USER_DOCS.md](docs/USER_DOCS.md)**:
 - [For coding agents](docs/USER_DOCS.md#for-coding-agents) — the machine-readable interface and generated `AGENTS.md`
 - [How it relates to `aikup`, `cardano-up`, and friends](docs/USER_DOCS.md#how-it-relates-to-aikup-cardano-up-and-friends)
 - [Infrastructure providers](docs/USER_DOCS.md#infrastructure-providers)
+- [Supporting tools](docs/USER_DOCS.md#supporting-tools): editor extensions (VS Code, Neovim, Zed), language servers, CBOR/transaction inspectors, explorers, and the testnet faucet
+- [Getting help](docs/USER_DOCS.md#getting-help): each tool's official Discord / GitHub Discussions, plus general Cardano developer channels
 
 ## Development Documentation
 

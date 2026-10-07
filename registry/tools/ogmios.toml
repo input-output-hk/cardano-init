@@ -9,6 +9,10 @@ without speaking the raw node protocols. Run as infrastructure via cardano-up, \
 which pulls in a Cardano node automatically. Its endpoint is published to the \
 project .env as OGMIOS_URL."""
 website = "https://ogmios.dev"
+community = [
+  { name = "Discord (IOG Technical Community, #ogmios)", url = "https://discord.gg/ZeyDn65t5v" },
+  { name = "GitHub Discussions", url = "https://github.com/CardanoSolutions/ogmios/discussions" },
+]
 languages = []
 system_deps = ["docker", "cardano-up"]
 nix_packages = []

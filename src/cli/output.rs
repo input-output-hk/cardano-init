@@ -1061,7 +1061,58 @@ pub fn print_doctor(
 
     // Missing-dependency advice (present tooling is shown in the panel above).
     print_dep_advice(report);
+    print_support_links(report);
+    print_community_links(scan, registry);
     println!();
+}
+
+fn print_community_links(scan: &ScanResult, registry: &Registry) {
+    let mut table = borderless_table();
+    table.set_content_arrangement(comfy_table::ContentArrangement::Disabled);
+    let mut any = false;
+    for comp in &scan.components {
+        let Some(tool) = registry.get(&comp.tool_id) else {
+            continue;
+        };
+        for (i, link) in tool.community.iter().enumerate() {
+            let label = if i == 0 { tool.name.as_str() } else { "" };
+            table.add_row(vec![
+                theme::strong(label).to_string(),
+                link.name.clone(),
+                theme::link(&link.url).to_string(),
+            ]);
+            any = true;
+        }
+    }
+    if !any {
+        return;
+    }
+    println!();
+    print_rule("Get help");
+    print_table(table, theme::PAD);
+}
+
+fn print_support_links(report: &Report) {
+    let mut table = borderless_table();
+    table.set_content_arrangement(comfy_table::ContentArrangement::Disabled);
+    let mut any = false;
+    for dep in &report.deps {
+        for (i, link) in dep.support.iter().enumerate() {
+            let label = if i == 0 { dep.id.as_str() } else { "" };
+            table.add_row(vec![
+                theme::strong(label).to_string(),
+                link.name.clone(),
+                theme::link(&link.url).to_string(),
+            ]);
+            any = true;
+        }
+    }
+    if !any {
+        return;
+    }
+    println!();
+    print_rule("Supporting tools");
+    print_table(table, theme::PAD);
 }
 
 /// Print the registry (roles + tools) for `cardano-init list`: human-readable

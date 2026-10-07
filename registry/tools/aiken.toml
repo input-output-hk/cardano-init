@@ -7,6 +7,11 @@ purpose-built syntax inspired by Rust and Gleam, and compiles to \
 UPLC (Untyped Plutus Core). It's the most popular choice for \
 writing Cardano validators and produces CIP-57 blueprints natively."""
 website = "https://aiken-lang.org"
+community = [
+  { name = "Discord (PRAGMA)", url = "https://discord.gg/JnWjkrErJr" },
+  { name = "Discord (TxPipe)", url = "https://discord.gg/eVc6HJrYmP" },
+  { name = "GitHub Discussions", url = "https://github.com/aiken-lang/aiken/discussions" },
+]
 languages = ["aiken"]
 system_deps = ["aiken"]
 nix_packages = ["aiken"]

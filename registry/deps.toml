@@ -32,11 +32,23 @@ install = [{ brew = "node" }, { apt = "nodejs" }, { winget = "OpenJS.NodeJS" }, 
 binaries = ["trix"]
 docs = "https://docs.txpipe.io/tx3/installation"
 install = [{ tx3up = "" }]
+support = [
+  { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=TxPipe.tx3" },
+  { name = "Language server", url = "https://github.com/tx3-lang/tx3-lsp" },
+]
 
 [aiken]
 binaries = ["aiken"]
 docs = "https://aiken-lang.org/installation-instructions"
 install = [{ aikup = "" }, { nix = "aiken" }]
+support = [
+  { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=TxPipe.aiken" },
+  { name = "Neovim plugin", url = "https://github.com/aiken-lang/editor-integration-nvim" },
+  { name = "Zed extension", url = "https://github.com/aiken-lang/zed-aiken" },
+  { name = "Emacs mode", url = "https://github.com/aiken-lang/aiken-mode" },
+  { name = "JetBrains plugin", url = "https://github.com/MedusaLabs-cardano/intellij_aiken" },
+  { name = "Online playground", url = "https://play.aiken-lang.org" },
+]
 
 [sbt]
 binaries = ["sbt"]
@@ -44,6 +56,12 @@ docs = "https://www.scala-sbt.org/download.html"
 # No stock `apt` package: sbt ships only via its own scala-sbt apt repo, which a
 # single-package recipe can't add — so apt is deliberately omitted (use brew/nix).
 install = [{ brew = "sbt" }, { nix = "sbt" }]
+support = [
+  { name = "Metals (Scala language server)", url = "https://scalameta.org/metals/" },
+  { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=scalameta.metals" },
+  { name = "Neovim plugin", url = "https://github.com/scalameta/nvim-metals" },
+  { name = "IntelliJ IDEA Scala plugin", url = "https://plugins.jetbrains.com/plugin/1347-scala" },
+]
 
 [jvm]
 binaries = ["java"]
@@ -66,6 +84,10 @@ binaries = ["ghc"]
 docs = "https://www.haskell.org/ghcup/"
 # Plinth currently targets GHC 9.6.x; ghcup lets you pin that series.
 install = [{ brew = "ghc" }, { apt = "ghc" }, { nix = "haskell.compiler.ghc966" }, { curl = "https://get-ghcup.haskell.org" }]
+support = [
+  { name = "Haskell Language Server", url = "https://haskell-language-server.readthedocs.io" },
+  { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=haskell.haskell" },
+]
 
 # --- installer-provider deps (reached via installer `bootstrap` lists) ---
 

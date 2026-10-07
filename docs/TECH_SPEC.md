@@ -489,15 +489,16 @@ A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) 
   ],
   "tools": [
     { "id": "aiken", "name": "Aiken", "description": "…", "website": "https://…",
+      "community": [ { "name": "Discord (PRAGMA)", "url": "https://discord.gg/…" } ],
       "languages": ["aiken"], "roles": ["on-chain"], "fullstack": false, "experimental": false },
-    { "id": "blaster", "name": "Blaster", "description": "…", "website": "https://…",
+    { "id": "blaster", "name": "Blaster", "description": "…", "website": "https://…", "community": [],
       "languages": ["blaster-spec"], "roles": ["formal-methods"], "fullstack": false, "experimental": true }
     /* … tools sorted by id; each tool's roles sorted … */
   ]
 }}
 ```
 
-`list` renders from a shared model (`registry::view`: `role_views()` / `tool_views()`). The human output has two forms: the default (a Roles table plus a per-tool block shared with `--help`), and a compact **`--table`** view — a full-grid matrix with one column per role (in `Role::ALL` order), each role's tools stacked and experimental ones tagged `🧪`. `--table` is a human-presentation flag only; it has no effect under `--format json` (the JSON already carries the same data). `roles[].multiple` is `true` only for infrastructure (`Role::multiple`). `tools[].fullstack` is `true` when the tool declares a `[fullstack]` template (i.e. `--fullstack <tool>` is valid); it is an additive field (no `schema_version` bump). `fullstack` is a capability, **not** a role — it never appears in `tools[].roles` or in the `roles` array. `tools[].experimental` is `true` for tools that are unstable and/or not yet build-green (§3.2.1); selecting one needs `--allow-experimental` — also additive.
+`list` renders from a shared model (`registry::view`: `role_views()` / `tool_views()`). The human output has two forms: the default (a Roles table plus a per-tool block shared with `--help`), and a compact **`--table`** view — a full-grid matrix with one column per role (in `Role::ALL` order), each role's tools stacked and experimental ones tagged `🧪`. `--table` is a human-presentation flag only; it has no effect under `--format json` (the JSON already carries the same data). `roles[].multiple` is `true` only for infrastructure (`Role::multiple`). `tools[].fullstack` is `true` when the tool declares a `[fullstack]` template (i.e. `--fullstack <tool>` is valid); it is an additive field (no `schema_version` bump). `fullstack` is a capability, **not** a role — it never appears in `tools[].roles` or in the `roles` array. `tools[].experimental` is `true` for tools that are unstable and/or not yet build-green (§3.2.1); selecting one needs `--allow-experimental` — also additive. `tools[].community` lists the tool's official help channels (Discord, GitHub Discussions, …) as `{ name, url }`, from the optional `community` field in the tool's TOML; empty when none (additive). The standalone `doctor` shows these for each detected component under a "Get help" heading.
 
 ---
 
@@ -579,6 +580,7 @@ install=[ {npm="@aiken-lang/aikup"}, {curl="https://install.aiken-lang.org"}, {p
 binaries=["aiken"]
 docs="https://aiken-lang.org/installation-instructions"
 install=[ {aikup=""}, {nix="aiken"} ]
+support=[ {name="VS Code extension", url="https://marketplace.visualstudio.com/items?itemName=TxPipe.aiken"}, {name="Neovim plugin", url="https://github.com/aiken-lang/editor-integration-nvim"} ]
 
 [just]
 binaries=["just"] 
@@ -592,7 +594,8 @@ install=[ {brew="process-compose"}, {go="github.com/f1bonacc1/process-compose@la
 ```
 
 ```rust
-struct DepRecipe { binaries: Vec<String>, docs: String, install: Vec<(Installer, String)> }  // ordered
+struct DepRecipe { binaries: Vec<String>, docs: String, install: Vec<(Installer, String)> /* ordered */, support: Vec<SupportLink> }
+struct SupportLink { name: String, url: String }   // optional `support` list; defaults to empty
 type DepCatalog = HashMap<String, DepRecipe>;   // dep id → recipe (loaded from registry/deps.toml)
 ```
 
@@ -641,7 +644,8 @@ The two passes are what make a directly-usable installer win over bootstrapping 
       "plan": [ { "installer": "npm",   "command": "npm install -g @aiken-lang/aikup" },
                 { "installer": "aikup", "command": "aikup install" } ],
       "alternatives": [ { "installer": "nix", "command": "nix profile install nixpkgs#aiken", "available": false } ],
-      "docs": "https://aiken-lang.org/installation-instructions" }
+      "docs": "https://aiken-lang.org/installation-instructions",
+      "support": [ { "name": "VS Code extension", "url": "https://marketplace.visualstudio.com/items?itemName=TxPipe.aiken" } ] }
   ]
 }}
 ```
@@ -651,6 +655,7 @@ The two passes are what make a directly-usable installer win over bootstrapping 
 - `plan` = the ordered, possibly multi-step install sequence the resolver produced **for this host** (empty when present; omitted/empty with only `docs` when unresolved).
 - `alternatives` (additive) = the recipe's *other* install methods, so the user can pick a different installer. Each is `{ installer, command, available }` where `available` = that installer is present on this host now. Ordered available-first, then those needing their installer installed; the method already used by `plan` is excluded. Omitted when the dep is present or the recipe offers no other method. The presenter lists available ones as plain commands and tags the rest `requires <installer>`.
 - `required` distinguishes tiers; `all_required_present` ignores recommended deps. The presenter shows missing required deps prominently and recommended ones as a soft note with `reason`. `docs` is always available so advice is never empty (FR-20).
+- `support` (additive) = the recipe's supporting tools (editor extensions, language servers, inspectors) as `{ name, url }`. Unlike `docs`, it is reported **whether or not** the dep is present (editor tooling matters after install too); omitted when the recipe declares none. It's advice only: never installed or probed. The standalone `doctor` lists it under a "Supporting tools" heading; generation-time advice does not.
 - Doctor output is **host-dependent by design** (it reflects detected installers) and is **not** part of the byte-identical generation contract (§11). v1 prints the plan; v2 executes it (same data, same resolver).
 
 ### 9.5 Referential integrity (tests)

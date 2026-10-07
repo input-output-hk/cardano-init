@@ -4,7 +4,7 @@ use rust_embed::RustEmbed;
 use serde::Deserialize;
 
 use super::types::{
-    CompatConfig, DetectSignature, EnvMapping, InfraConfig, Role, RoleConfig, Seam, ToolDef,
+    CompatConfig, DetectSignature, EnvMapping, InfraConfig, Link, Role, RoleConfig, Seam, ToolDef,
     UnknownRoleError, UnknownSeamError,
 };
 
@@ -106,6 +106,8 @@ struct ToolMetaToml {
     name: String,
     description: String,
     website: String,
+    #[serde(default)]
+    community: Vec<Link>,
     languages: Vec<String>,
     #[serde(default)]
     system_deps: Vec<String>,
@@ -217,6 +219,7 @@ fn to_tool_def(file_name: &str, raw: ToolFileToml) -> Result<ToolDef, RegistryEr
         name: raw.tool.name,
         description: raw.tool.description,
         website: raw.tool.website,
+        community: raw.tool.community,
         languages: raw.tool.languages,
         system_deps: raw.tool.system_deps,
         nix_packages: raw.tool.nix_packages,
@@ -553,6 +556,15 @@ mod tests {
                 "description should not be empty"
             );
             assert!(!tool.website.is_empty(), "website should not be empty");
+            for link in &tool.community {
+                assert!(!link.name.is_empty(), "{}: unnamed community link", tool.id);
+                assert!(
+                    link.url.starts_with("https://"),
+                    "{}: community link '{}' is not https",
+                    tool.id,
+                    link.name
+                );
+            }
             // Infrastructure providers (e.g. kupo, ogmios) are not authored in a
             // user-facing language — they're cardano-up packages — so `languages`
             // may legitimately be empty for an infra-only tool. Every other tool

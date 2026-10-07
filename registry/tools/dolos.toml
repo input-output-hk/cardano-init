@@ -9,6 +9,9 @@ cardano-up. It provides its own node socket (it does not run a separate \
 cardano-node), published to the project .env as NODE_SOCKET_PATH, and its gRPC \
 endpoint as DOLOS_GRPC_URL."""
 website = "https://github.com/txpipe/dolos"
+community = [
+  { name = "Discord (TxPipe)", url = "https://discord.gg/eVc6HJrYmP" },
+]
 languages = []
 system_deps = ["docker", "cardano-up"]
 nix_packages = []
