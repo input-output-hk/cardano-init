@@ -122,6 +122,9 @@ cardano-init
 # Fullstack: one tool for both on-chain and off-chain, as a single `protocol/` component
 cardano-init --name my-protocol --fullstack scalus
 
+# Short flags and aliases: -n (--name), -p/-f/--protocol (--fullstack), --on/--off, -i, -d, -e
+cardano-init -n my-protocol -p scalus -d yaci
+
 # Preview what would be generated, without writing
 cardano-init --name my-protocol --on-chain aiken --dry-run
 
