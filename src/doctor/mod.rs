@@ -228,6 +228,29 @@ pub fn resolve_all(required: &[String], catalog: &DepCatalog, env: &Environment)
     }
 }
 
+/// The Cardano-relevant tooling installed on this host, independent of what the
+/// current project requires: the base dep plus every tool's `system_deps`,
+/// filtered to those present, sorted and deduplicated. Installer-provider-only
+/// deps (aikup, rustup, go, …) are excluded — they surface as installers.
+pub fn present_tooling(
+    catalog: &DepCatalog,
+    registry: &crate::registry::loader::Registry,
+    env: &Environment,
+) -> Vec<String> {
+    let mut ids: Vec<String> = std::iter::once(BASE_DEP.to_string())
+        .chain(
+            registry
+                .all_tools()
+                .iter()
+                .flat_map(|t| t.system_deps.iter().cloned()),
+        )
+        .filter(|id| catalog.get(id).is_some_and(|r| dep_present(r, env)))
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 // ---------------------------------------------------------------------------
 // Tests (synthetic Environment — no system access)
 // ---------------------------------------------------------------------------
@@ -418,6 +441,20 @@ mod tests {
         assert_eq!(node["plan"][0]["installer"], "brew");
         assert_eq!(node["plan"][0]["command"], "brew install node");
         assert!(node["docs"].is_string());
+    }
+
+    #[test]
+    fn present_tooling_lists_installed_tools_regardless_of_requirement() {
+        let registry = crate::registry::loader::Registry::load().unwrap();
+        let tooling = present_tooling(&catalog(), &registry, &env(&[], &["aiken", "just"]));
+        assert_eq!(tooling, vec!["aiken", "just"]);
+    }
+
+    #[test]
+    fn present_tooling_excludes_installer_only_deps() {
+        let registry = crate::registry::loader::Registry::load().unwrap();
+        let tooling = present_tooling(&catalog(), &registry, &env(&[], &["go", "aikup"]));
+        assert!(tooling.is_empty());
     }
 
     // ---- Referential integrity (TECH_SPEC §9.5) ----
