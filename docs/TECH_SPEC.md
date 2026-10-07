@@ -35,18 +35,20 @@ The `add`/`remove` commands operate on the project in the current directory: the
 
 | Flag | Type | Notes |
 |------|------|-------|
-| `--name <NAME>` | string | Presence selects one-shot mode. Validated per §3.5. |
-| `--on-chain <TOOL_ID>` | string | At most one. |
-| `--off-chain <TOOL_ID>` | string | At most one. |
-| `--fullstack <TOOL_ID>` | string | Sugar for `--on-chain X --off-chain X`. The tool must declare a `[fullstack]` template (§3.2). Mutually exclusive with `--on-chain`/`--off-chain`. |
-| `--infra <TOOL_ID>` | string, repeatable | Multiple allowed (only multi-tool role). |
-| `--devnet <TOOL_ID>` | string | At most one. |
-| `--formal-methods <TOOL_ID>` | string | At most one. |
+| `--name <NAME>`, `-n` | string | Presence selects one-shot mode. Validated per §3.5. |
+| `--on-chain <TOOL_ID>` (aliases `--on`, `--onchain`) | string | At most one. |
+| `--off-chain <TOOL_ID>` (aliases `--off`, `--offchain`) | string | At most one. |
+| `--fullstack <TOOL_ID>`, `-f`, `-p` (alias `--protocol`) | string | Sugar for `--on-chain X --off-chain X`. The tool must declare a `[fullstack]` template (§3.2). Mutually exclusive with `--on-chain`/`--off-chain`. |
+| `--infra <TOOL_ID>`, `-i` (alias `--infrastructure`) | string, repeatable | Multiple allowed (only multi-tool role). |
+| `--devnet <TOOL_ID>`, `-d` | string | At most one. |
+| `--formal-methods <TOOL_ID>` (aliases `--formal`, `--formalmethods`) | string | At most one. |
 | `--nix` | bool | Emit `flake.nix` + `.envrc`. |
-| `--allow-experimental` | bool | Opt in to experimental tools (§3.2.1). Required to select one in one-shot/JSON; pre-acknowledges the interactive confirm. |
-| `--ignore-warning` | bool | Scaffold an off-chain ↔ provider combination the compatibility gate flags as incompatible (§3.2.2). Downgrades the stop to a warning. |
-| `--dry-run` | bool | Plan only; write nothing; exit 0. |
+| `--allow-experimental`, `-e` (alias `--experimental`) | bool | Opt in to experimental tools (§3.2.1). Required to select one in one-shot/JSON; pre-acknowledges the interactive confirm. |
+| `--ignore-warning` (alias `--ignore-warnings`) | bool | Scaffold an off-chain ↔ provider combination the compatibility gate flags as incompatible (§3.2.2). Downgrades the stop to a warning. |
+| `--dry-run` (alias `--dryrun`) | bool | Plan only; write nothing; exit 0. |
 
+
+Short flags and aliases are input conveniences only: they parse to the same canonical flag, and errors, JSON contexts and docs always use the canonical long name. `add`/`remove` accept the same role-flag aliases and `UpdateFlags` aliases (`-e`, `--dryrun`, `--ignore-warnings`); `--force` deliberately has no short form.
 
 Mode resolution: if `--name` is present → one-shot; else → interactive. Providing any one-shot flag **without** `--name` is a usage error (`name_required`).
 

@@ -70,7 +70,7 @@ pub struct ListArgs {
 #[derive(clap::Args, Debug, Default, Clone)]
 pub struct UpdateFlags {
     /// Show the change set without writing anything
-    #[arg(long)]
+    #[arg(long, visible_alias = "dryrun")]
     pub dry_run: bool,
 
     /// Update even when the git working tree has uncommitted changes (there is
@@ -80,11 +80,11 @@ pub struct UpdateFlags {
 
     /// Proceed even if the resulting off-chain ↔ provider selection is flagged
     /// incompatible (downgrades the stop to a warning)
-    #[arg(long)]
+    #[arg(long, visible_alias = "ignore-warnings")]
     pub ignore_warning: bool,
 
     /// Allow experimental tools in the resulting selection
-    #[arg(long)]
+    #[arg(long, short = 'e', visible_alias = "experimental")]
     pub allow_experimental: bool,
 }
 
@@ -92,28 +92,39 @@ pub struct UpdateFlags {
 #[derive(clap::Args, Debug)]
 pub struct AddArgs {
     /// On-chain tool (replaces the current on-chain tool if any)
-    #[arg(long, value_name = "TOOL_ID")]
+    #[arg(long, visible_aliases = ["on", "onchain"], value_name = "TOOL_ID")]
     pub on_chain: Option<String>,
 
     /// Off-chain tool (replaces the current off-chain tool if any)
-    #[arg(long, value_name = "TOOL_ID")]
+    #[arg(long, visible_aliases = ["off", "offchain"], value_name = "TOOL_ID")]
     pub off_chain: Option<String>,
 
     /// Fullstack tool filling both on-chain and off-chain as one `protocol/`
     /// component. Not combinable with --on-chain/--off-chain.
-    #[arg(long, value_name = "TOOL_ID")]
+    #[arg(
+        long,
+        short = 'f',
+        visible_short_alias = 'p',
+        visible_alias = "protocol",
+        value_name = "TOOL_ID"
+    )]
     pub fullstack: Option<String>,
 
     /// Infrastructure provider to add (repeatable)
-    #[arg(long, value_name = "TOOL_ID")]
+    #[arg(
+        long,
+        short = 'i',
+        visible_alias = "infrastructure",
+        value_name = "TOOL_ID"
+    )]
     pub infra: Vec<String>,
 
     /// Devnet tool (replaces the current devnet tool if any)
-    #[arg(long, value_name = "TOOL_ID")]
+    #[arg(long, short = 'd', value_name = "TOOL_ID")]
     pub devnet: Option<String>,
 
     /// Formal-methods tool (replaces the current one if any)
-    #[arg(long, value_name = "TOOL_ID")]
+    #[arg(long, visible_aliases = ["formal", "formalmethods"], value_name = "TOOL_ID")]
     pub formal_methods: Option<String>,
 
     #[command(flatten)]
@@ -125,23 +136,28 @@ pub struct AddArgs {
 #[derive(clap::Args, Debug)]
 pub struct RemoveArgs {
     /// Remove the on-chain component
-    #[arg(long)]
+    #[arg(long, visible_aliases = ["on", "onchain"])]
     pub on_chain: bool,
 
     /// Remove the off-chain component
-    #[arg(long)]
+    #[arg(long, visible_aliases = ["off", "offchain"])]
     pub off_chain: bool,
 
     /// Remove an infrastructure provider by id (repeatable)
-    #[arg(long, value_name = "TOOL_ID")]
+    #[arg(
+        long,
+        short = 'i',
+        visible_alias = "infrastructure",
+        value_name = "TOOL_ID"
+    )]
     pub infra: Vec<String>,
 
     /// Remove the devnet component
-    #[arg(long)]
+    #[arg(long, short = 'd')]
     pub devnet: bool,
 
     /// Remove the formal-methods component
-    #[arg(long)]
+    #[arg(long, visible_aliases = ["formal", "formalmethods"])]
     pub formal_methods: bool,
 
     #[command(flatten)]
@@ -152,32 +168,43 @@ pub struct RemoveArgs {
 #[derive(clap::Args, Debug)]
 pub struct InitArgs {
     /// Project name (required in one-shot mode)
-    #[arg(long)]
+    #[arg(long, short = 'n')]
     pub name: Option<String>,
 
     /// On-chain tool (e.g., aiken, scalus)
-    #[arg(long, value_name = "TOOL_ID")]
+    #[arg(long, visible_aliases = ["on", "onchain"], value_name = "TOOL_ID")]
     pub on_chain: Option<String>,
 
     /// Off-chain tool (e.g., meshjs, scalus)
-    #[arg(long, value_name = "TOOL_ID")]
+    #[arg(long, visible_aliases = ["off", "offchain"], value_name = "TOOL_ID")]
     pub off_chain: Option<String>,
 
     /// Fullstack tool for both on-chain and off-chain, as one `protocol/`
-    /// Not combinable with --on-chain/--off-chain
-    #[arg(long, value_name = "TOOL_ID")]
+    /// component. Not combinable with --on-chain/--off-chain
+    #[arg(
+        long,
+        short = 'f',
+        visible_short_alias = 'p',
+        visible_alias = "protocol",
+        value_name = "TOOL_ID"
+    )]
     pub fullstack: Option<String>,
 
     /// Infrastructure tool (repeatable: --infra kupo --infra ogmios)
-    #[arg(long, value_name = "TOOL_ID")]
+    #[arg(
+        long,
+        short = 'i',
+        visible_alias = "infrastructure",
+        value_name = "TOOL_ID"
+    )]
     pub infra: Vec<String>,
 
     /// Devnet tool (e.g., yaci)
-    #[arg(long, value_name = "TOOL_ID")]
+    #[arg(long, short = 'd', value_name = "TOOL_ID")]
     pub devnet: Option<String>,
 
     /// Formal methods tool (e.g., blaster)
-    #[arg(long, value_name = "TOOL_ID")]
+    #[arg(long, visible_aliases = ["formal", "formalmethods"], value_name = "TOOL_ID")]
     pub formal_methods: Option<String>,
 
     /// Generate Nix flake for dependency management
@@ -185,15 +212,15 @@ pub struct InitArgs {
     pub nix: bool,
 
     /// Opt in to experimental tools
-    #[arg(long)]
+    #[arg(long, short = 'e', visible_alias = "experimental")]
     pub allow_experimental: bool,
 
     /// Show what would be generated without writing to disk
-    #[arg(long)]
+    #[arg(long, visible_alias = "dryrun")]
     pub dry_run: bool,
 
     /// Scaffold a combination the compatibility check flags as incompatible
-    #[arg(long)]
+    #[arg(long, visible_alias = "ignore-warnings")]
     pub ignore_warning: bool,
 }
 
@@ -530,6 +557,10 @@ fn build_help_footer() -> String {
     let _ = writeln!(
         out,
         "  cardano-init --name my-app --on-chain aiken --off-chain meshjs --nix"
+    );
+    let _ = writeln!(
+        out,
+        "  cardano-init -n my-app -p scalus -d yaci            # short flags"
     );
 
     out
@@ -908,6 +939,63 @@ fn resolve_selection_deps(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse(args: &[&str]) -> Cli {
+        Cli::try_parse_from(std::iter::once("cardano-init").chain(args.iter().copied()))
+            .unwrap_or_else(|e| panic!("{args:?} should parse: {e}"))
+    }
+
+    #[test]
+    fn cli_definition_has_no_flag_conflicts() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn role_flag_aliases_parse() {
+        for (on, off) in [("--on", "--off"), ("--onchain", "--offchain")] {
+            let cli = parse(&[on, "aiken", off, "meshjs"]);
+            assert_eq!(cli.init.on_chain.as_deref(), Some("aiken"));
+            assert_eq!(cli.init.off_chain.as_deref(), Some("meshjs"));
+        }
+        for formal in ["--formal", "--formalmethods"] {
+            let cli = parse(&[formal, "blaster"]);
+            assert_eq!(cli.init.formal_methods.as_deref(), Some("blaster"));
+        }
+    }
+
+    #[test]
+    fn fullstack_short_flags_and_alias_parse() {
+        for flag in ["-f", "-p", "--protocol", "--fullstack"] {
+            let cli = parse(&[flag, "scalus"]);
+            assert_eq!(cli.init.fullstack.as_deref(), Some("scalus"), "{flag}");
+        }
+    }
+
+    #[test]
+    fn init_short_flags_parse() {
+        let cli = parse(&[
+            "-n", "demo", "-i", "kupo", "-i", "ogmios", "-d", "yaci", "-e",
+        ]);
+        assert_eq!(cli.init.name.as_deref(), Some("demo"));
+        assert_eq!(cli.init.infra, vec!["kupo", "ogmios"]);
+        assert_eq!(cli.init.devnet.as_deref(), Some("yaci"));
+        assert!(cli.init.allow_experimental);
+    }
+
+    #[test]
+    fn add_and_remove_accept_aliases() {
+        let Some(Command::Add(add)) = parse(&["add", "-p", "scalus", "--dryrun"]).command else {
+            panic!("expected add");
+        };
+        assert_eq!(add.fullstack.as_deref(), Some("scalus"));
+        assert!(add.flags.dry_run);
+
+        let Some(Command::Remove(rm)) = parse(&["remove", "--on", "--formal"]).command else {
+            panic!("expected remove");
+        };
+        assert!(rm.on_chain && rm.formal_methods);
+        assert!(!rm.off_chain);
+    }
 
     #[test]
     fn unknown_tool_error_code_and_context() {
