@@ -75,43 +75,12 @@ just -f infra/Justfile dev
 
 ## Supporting tools
 
-Beyond the toolchains themselves, there's a layer of supporting tools: editor extensions, language servers, and inspectors for the CBOR that Cardano runs on.
+Beyond the toolchains themselves, each language has a layer of supporting tools: editor extensions (VS Code, Neovim, Zed, Emacs, JetBrains), language servers, and online playgrounds. You don't need to hunt for them: `cardano-init doctor` lists the ones that fit the stack it detects in your project, under *Supporting tools* (or as `deps[].support` with `--format json`). The links are kept as data in the `support` field of [`registry/deps.toml`](../registry/deps.toml), sourced from each tool's own docs.
 
-**Per-language editor tooling.** `cardano-init doctor` lists the editor tooling for the stack it detects in your project (text output under *Supporting tools*, and `deps[].support` in `--format json`). The links are data in [`registry/deps.toml`](../registry/deps.toml) (the `support` field), so they stay in one place:
-
-| Language (tool) | Supporting tools |
-|-----------------|------------------|
-| Aiken | [VS Code extension](https://marketplace.visualstudio.com/items?itemName=TxPipe.aiken) · [Neovim plugin](https://github.com/aiken-lang/editor-integration-nvim) · [Zed extension](https://github.com/aiken-lang/zed-aiken) · [Emacs mode](https://github.com/aiken-lang/aiken-mode) · [JetBrains plugin](https://github.com/MedusaLabs-cardano/intellij_aiken) · [Online playground](https://play.aiken-lang.org). Any other LSP-capable editor (e.g. Helix): run the built-in `aiken lsp` |
-| Tx3 | [VS Code extension](https://marketplace.visualstudio.com/items?itemName=TxPipe.tx3) · [Language server](https://github.com/tx3-lang/tx3-lsp) |
-| Haskell (Plinth) | [Haskell Language Server](https://haskell-language-server.readthedocs.io) · [VS Code extension](https://marketplace.visualstudio.com/items?itemName=haskell.haskell) |
-| Scala (Scalus) | [Metals](https://scalameta.org/metals/) · [VS Code extension](https://marketplace.visualstudio.com/items?itemName=scalameta.metals) · [Neovim plugin](https://github.com/scalameta/nvim-metals) · [IntelliJ IDEA Scala plugin](https://plugins.jetbrains.com/plugin/1347-scala) |
-
-**Chain-level tools.** These work with any stack:
-
-| Tool | What it's for |
-|------|---------------|
-| [CQuisitor](https://cardananium.github.io/cquisitor/) | Decode, inspect and validate Cardano transaction CBOR (inputs, outputs, witnesses, redeemers, Phase-1/2 checks) |
-| [cbor.me](https://cbor.me) · [cbor.nemo157.com](https://cbor.nemo157.com) | Generic CBOR ↔ diagnostic-notation decoders (datums, redeemers, `plutus.json` script bytes) |
-| Cardanoscan: [mainnet](https://cardanoscan.io) · [preprod](https://preprod.cardanoscan.io) · [preview](https://preview.cardanoscan.io) | Block explorer: look up transactions, addresses, and scripts |
-| Cexplorer: [mainnet](https://cexplorer.io) · [preprod](https://preprod.cexplorer.io) · [preview](https://preview.cexplorer.io) | Block explorer: look up transactions, addresses, and scripts |
-| [Testnet faucet](https://docs.cardano.org/cardano-testnets/tools/faucet) | Free test ada for `preview` / `preprod` |
+At the chain level, a few kinds of tool help with any stack: CBOR and transaction inspectors (to decode datums, redeemers, and raw transactions), block explorers for mainnet, preprod, and preview, and the testnet faucet for free test ada. The [developers.cardano.org tools directory](https://developers.cardano.org/tools/) is a good place to find them.
 
 ## Getting help
 
-Each tool's official community channels are recorded in its registry entry (`community` in `registry/tools/<tool>.toml`). `cardano-init doctor` lists them for the components it detects (under *Get help*), and `cardano-init list --format json` exposes them as `tools[].community`.
+Every tool in the registry records its official community channels (usually a Discord server, sometimes GitHub Discussions or a forum) in the `community` field of `registry/tools/<tool>.toml`. `cardano-init doctor` shows them for the components it detects, under *Get help*, and `cardano-init list --format json` exposes them for every tool as `tools[].community`. The channels are the ones each project links from its own website or repository.
 
-| Tool | Where to ask |
-|------|--------------|
-| Aiken | [Discord (PRAGMA)](https://discord.gg/JnWjkrErJr) · [GitHub Discussions](https://github.com/aiken-lang/aiken/discussions) |
-| Scalus | [Discord (Lantr)](https://discord.gg/B6tXmBzhTn) |
-| Plinth | [Discord (Intersect)](https://discord.gg/RJWdVsMkvR), channel `#wg-plutus` · [Cardano Stack Exchange, `plutus` tag](https://cardano.stackexchange.com/questions/tagged/plutus) |
-| MeshJS | [Discord](https://discord.gg/dH48jH3BKa) |
-| Evolution SDK | [Discord (No Witness)](https://discord.gg/39xMk9DwQv) · [GitHub Discussions](https://github.com/IntersectMBO/evolution-sdk/discussions) |
-| Tx3, Dolos | [Discord (TxPipe)](https://discord.gg/eVc6HJrYmP) |
-| Yaci DevKit | [Discord (Bloxbean)](https://discord.gg/JtQ54MSw6p) · [GitHub Discussions](https://github.com/bloxbean/yaci-devkit/discussions) |
-| Kupo | [Discord (IOG Technical Community)](https://discord.gg/ZeyDn65t5v), channel `#ogmios` · [GitHub Discussions](https://github.com/CardanoSolutions/kupo/discussions) |
-| Ogmios | [Discord (IOG Technical Community)](https://discord.gg/ZeyDn65t5v), channel `#ogmios` · [GitHub Discussions](https://github.com/CardanoSolutions/ogmios/discussions) |
-| Cardano Node | [GitHub Discussions](https://github.com/IntersectMBO/cardano-node/discussions) · [Discord (Intersect)](https://discord.gg/RJWdVsMkvR) |
-| Dingo, Cardano Node API, Tx Submit API, cardano-up | [Discord (Blink Labs)](https://discord.gg/5fPRZnX4qW) |
-
-**General Cardano developer channels.** For questions that aren't specific to one tool: the [Cardano Foundation developer Discord](https://discord.gg/MmeqpAzKbp), the [Cardano Forum developers category](https://forum.cardano.org/c/developers/29), and [Cardano Stack Exchange](https://cardano.stackexchange.com) (low traffic today, but a useful searchable archive).
+For questions that aren't specific to one tool, the Cardano Foundation's developer channels (Discord, the Cardano Forum, and Cardano Stack Exchange) are linked from [developers.cardano.org](https://developers.cardano.org).
