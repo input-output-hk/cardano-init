@@ -334,6 +334,9 @@ pub struct Selection {
     pub assignments: Vec<RoleAssignment>,
     pub network: Network,
     pub nix: bool,
+    /// Generate the `spec/` protocol-specification folder (default on;
+    /// `--no-spec` turns it off).
+    pub spec: bool,
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,31 @@
+# Protocol specification
+
+This folder holds the **specification** of {{ project_name }}: what the protocol
+does and why it is safe, written as plain text (Markdown) for people to read.
+Nothing in it is executed or built.
+
+Use it to design a change before writing validators, and to review changes
+against: if the code and the spec disagree, one of them is wrong.
+
+## Conventions
+
+- One document per protocol or feature (e.g. `giftcard.md`). Add new ones next
+  to it and list them below.
+- Each document describes **actors**, **assets**, **validators** (parameters,
+  datum, redeemer, and the rules they enforce), **transactions** (inputs,
+  outputs, mint), and the **invariants** the protocol must keep.
+- Keep the spec in step with the code: a pull request that changes a validator
+  updates its spec in the same change.
+- Formal, machine-checked specifications belong to the formal-methods
+  component, not here. This folder is the human-readable source of intent.
+
+## Documents
+
+{%- if spec_example %}
+
+- [`giftcard.md`](giftcard.md): the gift-card example protocol shipped with the
+  generated project. Replace it with your own protocol's spec.
+{%- else %}
+
+_None yet._ Add a document per protocol or feature as you design it.
+{%- endif %}

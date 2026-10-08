@@ -140,6 +140,7 @@ mod tests {
             assignments,
             network: Network::Preview,
             nix: false,
+            spec: true,
         }
     }
 
@@ -281,6 +282,7 @@ mod tests {
             assignments,
             network,
             nix,
+            spec: true,
         }
     }
 

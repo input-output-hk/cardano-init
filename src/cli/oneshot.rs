@@ -96,6 +96,7 @@ pub fn build_selection(
         assignments,
         network: Network::Preview,
         nix,
+        spec: true,
     })
 }
 
@@ -232,6 +233,8 @@ mod tests {
 
         assert_eq!(sel.assignments.len(), 3);
         assert!(sel.nix);
+        // The spec folder is on by default; `--no-spec` is applied by the caller.
+        assert!(sel.spec);
         // Network is fixed at scaffold time; switching is a `.env` edit.
         assert_eq!(sel.network.to_string(), "preview");
     }

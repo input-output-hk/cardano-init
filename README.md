@@ -19,6 +19,7 @@ my-protocol/
 ├── off-chain/    # Tx building (protocol transactions)
 ├── devnet/       # Local chain for integration testing
 ├── blueprint/    # shared CIP-57 contract interface
+├── spec/         # Protocol specification (plain Markdown; --no-spec to skip)
 ├── .env          # shared between components
 ├── Justfile      # Commands to build, test, and clean
 ├── AGENTS.md     # Agent brief

@@ -44,6 +44,7 @@ snap-project/
 ├── AGENTS.md                   # Guidance for AI coding agents (CLAUDE.md imports it)
 ├── devnet/                     # Yaci DevKit (typescript)
 ├── blueprint/                  # CIP-57 Plutus blueprint (drop or build plutus.json here)
+├── spec/                       # Protocol specification (plain Markdown)
 └── README.md
 ```
 
@@ -106,6 +107,7 @@ snap-project/
 ├── .env                        # Shared connection vars (the .env seam)
 ├── devnet/                     # Yaci DevKit — local throwaway chain
 ├── blueprint/                  # CIP-57 Plutus blueprint (plutus.json lands here after on-chain build)
+├── spec/                       # Protocol specification (plain Markdown, not executed)
 └── README.md
 ```
 
@@ -132,6 +134,10 @@ just -f <dir>/Justfile dev        # run its dev/watch/devnet mode (only where it
 ### Devnet — Yaci DevKit (`devnet/`, typescript)
 
 A local throwaway chain for development and integration tests. Its `dev` is a **provider** of the `.env` connection vars. Official docs: https://devkit.yaci.xyz
+
+## Specification (`spec/`)
+
+`spec/` holds the protocol's specification as plain Markdown: actors, assets, validators, transactions and invariants. It is the statement of intent the code is reviewed against. **Read the relevant spec before changing a validator or transaction, and update it in the same change.** If the code and the spec disagree, flag it rather than silently picking one.
 
 ## The worked example
 
@@ -618,4 +624,30 @@ if (clear) {
   console.log(`Wrote Yaci connection details to ${envPath}:`);
   for (const [k, v] of Object.entries(SET)) console.log(`  ${k}=${v}`);
 }
+
+=== spec/README.md ===
+# Protocol specification
+
+This folder holds the **specification** of snap-project: what the protocol
+does and why it is safe, written as plain text (Markdown) for people to read.
+Nothing in it is executed or built.
+
+Use it to design a change before writing validators, and to review changes
+against: if the code and the spec disagree, one of them is wrong.
+
+## Conventions
+
+- One document per protocol or feature (e.g. `giftcard.md`). Add new ones next
+  to it and list them below.
+- Each document describes **actors**, **assets**, **validators** (parameters,
+  datum, redeemer, and the rules they enforce), **transactions** (inputs,
+  outputs, mint), and the **invariants** the protocol must keep.
+- Keep the spec in step with the code: a pull request that changes a validator
+  updates its spec in the same change.
+- Formal, machine-checked specifications belong to the formal-methods
+  component, not here. This folder is the human-readable source of intent.
+
+## Documents
+
+_None yet._ Add a document per protocol or feature as you design it.
 
