@@ -7,7 +7,7 @@
 use serde::Serialize;
 
 use super::loader::Registry;
-use super::types::Role;
+use super::types::{Link, Role};
 
 /// A role, as exposed to consumers (TECH_SPEC §8). `multiple` is `true` only for
 /// the role that may be filled by several tools at once (Infrastructure).
@@ -27,6 +27,7 @@ pub struct ToolView {
     pub name: String,
     pub description: String,
     pub website: String,
+    pub community: Vec<Link>,
     pub languages: Vec<String>,
     pub roles: Vec<String>,
     /// `true` when the tool declares a `[fullstack]` template, i.e. it can fill
@@ -70,6 +71,7 @@ pub fn tool_views(registry: &Registry) -> Vec<ToolView> {
                 name: tool.name.clone(),
                 description: tool.description.clone(),
                 website: tool.website.clone(),
+                community: tool.community.clone(),
                 languages: tool.languages.clone(),
                 roles,
                 fullstack: tool.fullstack.is_some(),

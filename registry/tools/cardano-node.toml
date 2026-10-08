@@ -9,6 +9,10 @@ published to the project .env as NODE_SOCKET_PATH. Pair it with an off-chain \
 tool that uses the socket, or add an indexer/query provider (kupo, ogmios) for \
 a fuller stack."""
 website = "https://github.com/IntersectMBO/cardano-node"
+community = [
+  { name = "GitHub Discussions", url = "https://github.com/IntersectMBO/cardano-node/discussions" },
+  { name = "Discord (Intersect)", url = "https://discord.gg/RJWdVsMkvR" },
+]
 languages = []
 system_deps = ["docker", "cardano-up"]
 nix_packages = []

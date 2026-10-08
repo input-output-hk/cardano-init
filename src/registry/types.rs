@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::contract;
 
@@ -221,6 +221,12 @@ pub struct DetectSignature {
     pub contains: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Link {
+    pub name: String,
+    pub url: String,
+}
+
 /// A loaded tool definition from the registry.
 #[derive(Debug, Clone)]
 pub struct ToolDef {
@@ -228,6 +234,7 @@ pub struct ToolDef {
     pub name: String,
     pub description: String,
     pub website: String,
+    pub community: Vec<Link>,
     pub languages: Vec<String>,
     /// Dependency ids this tool requires; each must have a `registry/deps.toml`
     /// entry. Consumed by the dependency doctor (TECH_SPEC §9.1).

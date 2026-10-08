@@ -9,6 +9,10 @@ infrastructure via cardano-up, which also pulls in a Cardano node \
 automatically. Its endpoint is published to the project .env as INDEXER_URL, \
 so off-chain components connect to it without extra wiring."""
 website = "https://github.com/CardanoSolutions/kupo"
+community = [
+  { name = "Discord (IOG Technical Community, #ogmios)", url = "https://discord.gg/ZeyDn65t5v" },
+  { name = "GitHub Discussions", url = "https://github.com/CardanoSolutions/kupo/discussions" },
+]
 languages = []
 system_deps = ["docker", "cardano-up"]
 nix_packages = []

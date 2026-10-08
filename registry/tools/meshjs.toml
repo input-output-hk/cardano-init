@@ -8,6 +8,9 @@ contract interaction out of the box. Works with any JavaScript \
 runtime (Node.js, Deno, Bun) and is a great choice for web-based \
 dApps and off-chain transaction builders."""
 website = "https://meshjs.dev"
+community = [
+  { name = "Discord (MeshJS)", url = "https://discord.gg/dH48jH3BKa" },
+]
 languages = ["typescript"]
 system_deps = ["node"]
 nix_packages = ["nodejs"]

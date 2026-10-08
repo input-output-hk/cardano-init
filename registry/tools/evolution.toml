@@ -8,6 +8,9 @@ lighter, tree-shakeable, and works across Node.js and the browser. Its \
 staged `Client` API (provider + wallet) and composable transaction builder \
 make it a strong choice for off-chain transaction building and dApps."""
 website = "https://github.com/IntersectMBO/evolution-sdk"
+community = [
+  { name = "Discord (No Witness)", url = "https://discord.gg/39xMk9DwQv" },
+]
 languages = ["typescript"]
 system_deps = ["node"]
 nix_packages = ["nodejs"]

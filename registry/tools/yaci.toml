@@ -12,6 +12,10 @@ off-chain components connect to automatically (it writes the standard \
 connection details into the project .env). Yaci DevKit is a dev/test tool — \
 you never deploy it — so it fills the devnet role, not infrastructure."""
 website = "https://devkit.yaci.xyz"
+community = [
+  { name = "Discord (Bloxbean)", url = "https://discord.gg/JtQ54MSw6p" },
+  { name = "GitHub Discussions", url = "https://github.com/bloxbean/yaci-devkit/discussions" },
+]
 languages = ["typescript"]
 system_deps = ["docker", "node"]
 nix_packages = []

@@ -47,6 +47,8 @@ pub struct InstallMethod {
     pub arg: String,
 }
 
+pub use crate::registry::types::Link as SupportLink;
+
 /// A per-dependency recipe.
 #[derive(Debug, Clone)]
 pub struct DepRecipe {
@@ -56,6 +58,7 @@ pub struct DepRecipe {
     pub docs: String,
     /// Ordered install methods (order = preference).
     pub install: Vec<InstallMethod>,
+    pub support: Vec<SupportLink>,
 }
 
 /// All dep recipes, keyed by dep id.
@@ -74,6 +77,8 @@ struct DepRecipeToml {
     docs: String,
     /// Each entry is a single-key table: `{ brew = "node" }`.
     install: Vec<HashMap<String, String>>,
+    #[serde(default)]
+    support: Vec<SupportLink>,
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +119,7 @@ impl DepCatalog {
                     binaries: recipe.binaries,
                     docs: recipe.docs,
                     install,
+                    support: recipe.support,
                 },
             );
         }
@@ -155,6 +161,42 @@ mod tests {
         // Empty arg ⇒ `aikup install` (latest); "latest" is not a valid tag.
         assert_eq!(aiken.install[0].arg, "");
         assert_eq!(aiken.install[1].installer, Installer::Nix);
+    }
+
+    #[test]
+    fn support_defaults_to_empty() {
+        let toml = r#"
+[foo]
+binaries = ["foo"]
+docs = "https://example.com"
+install = [{ brew = "foo" }]
+"#;
+        let cat = DepCatalog::from_str(toml).unwrap();
+        assert!(cat.get("foo").unwrap().support.is_empty());
+    }
+
+    #[test]
+    fn aiken_has_support_links() {
+        let cat = DepCatalog::load().unwrap();
+        assert!(!cat.get("aiken").unwrap().support.is_empty());
+    }
+
+    #[test]
+    fn support_urls_are_https() {
+        let cat = DepCatalog::load().unwrap();
+        for id in cat.dep_ids() {
+            for link in &cat.get(id).unwrap().support {
+                assert!(
+                    !link.name.is_empty(),
+                    "dep '{id}' has an unnamed support link"
+                );
+                assert!(
+                    link.url.starts_with("https://"),
+                    "dep '{id}' support link '{}' is not https",
+                    link.name
+                );
+            }
+        }
     }
 
     #[test]

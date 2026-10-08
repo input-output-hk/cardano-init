@@ -3,10 +3,11 @@ use serde_json::json;
 use super::theme;
 use super::{CliError, Format};
 use crate::doctor::Report;
+use crate::doctor::catalog::DepCatalog;
 use crate::doctor::installers::Installer;
 use crate::doctor::probe::{Environment, ScanResult};
 use crate::registry::loader::Registry;
-use crate::registry::types::{Role, Selection, ToolDef};
+use crate::registry::types::{Link, Role, Selection, ToolDef};
 use crate::scaffold::planner::FilePlan;
 use crate::scaffold::update::{self, SlotOp, UpdatePlan};
 
@@ -1071,7 +1072,60 @@ pub fn print_doctor(
     if project_detected || !report.all_required_present {
         print_dep_advice(report);
     }
+    if project_detected {
+        print_support_links(report);
+        print_community_links(scan, registry);
+    }
     println!();
+}
+
+fn print_community_links(scan: &ScanResult, registry: &Registry) {
+    let mut table = borderless_table();
+    table.set_content_arrangement(comfy_table::ContentArrangement::Disabled);
+    let mut any = false;
+    for comp in &scan.components {
+        let Some(tool) = registry.get(&comp.tool_id) else {
+            continue;
+        };
+        for (i, link) in tool.community.iter().enumerate() {
+            let label = if i == 0 { tool.name.as_str() } else { "" };
+            table.add_row(vec![
+                theme::strong(label).to_string(),
+                link.name.clone(),
+                theme::link(&link.url).to_string(),
+            ]);
+            any = true;
+        }
+    }
+    if !any {
+        return;
+    }
+    println!();
+    print_rule("Get help");
+    print_table(table, theme::PAD);
+}
+
+fn print_support_links(report: &Report) {
+    let mut table = borderless_table();
+    table.set_content_arrangement(comfy_table::ContentArrangement::Disabled);
+    let mut any = false;
+    for dep in &report.deps {
+        for (i, link) in dep.support.iter().enumerate() {
+            let label = if i == 0 { dep.id.as_str() } else { "" };
+            table.add_row(vec![
+                theme::strong(label).to_string(),
+                link.name.clone(),
+                theme::link(&link.url).to_string(),
+            ]);
+            any = true;
+        }
+    }
+    if !any {
+        return;
+    }
+    println!();
+    print_rule("Supporting tools");
+    print_table(table, theme::PAD);
 }
 
 /// Print the registry (roles + tools) for `cardano-init list`: human-readable
@@ -1145,13 +1199,28 @@ fn print_list_table(registry: &Registry) {
     println!();
 }
 
-pub fn print_list(registry: &Registry, format: Format, table: bool) {
+pub fn print_list(registry: &Registry, catalog: &DepCatalog, format: Format, table: bool) {
     use crate::registry::view;
 
     if format == Format::Json {
+        #[derive(serde::Serialize)]
+        struct ListTool {
+            #[serde(flatten)]
+            view: view::ToolView,
+            support: Vec<Link>,
+        }
+        let tools: Vec<ListTool> = view::tool_views(registry)
+            .into_iter()
+            .map(|v| {
+                let support = registry
+                    .get(&v.id)
+                    .map_or_else(Vec::new, |t| super::tool_support_links(t, catalog));
+                ListTool { view: v, support }
+            })
+            .collect();
         emit_json_ok(json!({
             "roles": view::role_views(),
-            "tools": view::tool_views(registry),
+            "tools": tools,
         }));
         return;
     }
@@ -1184,14 +1253,13 @@ pub fn print_list(registry: &Registry, format: Format, table: bool) {
 
     println!();
     print_rule("Tools");
-    // Reuse the same per-tool block as `--help` so the two can't drift; sort by
-    // id to match the JSON ordering.
+    // Sort by id to match the JSON ordering.
     let mut tools: Vec<&crate::registry::types::ToolDef> = registry.all_tools().iter().collect();
     tools.sort_by(|a, b| a.id.cmp(&b.id));
     let mut block = String::new();
     for tool in tools {
         block.push('\n');
-        super::format_tool(&mut block, tool);
+        super::format_tool(&mut block, tool, &super::tool_support_links(tool, catalog));
     }
     print!("{block}");
     println!();

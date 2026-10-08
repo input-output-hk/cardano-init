@@ -8,6 +8,9 @@ to Plutus Core, giving you the full type system and a blueprint emitted \
 straight from your compiled scripts. Built with Cabal against the IOG \
 package repository (CHaP)."""
 website = "https://plutus.cardano.intersectmbo.org"
+community = [
+  { name = "Discord (Intersect, #wg-plutus)", url = "https://discord.gg/RJWdVsMkvR" },
+]
 languages = ["haskell"]
 system_deps = ["cabal", "ghc"]
 nix_packages = ["cabal-install", "haskell.compiler.ghc966", "pkg-config", "libsodium", "secp256k1", "blst"]

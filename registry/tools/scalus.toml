@@ -7,6 +7,9 @@ to UPLC for on-chain validators and build transactions for off-chain \
 interaction — all in one language. Its off-chain tests run validators \
 locally. Choose it for one role or both."""
 website = "https://scalus.org"
+community = [
+  { name = "Discord (Lantr)", url = "https://discord.gg/B6tXmBzhTn" },
+]
 languages = ["scala"]
 system_deps = ["sbt", "jvm"]
 nix_packages = ["sbt", "jdk"]
