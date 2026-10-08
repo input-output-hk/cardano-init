@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use crate::registry::loader::{Registry, RegistryError};
-use crate::registry::types::{Role, ToolDef};
+use crate::registry::types::{Link, Role, ToolDef};
 use crate::scaffold::ScaffoldError;
 
 // ---------------------------------------------------------------------------
@@ -535,7 +535,22 @@ fn build_help_footer() -> String {
     out
 }
 
-pub(super) fn format_tool(out: &mut String, tool: &ToolDef) {
+pub(super) fn tool_support_links(
+    tool: &ToolDef,
+    catalog: &crate::doctor::catalog::DepCatalog,
+) -> Vec<Link> {
+    let mut links: Vec<Link> = Vec::new();
+    for dep in &tool.system_deps {
+        for link in catalog.get(dep).map_or(&[][..], |r| &r.support) {
+            if !links.iter().any(|l| l.url == link.url) {
+                links.push(link.clone());
+            }
+        }
+    }
+    links
+}
+
+pub(super) fn format_tool(out: &mut String, tool: &ToolDef, support: &[Link]) {
     use std::fmt::Write;
 
     let mut roles: Vec<&str> = tool.roles.keys().map(|r| r.as_kebab()).collect();
@@ -555,6 +570,14 @@ pub(super) fn format_tool(out: &mut String, tool: &ToolDef) {
     let _ = writeln!(out, "    Roles:     {}", roles.join(", "));
     let _ = writeln!(out, "    Languages: {}", tool.languages.join(", "));
     let _ = writeln!(out, "    Website:   {}", tool.website);
+    for (i, link) in tool.community.iter().enumerate() {
+        let label = if i == 0 { "Community:" } else { "" };
+        let _ = writeln!(out, "    {label:<10} {}: {}", link.name, link.url);
+    }
+    for (i, link) in support.iter().enumerate() {
+        let label = if i == 0 { "Tooling:" } else { "" };
+        let _ = writeln!(out, "    {label:<10} {}: {}", link.name, link.url);
+    }
 
     // Wrap description to ~72 chars with 4-space indent
     let _ = write!(out, "    ");
@@ -602,10 +625,9 @@ pub fn run() -> i32 {
 
     let result = match cli.command {
         Some(Command::Doctor) => run_doctor(&registry, format),
-        Some(Command::List(args)) => {
-            output::print_list(&registry, format, args.table);
-            Ok(())
-        }
+        Some(Command::List(args)) => crate::doctor::catalog::DepCatalog::load()
+            .map_err(CliError::from)
+            .map(|catalog| output::print_list(&registry, &catalog, format, args.table)),
         Some(Command::Add(args)) => update::run_add(args, &registry, format),
         Some(Command::Remove(args)) => update::run_remove(args, &registry, format),
         None => run_init(cli.init, &registry, format),
@@ -908,6 +930,42 @@ fn resolve_selection_deps(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn format_tool_lists_community_links() {
+        let registry = Registry::load().unwrap();
+        for tool in registry.all_tools() {
+            let mut out = String::new();
+            format_tool(&mut out, tool, &[]);
+            for link in &tool.community {
+                assert!(
+                    out.contains(&format!("{}: {}", link.name, link.url)),
+                    "{}: community link '{}' missing from list output",
+                    tool.id,
+                    link.name
+                );
+            }
+            assert_eq!(out.contains("Community:"), !tool.community.is_empty());
+        }
+    }
+
+    #[test]
+    fn format_tool_lists_tooling_from_system_deps() {
+        let registry = Registry::load().unwrap();
+        let catalog = crate::doctor::catalog::DepCatalog::load().unwrap();
+        let aiken = registry.get("aiken").unwrap();
+        let support = tool_support_links(aiken, &catalog);
+        assert!(!support.is_empty());
+        let mut out = String::new();
+        format_tool(&mut out, aiken, &support);
+        assert!(out.contains("Tooling:"));
+        for link in &support {
+            assert!(out.contains(&format!("{}: {}", link.name, link.url)));
+        }
+
+        let meshjs = registry.get("meshjs").unwrap();
+        assert!(tool_support_links(meshjs, &catalog).is_empty());
+    }
 
     #[test]
     fn unknown_tool_error_code_and_context() {

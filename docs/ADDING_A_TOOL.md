@@ -21,7 +21,7 @@ description = """\
 One to three sentences. What does this tool do, and when should \
 someone choose it over alternatives?"""
 website     = "https://mytool.dev"
-community   = [                        # Optional: official help channels, shown by `doctor` and `list --format json`
+community   = [                        # Optional: official help channels, shown by `doctor` and `list`
   { name = "Discord", url = "https://discord.gg/…" },
   { name = "GitHub Discussions", url = "https://github.com/acme/mytool/discussions" },
 ]
@@ -44,7 +44,7 @@ detect = [{ file = "package.json", contains = "mytool" }]  # generic filename �
 
 Only tools that declare a role are tested against that role's directory, so signatures only need to disambiguate *within* a role. A directory that matches nothing is reported as "unrecognized" — `doctor` checks dependencies, it does not validate that the component builds (that's `just test`).
 
-**Supporting tools.** In the dep's `registry/deps.toml` entry, you can add an optional `support` list pointing users at your language's editor tooling (VS Code / Neovim extensions, a language server, a playground). `cardano-init doctor` lists these for every detected tool:
+**Supporting tools.** In the dep's `registry/deps.toml` entry, you can add an optional `support` list pointing users at your language's editor tooling (VS Code / Neovim extensions, a language server, a playground). `cardano-init doctor` lists these for every detected tool, and `cardano-init list` shows them under each tool that depends on this dep:
 
 ```toml
 [mytool-cli]

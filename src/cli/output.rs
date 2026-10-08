@@ -3,10 +3,11 @@ use serde_json::json;
 use super::theme;
 use super::{CliError, Format};
 use crate::doctor::Report;
+use crate::doctor::catalog::DepCatalog;
 use crate::doctor::installers::Installer;
 use crate::doctor::probe::{Environment, ScanResult};
 use crate::registry::loader::Registry;
-use crate::registry::types::{Role, Selection, ToolDef};
+use crate::registry::types::{Link, Role, Selection, ToolDef};
 use crate::scaffold::planner::FilePlan;
 use crate::scaffold::update::{self, SlotOp, UpdatePlan};
 
@@ -1198,13 +1199,28 @@ fn print_list_table(registry: &Registry) {
     println!();
 }
 
-pub fn print_list(registry: &Registry, format: Format, table: bool) {
+pub fn print_list(registry: &Registry, catalog: &DepCatalog, format: Format, table: bool) {
     use crate::registry::view;
 
     if format == Format::Json {
+        #[derive(serde::Serialize)]
+        struct ListTool {
+            #[serde(flatten)]
+            view: view::ToolView,
+            support: Vec<Link>,
+        }
+        let tools: Vec<ListTool> = view::tool_views(registry)
+            .into_iter()
+            .map(|v| {
+                let support = registry
+                    .get(&v.id)
+                    .map_or_else(Vec::new, |t| super::tool_support_links(t, catalog));
+                ListTool { view: v, support }
+            })
+            .collect();
         emit_json_ok(json!({
             "roles": view::role_views(),
-            "tools": view::tool_views(registry),
+            "tools": tools,
         }));
         return;
     }
@@ -1237,14 +1253,13 @@ pub fn print_list(registry: &Registry, format: Format, table: bool) {
 
     println!();
     print_rule("Tools");
-    // Reuse the same per-tool block as `--help` so the two can't drift; sort by
-    // id to match the JSON ordering.
+    // Sort by id to match the JSON ordering.
     let mut tools: Vec<&crate::registry::types::ToolDef> = registry.all_tools().iter().collect();
     tools.sort_by(|a, b| a.id.cmp(&b.id));
     let mut block = String::new();
     for tool in tools {
         block.push('\n');
-        super::format_tool(&mut block, tool);
+        super::format_tool(&mut block, tool, &super::tool_support_links(tool, catalog));
     }
     print!("{block}");
     println!();
