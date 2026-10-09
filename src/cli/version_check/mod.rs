@@ -49,7 +49,7 @@ pub struct UpdateNotice {
 impl UpdateNotice {
     /// The command that updates this install, or `None` when the install method
     /// is unknown (show [`RELEASES_URL`] instead).
-    pub fn command(&self) -> Option<&'static str> {
+    pub fn command(&self) -> Option<String> {
         self.install.update_command()
     }
 }
