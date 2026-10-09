@@ -27,6 +27,8 @@ serde_json = "1"
 # Blocking HTTPS client for the once-a-day version-update check (TECH_SPEC
 # §10); runs on a background thread, off the generation path. rustls only.
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# Per-user cache dir for the version-update check's once-a-day cache.
+dirs = "6"
 
 # Unix-only: reset the SIGPIPE disposition so piping into `head`/`less` and
 # quitting early exits cleanly instead of panicking on a broken pipe.

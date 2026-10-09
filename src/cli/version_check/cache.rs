@@ -60,24 +60,10 @@ fn now() -> u64 {
         .unwrap_or(0)
 }
 
+/// `<OS cache dir>/cardano-init/update-check`: `~/Library/Caches` on macOS,
+/// `$XDG_CACHE_HOME|~/.cache` on Linux, `%LOCALAPPDATA%` on Windows.
 fn path() -> Option<PathBuf> {
-    cache_dir(|k| std::env::var_os(k).map(PathBuf::from)).map(|d| d.join(FILE_NAME))
-}
-
-/// The per-app cache dir: `%LOCALAPPDATA%\cardano-init` on Windows,
-/// `~/Library/Caches/cardano-init` on macOS, `$XDG_CACHE_HOME|~/.cache` +
-/// `cardano-init` elsewhere. `var` looks up an env var (injected for tests).
-fn cache_dir(var: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
-    let base = if cfg!(windows) {
-        var("LOCALAPPDATA")?
-    } else if cfg!(target_os = "macos") {
-        var("HOME")?.join("Library").join("Caches")
-    } else {
-        var("XDG_CACHE_HOME")
-            .filter(|p| p.is_absolute())
-            .or_else(|| var("HOME").map(|h| h.join(".cache")))?
-    };
-    base.is_absolute().then(|| base.join("cardano-init"))
+    dirs::cache_dir().map(|d| d.join("cardano-init").join(FILE_NAME))
 }
 
 #[cfg(test)]
@@ -104,36 +90,5 @@ mod tests {
         let text = serde_json::to_string(&c).unwrap();
         assert_eq!(serde_json::from_str::<Cache>(&text).unwrap(), c);
         assert!(serde_json::from_str::<Cache>("garbage").is_err());
-    }
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    #[test]
-    fn cache_dir_prefers_xdg_then_home() {
-        let xdg = |k: &str| match k {
-            "XDG_CACHE_HOME" => Some(PathBuf::from("/xdg")),
-            "HOME" => Some(PathBuf::from("/home/u")),
-            _ => None,
-        };
-        assert_eq!(cache_dir(xdg), Some(PathBuf::from("/xdg/cardano-init")));
-        let home = |k: &str| (k == "HOME").then(|| PathBuf::from("/home/u"));
-        assert_eq!(
-            cache_dir(home),
-            Some(PathBuf::from("/home/u/.cache/cardano-init"))
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn cache_dir_macos() {
-        let home = |k: &str| (k == "HOME").then(|| PathBuf::from("/Users/u"));
-        assert_eq!(
-            cache_dir(home),
-            Some(PathBuf::from("/Users/u/Library/Caches/cardano-init"))
-        );
-    }
-
-    #[test]
-    fn cache_dir_absent_without_env() {
-        assert_eq!(cache_dir(|_| None), None);
     }
 }
