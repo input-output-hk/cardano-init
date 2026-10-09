@@ -1,18 +1,21 @@
 //! Version-update check (TECH_SPEC §10): compare this binary's version with the
 //! latest GitHub release and, when it is newer, show a notice **before
 //! generation** with the update command for however this binary was installed
-//! (falling back to the release link).
+//! (falling back to the release link). GitHub is asked at most once a day; the
+//! answer is cached in between.
 //!
 //! Informational, never a gate: it never alters generated output, never blocks
 //! beyond a ≤1s deadline, and every failure (offline, timeout, parse) is a
 //! silent no-op. It runs only for human, attended output; `--format json` and
 //! non-TTY runs never touch the network.
 //!
-//! [`start`] (called from `run()` for the generating commands) fires the request
-//! on a background thread so it overlaps interactive selection; [`announce`]
+//! [`start`] (called from `run()` for the generating commands) answers from a
+//! fresh cache, or fires the request on a background thread so it overlaps
+//! interactive selection; [`announce`]
 //! joins it right before the write phase. Not started (tests, `list`,
 //! `doctor`) → no-op.
 
+mod cache;
 mod install;
 
 use std::sync::Mutex;
@@ -60,8 +63,9 @@ struct Pending {
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 
-/// Fire the GitHub request on a background thread, for human + attended runs
-/// only (and unless opted out via `CARDANO_INIT_NO_UPDATE_CHECK` or `CI`).
+/// Look up the latest version, for human + attended runs only (and unless opted
+/// out via `CARDANO_INIT_NO_UPDATE_CHECK` or `CI`): from a fresh cache
+/// synchronously, else via GitHub on a background thread.
 pub fn start(format: Format) {
     if format != Format::Human
         || !console::user_attended()
@@ -71,9 +75,20 @@ pub fn start(format: Format) {
         return;
     }
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(fetch_latest());
-    });
+    match cache::read_fresh() {
+        Some(c) => {
+            let _ = tx.send(Some(c.latest));
+        }
+        None => {
+            std::thread::spawn(move || {
+                let latest = fetch_latest();
+                if let Some(l) = &latest {
+                    cache::write(l);
+                }
+                let _ = tx.send(latest);
+            });
+        }
+    }
     *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(Pending {
         rx,
         started: Instant::now(),

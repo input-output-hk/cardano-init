@@ -703,11 +703,12 @@ The `contains` form is what keeps detection **honest without overreaching** (per
 Goal: surface "a newer `cardano-init` is available" **before generation**, so the user can update and regenerate with newer templates rather than discovering it post-write (and deleting/regenerating). Constraints: never block agents/CI, never alter generated output, bounded latency, offline-safe. Implemented in `src/cli/version_check/` (a thin `cli/` concern).
 
 - **Scope.** The generating commands: `init` (interactive + one-shot, incl. `--dry-run`) and `add`/`remove`.
-- **Rule.** Each run compares this binary's version (`CARGO_PKG_VERSION`) with the latest GitHub release; a newer release → notice. No cache: every eligible run makes one request.
+- **Rule.** Each run compares this binary's version (`CARGO_PKG_VERSION`) with the latest GitHub release; a newer release → notice.
+- **Cached once/day.** `update-check` (JSON `{ checked_at, latest }`) under the OS cache dir: `~/Library/Caches/cardano-init/` (macOS), `$XDG_CACHE_HOME|~/.cache/cardano-init/` (Linux), `%LOCALAPPDATA%\cardano-init\` (Windows). Checked within 24h → cached result, **zero network, zero latency**; also keeps us far below GitHub's unauthenticated rate limit (60 req/hour/IP).
 - **Gating.** Runs only when stdout is a **TTY and the format is `human`**. Disabled entirely when `CARDANO_INIT_NO_UPDATE_CHECK` or `CI` is set. `--format json` and non-TTY runs never touch the network and report no update info.
 - **Surfaced before the write phase; latency hidden where possible:**
   - **Interactive:** the check fires on a background thread at process start and completes during tool selection; the notice (if any) shows before generation with **no added latency**.
-  - **Human one-shot:** the check is joined with a **≤1s deadline** (measured from process start) behind a `Checking for updates…` spinner before writing; on hit → notice then generate; on timeout/offline → proceed (worst case **+1s**).
+  - **Human one-shot:** the check is joined with a **≤1s deadline** (measured from process start) behind a `Checking for updates…` spinner before writing; on hit → notice then generate; on timeout/offline → proceed (worst case **+1s, once/day**).
 - **Install-aware update command.** The notice prints the command matching how the running binary was installed (from `current_exe`), first match wins:
 
   | Signal | Method | Command |
