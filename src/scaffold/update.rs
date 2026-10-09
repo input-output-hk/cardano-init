@@ -66,6 +66,7 @@ pub fn apply(old: &Selection, mutation: &Mutation) -> Selection {
         assignments,
         network: old.network,
         nix: old.nix,
+        spec: old.spec,
     }
 }
 
@@ -321,6 +322,7 @@ mod tests {
             assignments,
             network: Network::Preview,
             nix: false,
+            spec: true,
         }
     }
 
@@ -356,6 +358,40 @@ mod tests {
                 .iter()
                 .any(|f| f.dest.to_str() == Some("Justfile"))
         );
+    }
+
+    #[test]
+    fn spec_is_user_owned_and_never_rewritten() {
+        // spec/ is the user's design doc once generated: add/remove neither
+        // rewrite nor delete it.
+        let reg = registry();
+        let old = sel(vec![a(Role::OnChain, "aiken")]);
+        for new in [
+            apply(&old, &Mutation::Add(a(Role::OffChain, "meshjs"))),
+            apply(&old, &Mutation::Add(a(Role::Devnet, "yaci"))),
+        ] {
+            assert!(new.spec, "spec carries over");
+            let plan = plan_update(&old, &new, &reg).unwrap();
+            assert!(!creates_under(&plan, "spec"));
+            assert!(!plan.shared_files.iter().any(|f| f.dest.starts_with("spec")));
+            assert!(!plan.shared_removals.iter().any(|p| p.starts_with("spec")));
+        }
+    }
+
+    #[test]
+    fn add_protocol_role_does_not_link_missing_spec_example() {
+        let reg = registry();
+        let old = sel(vec![a(Role::Devnet, "yaci")]);
+        let new = apply(&old, &Mutation::Add(a(Role::OnChain, "aiken")));
+        let plan = plan_update(&old, &new, &reg).unwrap();
+        let agents = plan
+            .shared_files
+            .iter()
+            .find(|f| f.dest == Path::new("AGENTS.md"))
+            .expect("AGENTS.md is re-rendered");
+        let agents = std::str::from_utf8(&agents.content).unwrap();
+        assert!(agents.contains("[`spec/`](spec/)"));
+        assert!(!agents.contains("spec/giftcard.md"));
     }
 
     #[test]

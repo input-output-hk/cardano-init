@@ -1,0 +1,112 @@
+# Gift card protocol
+
+> Example specification for the gift-card protocol shipped with this project.
+> Replace it with the specification of your own protocol.
+
+## Overview
+
+A **giver** locks assets (the gift) at a script address together with a
+unique **gift-card token**. Anyone can **redeem** the gift by spending that UTxO
+in a transaction that burns the token. The validators guarantee that each gift
+card is unique and that the locked value is released only by burning its
+token. They do not restrict *who* redeems it.
+
+## Actors
+
+| Actor     | Role                                                                     |
+|-----------|--------------------------------------------------------------------------|
+| Giver     | Creates the gift card: funds the gift and mints the token.               |
+| Redeemer  | Spends the locked UTxO, burns the token, and receives the gift.          |
+
+## Assets
+
+- **Gift-card token**: a single native token under the `gift_card` minting
+  policy.
+  - Its asset name is the `token_name` parameter.
+  - Its policy id is the hash of `gift_card` applied to its parameters, so each
+    gift card has its own policy.
+- **Gift**: the assets (typically lovelace) locked at the `redeem` script
+  address next to the token.
+
+## Validators
+
+### `gift_card` (minting policy)
+
+Parameters:
+- `token_name: ByteArray`: the asset name of the gift-card token.
+- `utxo_ref: OutputReference`: the seed UTxO, which must be spent when minting.
+
+Redeemer: `Action = Mint | Burn` (`Mint` = constructor 0, `Burn` = constructor 1).
+
+Rules. In both cases, exactly one asset of this policy is minted or burned in
+the transaction.
+
+| Redeemer | Must hold                                                                           |
+|----------|-------------------------------------------------------------------------------------|
+| `Mint`   | `utxo_ref` is among the inputs, and exactly `+1` of `token_name` is minted.         |
+| `Burn`   | Exactly `-1` of `token_name` is burned.                                             |
+
+### `redeem` (spending validator)
+
+Parameters:
+- `token_name: ByteArray`: the gift-card token's asset name.
+- `policy_id: ByteArray`: the `gift_card` policy id for this gift card.
+
+Datum and redeemer: unused on-chain. Off-chain code attaches an inline datum
+`[seed_tx_hash, seed_output_index, token_name]` so the gift card's parameters
+can be recovered from the UTxO. The redeemer is unit.
+
+Rule: the locked UTxO can be spent only if the same transaction burns exactly
+`-1` of `token_name` under `policy_id`, and nothing else under that policy.
+
+## Transactions
+
+### Create
+
+| | |
+|---|---|
+| Inputs  | The giver's seed UTxO (`utxo_ref`), plus any funding UTxOs. |
+| Mint    | `+1` `token_name` under `gift_card(token_name, utxo_ref)`, redeemer `Mint`. |
+| Outputs | The gift **and** the token, locked at the address of `redeem(token_name, policy_id)` with the inline datum above. |
+
+### Redeem
+
+| | |
+|---|---|
+| Inputs  | The UTxO locked at the `redeem` address (it carries the token). |
+| Mint    | `-1` `token_name` under the same policy, redeemer `Burn`. |
+| Outputs | The released gift to the redeemer's address. |
+
+## Invariants
+
+1. **Uniqueness.** At most one gift-card token ever exists per policy. Minting
+   requires spending `utxo_ref`, and a UTxO can be spent only once.
+2. **Funds move only by redemption.** Value at the `redeem` address leaves only
+   in a transaction that burns that gift card's token.
+3. **Burn exactly once.** A redemption burns exactly one token. Minting or
+   burning any other amount or name under the policy fails.
+4. **Isolation.** Each gift card's policy is parameterised by its own seed, so
+   tokens and locked funds of different gift cards cannot be confused.
+
+## Out of scope
+
+- Expiry or reclaim by the giver (the gift is locked until redeemed).
+- Partial redemption.
+- Restricting who may redeem. The token is locked with the gift, so anyone who
+  finds the UTxO can claim it. A real protocol would add, for example, a
+  recipient signature check or send the token to the recipient's wallet.
+{%- if has_fullstack or has_on_chain or has_off_chain %}
+
+## Implementation
+{% if has_fullstack %}
+- Validators and transactions: `{{ fullstack.dir }}/` ({{ fullstack.tool_name }}).
+{%- else %}
+{%- if has_on_chain %}
+- Validators: `{{ on_chain.dir }}/` ({{ on_chain.tool_name }}).
+{%- endif %}
+{%- if has_off_chain %}
+- Transactions: `{{ off_chain.dir }}/` ({{ off_chain.tool_name }}).
+{%- endif %}
+{%- endif %}
+- Compiled validators: `{{ blueprint_path }}` (CIP-57 blueprint).
+{%- endif %}

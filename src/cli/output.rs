@@ -343,18 +343,18 @@ pub fn print_incompatibility_warning(inc: &crate::registry::compat::Incompatibil
     );
 }
 
-/// The aligned `role  tool · lang` rows (plus `network` and, if set, `nix`) that
+/// The aligned `role  tool · lang` rows (plus `network`, `nix` if set, and `spec`) that
 /// fill the selection panel. Shared by the pre-generation summary and the
 /// post-generation success panel so they can't drift.
 fn summary_rows(selection: &Selection, registry: &Registry) -> Vec<String> {
     let comps = components(selection, registry);
 
     // Column widths for the aligned rows (labels are the role kebabs plus the
-    // trailing `network`/`nix` rows).
+    // trailing `network`/`nix`/`spec` rows).
     let label_w = comps
         .iter()
         .map(|c| c.kebab.len())
-        .chain([NETWORK_LABEL.len(), NIX_LABEL.len()])
+        .chain([NETWORK_LABEL.len(), NIX_LABEL.len(), SPEC_LABEL.len()])
         .max()
         .unwrap_or(0);
     let name_w = comps
@@ -393,6 +393,12 @@ fn summary_rows(selection: &Selection, registry: &Registry) -> Vec<String> {
     if selection.nix {
         rows.push(format!("{NIX_LABEL:<label_w$}  {}", theme::good("yes")));
     }
+    let spec = if selection.spec {
+        theme::good("yes").to_string()
+    } else {
+        theme::dim("no").to_string()
+    };
+    rows.push(format!("{SPEC_LABEL:<label_w$}  {spec}"));
     rows
 }
 
@@ -414,6 +420,7 @@ pub fn print_summary(selection: &Selection, registry: &Registry) {
 /// Row labels for the non-component lines of the summary panel.
 const NETWORK_LABEL: &str = "network";
 const NIX_LABEL: &str = "nix";
+const SPEC_LABEL: &str = "spec";
 
 /// A generated component as reported to the user: its role (kebab) and tool id.
 struct Component {
@@ -478,6 +485,7 @@ pub fn print_dry_run(selection: &Selection, registry: &Registry, plan: &FilePlan
             "project": selection.project_name,
             "network": selection.network.to_string(),
             "nix": selection.nix,
+            "spec": selection.spec,
             "dry_run": true,
             "generated": false,
             "components": components_json(selection, registry),
@@ -587,6 +595,7 @@ pub fn print_success(
             "project": selection.project_name,
             "network": selection.network.to_string(),
             "nix": selection.nix,
+            "spec": selection.spec,
             "generated": true,
             "components": components_json(selection, registry),
             "git": git.as_str(),
@@ -820,6 +829,7 @@ pub fn print_update_success(
             "applied": true,
             "network": selection.network.to_string(),
             "nix": selection.nix,
+            "spec": selection.spec,
             "components": components_json(selection, registry),
             "changes": changes_json(plan),
             "dependencies": report,
@@ -1315,6 +1325,7 @@ mod tests {
             assignments,
             network: Network::Preview,
             nix: false,
+            spec: true,
         }
     }
 

@@ -388,6 +388,7 @@ pub fn reconstruct(root: &Path, registry: &Registry) -> Reconstructed {
         Network::Preview
     });
     let nix = root.join("flake.nix").is_file();
+    let spec = root.join("spec").is_dir();
     let project_name = root
         .file_name()
         .and_then(|s| s.to_str())
@@ -400,6 +401,7 @@ pub fn reconstruct(root: &Path, registry: &Registry) -> Reconstructed {
             assignments,
             network,
             nix,
+            spec,
         },
         unrecognized: scan.unrecognized,
         low_confidence,
@@ -712,6 +714,7 @@ mod tests {
             assignments,
             network,
             nix,
+            spec: true,
         };
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join(&sel.project_name);
@@ -741,6 +744,7 @@ mod tests {
         assert_eq!(r.selection.project_name, "my-protocol");
         assert_eq!(r.selection.network, Network::Preview);
         assert!(!r.selection.nix);
+        assert!(r.selection.spec);
         assert_same_assignments(
             r.selection.assignments,
             vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")],
@@ -785,6 +789,22 @@ mod tests {
             r.selection.assignments,
             vec![a(Role::OnChain, "scalus"), a(Role::OffChain, "scalus")],
         );
+    }
+
+    #[test]
+    fn reconstruct_infers_spec_from_dir() {
+        let reg = registry();
+        let sel = Selection {
+            project_name: "my-protocol".to_string(),
+            assignments: vec![a(Role::OnChain, "aiken")],
+            network: Network::Preview,
+            nix: false,
+            spec: false,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join(&sel.project_name);
+        crate::scaffold::scaffold(&sel, &reg, &root).unwrap();
+        assert!(!reconstruct(&root, &reg).selection.spec);
     }
 
     #[test]

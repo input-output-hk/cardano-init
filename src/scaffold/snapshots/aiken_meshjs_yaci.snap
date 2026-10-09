@@ -66,6 +66,7 @@ snap-project/
 ├── off-chain/                 # MeshJS (typescript)
 ├── devnet/                     # Yaci DevKit (typescript)
 ├── blueprint/                  # CIP-57 Plutus blueprint (drop or build plutus.json here)
+├── spec/                       # Protocol specification (plain Markdown)
 └── README.md
 ```
 
@@ -152,6 +153,7 @@ snap-project/
 ├── off-chain/                 # MeshJS — transaction building & submission
 ├── devnet/                     # Yaci DevKit — local throwaway chain
 ├── blueprint/                  # CIP-57 Plutus blueprint (plutus.json lands here after on-chain build)
+├── spec/                       # Protocol specification (plain Markdown, not executed)
 └── README.md
 ```
 
@@ -187,9 +189,13 @@ Transaction building & submission. It **consumes** `blueprint/plutus.json` and r
 
 A local throwaway chain for development and integration tests. Its `dev` is a **provider** of the `.env` connection vars. Official docs: https://devkit.yaci.xyz
 
+## Specification (`spec/`)
+
+`spec/` holds the protocol's specification as plain Markdown: actors, assets, validators, transactions and invariants. It is the statement of intent the code is reviewed against. **Read the relevant spec before changing a validator or transaction, and update it in the same change.** If the code and the spec disagree, flag it rather than silently picking one.
+
 ## The worked example
 
-Every generated project ships the **same** worked example — a **gift card**: a one-shot minting policy that mints a unique token gated by a specific UTxO, plus a `redeem` validator that releases a locked gift when the token is burned. On- and off-chain sides share the same parameter ABI through the blueprint, which is why the project builds and its tests pass out of the box. Use it as the template for real logic; replace it, don't accrete around it.
+Every generated project ships the **same** worked example — a **gift card**: a one-shot minting policy that mints a unique token gated by a specific UTxO, plus a `redeem` validator that releases a locked gift when the token is burned. On- and off-chain sides share the same parameter ABI through the blueprint, which is why the project builds and its tests pass out of the box. Use it as the template for real logic; replace it, don't accrete around it. Its human-readable specification, when present, is under [`spec/`](spec/).
 
 ## Cardano knowledge: use cardano-dev-skills
 
@@ -1928,4 +1934,136 @@ if (clear) {
   console.log(`Wrote Yaci connection details to ${envPath}:`);
   for (const [k, v] of Object.entries(SET)) console.log(`  ${k}=${v}`);
 }
+
+=== spec/README.md ===
+# Protocol specification
+
+This folder holds the **specification** of snap-project: what the protocol
+does and why it is safe, written as plain text (Markdown) for people to read.
+Nothing in it is executed or built.
+
+Use it to design a change before writing validators, and to review changes
+against: if the code and the spec disagree, one of them is wrong.
+
+## Conventions
+
+- One document per protocol or feature (e.g. `giftcard.md`). Add new ones next
+  to it and list them below.
+- Each document describes **actors**, **assets**, **validators** (parameters,
+  datum, redeemer, and the rules they enforce), **transactions** (inputs,
+  outputs, mint), and the **invariants** the protocol must keep.
+- Keep the spec in step with the code: a pull request that changes a validator
+  updates its spec in the same change.
+- Formal, machine-checked specifications belong to the formal-methods
+  component, not here. This folder is the human-readable source of intent.
+
+## Documents
+
+- [`giftcard.md`](giftcard.md): the gift-card example protocol shipped with the
+  generated project. Replace it with your own protocol's spec.
+
+=== spec/giftcard.md ===
+# Gift card protocol
+
+> Example specification for the gift-card protocol shipped with this project.
+> Replace it with the specification of your own protocol.
+
+## Overview
+
+A **giver** locks assets (the gift) at a script address together with a
+unique **gift-card token**. Anyone can **redeem** the gift by spending that UTxO
+in a transaction that burns the token. The validators guarantee that each gift
+card is unique and that the locked value is released only by burning its
+token. They do not restrict *who* redeems it.
+
+## Actors
+
+| Actor     | Role                                                                     |
+|-----------|--------------------------------------------------------------------------|
+| Giver     | Creates the gift card: funds the gift and mints the token.               |
+| Redeemer  | Spends the locked UTxO, burns the token, and receives the gift.          |
+
+## Assets
+
+- **Gift-card token**: a single native token under the `gift_card` minting
+  policy.
+  - Its asset name is the `token_name` parameter.
+  - Its policy id is the hash of `gift_card` applied to its parameters, so each
+    gift card has its own policy.
+- **Gift**: the assets (typically lovelace) locked at the `redeem` script
+  address next to the token.
+
+## Validators
+
+### `gift_card` (minting policy)
+
+Parameters:
+- `token_name: ByteArray`: the asset name of the gift-card token.
+- `utxo_ref: OutputReference`: the seed UTxO, which must be spent when minting.
+
+Redeemer: `Action = Mint | Burn` (`Mint` = constructor 0, `Burn` = constructor 1).
+
+Rules. In both cases, exactly one asset of this policy is minted or burned in
+the transaction.
+
+| Redeemer | Must hold                                                                           |
+|----------|-------------------------------------------------------------------------------------|
+| `Mint`   | `utxo_ref` is among the inputs, and exactly `+1` of `token_name` is minted.         |
+| `Burn`   | Exactly `-1` of `token_name` is burned.                                             |
+
+### `redeem` (spending validator)
+
+Parameters:
+- `token_name: ByteArray`: the gift-card token's asset name.
+- `policy_id: ByteArray`: the `gift_card` policy id for this gift card.
+
+Datum and redeemer: unused on-chain. Off-chain code attaches an inline datum
+`[seed_tx_hash, seed_output_index, token_name]` so the gift card's parameters
+can be recovered from the UTxO. The redeemer is unit.
+
+Rule: the locked UTxO can be spent only if the same transaction burns exactly
+`-1` of `token_name` under `policy_id`, and nothing else under that policy.
+
+## Transactions
+
+### Create
+
+| | |
+|---|---|
+| Inputs  | The giver's seed UTxO (`utxo_ref`), plus any funding UTxOs. |
+| Mint    | `+1` `token_name` under `gift_card(token_name, utxo_ref)`, redeemer `Mint`. |
+| Outputs | The gift **and** the token, locked at the address of `redeem(token_name, policy_id)` with the inline datum above. |
+
+### Redeem
+
+| | |
+|---|---|
+| Inputs  | The UTxO locked at the `redeem` address (it carries the token). |
+| Mint    | `-1` `token_name` under the same policy, redeemer `Burn`. |
+| Outputs | The released gift to the redeemer's address. |
+
+## Invariants
+
+1. **Uniqueness.** At most one gift-card token ever exists per policy. Minting
+   requires spending `utxo_ref`, and a UTxO can be spent only once.
+2. **Funds move only by redemption.** Value at the `redeem` address leaves only
+   in a transaction that burns that gift card's token.
+3. **Burn exactly once.** A redemption burns exactly one token. Minting or
+   burning any other amount or name under the policy fails.
+4. **Isolation.** Each gift card's policy is parameterised by its own seed, so
+   tokens and locked funds of different gift cards cannot be confused.
+
+## Out of scope
+
+- Expiry or reclaim by the giver (the gift is locked until redeemed).
+- Partial redemption.
+- Restricting who may redeem. The token is locked with the gift, so anyone who
+  finds the UTxO can claim it. A real protocol would add, for example, a
+  recipient signature check or send the token to the recipient's wallet.
+
+## Implementation
+
+- Validators: `on-chain/` (Aiken).
+- Transactions: `off-chain/` (MeshJS).
+- Compiled validators: `blueprint/plutus.json` (CIP-57 blueprint).
 

@@ -136,6 +136,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 - **FR-7 (M):** Composition is generic. The pipeline wires components using only the set of present roles and the interface contract, with **no per-tool-pair logic**.
 - **FR-8 (M):** Per-component `Justfile`s expose standardized targets (`build`, `test`, `clean`; plus an optional `dev` when the tool has a watch/daemon/devnet mode). The top level aggregates only the terminating, composable tasks — `build`, `test`, `clean` — delegating to each component (`test` builds the on-chain blueprint first, then runs each component's `test` in role order); `dev`, where present, is run per-component by the developer and is not aggregated.
 - **FR-9 (S):** Optional Nix flake (`flake.nix`) providing a dev shell with all required toolchains, opt-in at selection time. Without Nix, prerequisites are documented in the README.
+- **FR-26 (S):** Generate a top-level `spec/` folder holding the protocol's specification in plain, non-executable Markdown, pre-populated with a spec of the worked example (actors, assets, validators, transactions, invariants) so system design has a clear place in the project. Created by default; skipped with `--no-spec`.
 
 ### Interface contract (mechanically enforced, see TECH_SPEC)
 
