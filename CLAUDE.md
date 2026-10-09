@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `cardano-init` is a Rust CLI tool that scaffolds Cardano protocol projects. Users select tools for each functional role (on-chain, off-chain, infrastructure, devnet, formal-methods) and the CLI generates a working monorepo. The authoritative docs live in `docs/`: read `docs/PRD.md` (product), `docs/ARCHITECTURE.md` (system design), and `docs/TECH_SPEC.md` (contracts, schemas, edge cases) before making any significant changes; `docs/ADDING_A_TOOL.md` is the contributor guide and `docs/ROADMAP.md` is the milestone plan.
 
-It's an early prototype: the dependency `doctor`, `list`, and `--format json` are implemented, while a few capabilities (a version-update check, min-version checks) remain **planned, not yet implemented**. `docs/ROADMAP.md` tracks what's real vs. upcoming.
+It's an early prototype: the dependency `doctor`, `list`, `--format json`, and the pre-generation version-update notice are implemented, while a few capabilities (min-version checks) remain **planned, not yet implemented**. `docs/ROADMAP.md` tracks what's real vs. upcoming.
 
 ## Commands
 

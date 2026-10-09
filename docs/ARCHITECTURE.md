@@ -347,14 +347,14 @@ install  = [ { aikup = "" }, { nix = "aiken" } ]
 
 ---
 
-## 9. Version-update check (planned, not yet implemented)
+## 9. Version-update check
 
-The chosen mechanism for template freshness without runtime template fetching (PRD A-3/FR-24). It is a **thin `cli/` concern** (UX, network, never core). No code implements it yet; the `cli/update.rs` module name is already taken by the `add`/`remove` project mutations (§6.4), so this check will land in its own module when built:
+The chosen mechanism for template freshness without runtime template fetching (PRD A-3/FR-24). It is a **thin `cli/` concern** (UX, network, never core). It lives in `cli/version_check/` (the `cli/update.rs` name is taken by the `add`/`remove` project mutations, §6.4), with pure, unit-tested install-method detection:
 
 - Best-effort check against the GitHub releases API; the notice (if any) is surfaced **before the write phase**, so the user can update and regenerate rather than discovering it post-write. It informs, never gates (the user may Ctrl-C to update first); it never alters generated output.
-- **Latency is hidden, not added.** In **interactive** mode the check fires async at startup and completes during tool selection: zero added latency. In **human one-shot** there's no think-time to hide it, so the result is joined with a **≤1s deadline** behind a spinner before writing (worst case +1s, once/day).
-- **Cached once/day** (small file in the OS cache dir): already-checked-today → zero network, zero latency.
-- **Gated and fail-silent**: only when stdout is a TTY and not `--format json` (agents/CI: no network, no spinner, no notice). Offline/timeout/parse error → no-op. Preserves offline operation and determinism (A-3).
+- **Latency is hidden, not added.** In **interactive** mode the check fires async at startup and completes during tool selection: zero added latency. In **human one-shot** there's no think-time to hide it, so the result is joined with a **≤1s deadline** behind a spinner before writing (worst case +1s).
+- **Install-aware**: the notice shows the update command for how the binary was installed (npm/npx, nix, cargo-dist installer, `cargo install`), falling back to the releases link (TECH_SPEC §10).
+- **Gated and fail-silent**: the network check runs only for a TTY with `human` format, and is off when `CI`/`CARDANO_INIT_NO_UPDATE_CHECK` is set. `--format json` never touches the network. Offline/timeout/parse error → no-op. Preserves offline operation and determinism (A-3).
 
 ---
 

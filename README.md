@@ -107,6 +107,8 @@ just test
 Every generated project is driven by [`just`](https://just.systems): `just build`, `just test`, `just clean`. 
 Missing a dependency? Run the built-in dependency doctor `cardano-init doctor` and it tells you exactly how to solve it.
 
+When a newer `cardano-init` is out, you get a notice with the update command for your install method before anything is generated (set `CARDANO_INIT_NO_UPDATE_CHECK=1` to turn it off).
+
 #### Other useful commands
 
 ```bash

@@ -698,18 +698,32 @@ The `contains` form is what keeps detection **honest without overreaching** (per
 
 ---
 
-## 10. Version-update check (planned, not yet implemented)
+## 10. Version-update check
 
-Goal: surface "a newer `cardano-init` is available" **before generation**, so the user can update and regenerate with newer templates rather than discovering it post-write (and deleting/regenerating). Constraints: never block agents/CI, never alter generated output, bounded latency, offline-safe.
+Goal: surface "a newer `cardano-init` is available" **before generation**, so the user can update and regenerate with newer templates rather than discovering it post-write (and deleting/regenerating). Constraints: never block agents/CI, never alter generated output, bounded latency, offline-safe. Implemented in `src/cli/version_check/` (a thin `cli/` concern).
 
-- **Gating.** Runs only when stdout is a **TTY and not `--format json`** (interactive, or human one-shot). For json/non-TTY (agents/CI) it is skipped entirely: no network, no spinner, no notice.
-- **Cached once/day.** A small file under the OS cache dir (e.g. `~/.cache/cardano-init/update-check`) stores last-checked date + latest-seen version. Already checked today → cached result, **zero network, zero latency**.
+- **Scope.** The generating commands: `init` (interactive + one-shot, incl. `--dry-run`) and `add`/`remove`.
+- **Rule.** Each run compares this binary's version (`CARGO_PKG_VERSION`) with the latest GitHub release; a newer release → notice. No cache: every eligible run makes one request.
+- **Gating.** Runs only when stdout is a **TTY and the format is `human`**. Disabled entirely when `CARDANO_INIT_NO_UPDATE_CHECK` or `CI` is set. `--format json` and non-TTY runs never touch the network and report no update info.
 - **Surfaced before the write phase; latency hidden where possible:**
-  - **Interactive:** the check fires async at process start and completes during tool selection; the notice (if any) shows before generation with **no added latency**.
-  - **Human one-shot:** no think-time to mask it, so the async check is joined with a **≤1s deadline** behind a `Checking for updates…` spinner before writing; on hit → notice then generate; on timeout/offline → proceed (worst case **+1s, once/day**).
-- **Informational, not a gate.** The notice prints the newer version + suggested update command, then continues with the current version (the user may Ctrl-C to update first). It never blocks beyond the deadline and never alters generated output (determinism, A-3).
-- **Fail-silent.** Best-effort GET of the latest release tag (GitHub releases API); offline/timeout/parse error → no-op. Requires a minimal HTTPS client (impl detail; off the generation path).
-- `--dry-run` writes nothing, so the delete/regenerate concern doesn't apply; the notice may still show (same gating).
+  - **Interactive:** the check fires on a background thread at process start and completes during tool selection; the notice (if any) shows before generation with **no added latency**.
+  - **Human one-shot:** the check is joined with a **≤1s deadline** (measured from process start) behind a `Checking for updates…` spinner before writing; on hit → notice then generate; on timeout/offline → proceed (worst case **+1s**).
+- **Install-aware update command.** The notice prints the command matching how the running binary was installed (from `current_exe`), first match wins:
+
+  | Signal | Method | Command |
+  |---|---|---|
+  | exe path has a `_npx` component | npx | `npx cardano-init@latest` |
+  | exe path has a `node_modules` component | npm | `npm install -g cardano-init@latest` |
+  | exe under `/nix/store` | nix | `nix profile upgrade cardano-init` |
+  | cargo-dist receipt (`$XDG_CONFIG_HOME\|~/.config/cardano-init/cardano-init-receipt.json`; Windows `%LOCALAPPDATA%\cardano-init\`) whose `install_prefix` contains the exe | shell / PowerShell installer | the README installer one-liner |
+  | `cardano-init` recorded in `$CARGO_HOME/.crates2.json` and exe in `$CARGO_HOME/bin` | cargo | `cargo install --git https://github.com/input-output-hk/cardano-init --force` |
+  | otherwise | unknown | none: the notice shows the releases link instead |
+
+  The receipt is checked before cargo because both installers place the binary in `$CARGO_HOME/bin`.
+- **Banner.** A yellow box (Flutter-style): "A new version of cardano-init is available! (current → latest)", then the update command (or the releases link). When the box would wrap on a narrow terminal, the same rows print unframed so the command stays copy-pasteable.
+- **Informational, not a gate.** After the notice, generation continues with the current version (the user may Ctrl-C to update first). It never blocks beyond the deadline and never alters generated output (determinism, A-3).
+- **Fail-silent.** Best-effort GET of `releases/latest` from the GitHub API (`ureq`, rustls); offline/timeout/parse error → no-op. Only plain `major.minor.patch` tags count; pre-releases are never offered.
+- `--dry-run` writes nothing, so the delete/regenerate concern doesn't apply; the notice still shows (same gating).
 
 ---
 

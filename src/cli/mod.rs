@@ -4,6 +4,7 @@ pub mod oneshot;
 pub mod output;
 pub mod theme;
 pub mod update;
+pub mod version_check;
 
 use std::path::PathBuf;
 
@@ -654,6 +655,13 @@ pub fn run() -> i32 {
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated");
     let format = cli.format;
 
+    if matches!(
+        cli.command,
+        None | Some(Command::Add(_)) | Some(Command::Remove(_))
+    ) {
+        version_check::start(format);
+    }
+
     let result = match cli.command {
         Some(Command::Doctor) => run_doctor(&registry, format),
         Some(Command::List(args)) => crate::doctor::catalog::DepCatalog::load()
@@ -913,6 +921,8 @@ fn run_init(args: InitArgs, registry: &Registry, format: Format) -> Result<(), C
             path: selection.project_name.clone(),
         });
     }
+
+    version_check::announce(format);
 
     if args.dry_run {
         let plan = crate::scaffold::dry_run(&selection, registry)?;
