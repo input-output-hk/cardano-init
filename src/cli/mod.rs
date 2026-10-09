@@ -870,7 +870,7 @@ fn run_init(args: InitArgs, registry: &Registry, format: Format) -> Result<(), C
 
     // Decide mode: one-shot if --name provided, interactive otherwise
     let selection = if let Some(ref name) = args.name {
-        let mut selection = oneshot::build_selection(
+        let selection = oneshot::build_selection(
             name,
             args.on_chain.as_deref(),
             args.off_chain.as_deref(),
@@ -879,9 +879,9 @@ fn run_init(args: InitArgs, registry: &Registry, format: Format) -> Result<(), C
             args.devnet.as_deref(),
             args.formal_methods.as_deref(),
             args.nix,
+            !args.no_spec,
             registry,
         )?;
-        selection.spec = !args.no_spec;
         // Experimental gate (one-shot / JSON): selecting a not-yet-build-green
         // tool requires explicit opt-in. Non-interactive can't prompt, so this
         // is a hard usage error unless --allow-experimental was passed.
@@ -1086,6 +1086,7 @@ mod tests {
             None,
             None,
             false,
+            true,
             &registry,
         )
         .unwrap_err();
@@ -1117,6 +1118,7 @@ mod tests {
             None,
             None,
             false,
+            true,
             &registry,
         )
         .unwrap_err();

@@ -379,6 +379,22 @@ mod tests {
     }
 
     #[test]
+    fn add_protocol_role_does_not_link_missing_spec_example() {
+        let reg = registry();
+        let old = sel(vec![a(Role::Devnet, "yaci")]);
+        let new = apply(&old, &Mutation::Add(a(Role::OnChain, "aiken")));
+        let plan = plan_update(&old, &new, &reg).unwrap();
+        let agents = plan
+            .shared_files
+            .iter()
+            .find(|f| f.dest == Path::new("AGENTS.md"))
+            .expect("AGENTS.md is re-rendered");
+        let agents = std::str::from_utf8(&agents.content).unwrap();
+        assert!(agents.contains("[`spec/`](spec/)"));
+        assert!(!agents.contains("spec/giftcard.md"));
+    }
+
+    #[test]
     fn remove_offchain_leaves_onchain_untouched() {
         let reg = registry();
         let old = sel(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);

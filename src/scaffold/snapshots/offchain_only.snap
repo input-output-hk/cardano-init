@@ -146,7 +146,7 @@ Transaction building & submission. It **consumes** `blueprint/plutus.json` and r
 
 ## The worked example
 
-Every generated project ships the **same** worked example — a **gift card**: a one-shot minting policy that mints a unique token gated by a specific UTxO, plus a `redeem` validator that releases a locked gift when the token is burned. On- and off-chain sides share the same parameter ABI through the blueprint, which is why the project builds and its tests pass out of the box. Use it as the template for real logic; replace it, don't accrete around it. Its human-readable specification is [`spec/giftcard.md`](spec/giftcard.md).
+Every generated project ships the **same** worked example — a **gift card**: a one-shot minting policy that mints a unique token gated by a specific UTxO, plus a `redeem` validator that releases a locked gift when the token is burned. On- and off-chain sides share the same parameter ABI through the blueprint, which is why the project builds and its tests pass out of the box. Use it as the template for real logic; replace it, don't accrete around it. Its human-readable specification, when present, is under [`spec/`](spec/).
 
 ## Cardano knowledge: use cardano-dev-skills
 
