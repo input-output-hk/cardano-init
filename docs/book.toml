@@ -16,7 +16,7 @@ site-url = "/cardano-init/"
 git-repository-url = "https://github.com/input-output-hk/cardano-init"
 edit-url-template = "https://github.com/input-output-hk/cardano-init/edit/main/docs/{path}"
 additional-js = ["theme/mermaid-init.js"]
-default-theme = "light"
+default-theme = "rust"
 preferred-dark-theme = "navy"
 
 [output.html.search]

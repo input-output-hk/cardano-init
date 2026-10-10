@@ -1,9 +1,16 @@
 # Ecosystem: aikup, cardano-up, and friends
 
+`cardano-init` creates a project once and then has no further role in it. Tools such as [`aikup`](https://github.com/aiken-lang/aikup) and [`cardano-up`](https://github.com/blinklabs-io/cardano-up) install and update the toolchains and services that the project uses. The two kinds of tool work together:
 
-`cardano-init` is a **project scaffolder**, not a version manager or an environment manager. It runs once, generates a wired-together monorepo, and steps out. That makes it complementary to (not a replacement for) the per-tool installers in the ecosystem.
+- `cardano-init` decides which tools the project uses and how they connect.
+- `aikup`, `cardano-up`, and similar installers install and manage those tools.
 
-These sit at different layers: `cardano-init` decides *what tools your project uses and how they compose*, while `aikup` / `cardano-up` install and manage *the toolchains and infrastructure those tools need*. The two meet at the dependency [`doctor`](commands.md#doctor): when toolchains are missing, `cardano-init` advises the right installer (`aikup` for Aiken, `cardano-up` for the infrastructure role) rather than reinventing them.
+They meet in the [`doctor`](commands.md#doctor) command. When a toolchain is missing, `doctor` tells you which installer to use, for example `aikup` for Aiken and `cardano-up` for the infrastructure role.
 
-By design, `cardano-init` is **not** a package or version manager: it does not pin or upgrade tool versions, manage dependencies after generation, or migrate existing projects. There is no `cardano-init update`.
+`cardano-init` does not:
 
+- pin or upgrade tool versions;
+- manage dependencies after the project is generated;
+- migrate existing projects.
+
+There is no `cardano-init update` command.

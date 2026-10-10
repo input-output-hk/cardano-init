@@ -1,6 +1,6 @@
 # Installation
 
-`cardano-init` is a single self-contained binary. Pick whichever install method suits you.
+`cardano-init` is a single binary with no runtime dependencies.
 
 ## Run without installing
 
@@ -30,7 +30,7 @@ Windows (PowerShell):
 irm https://github.com/input-output-hk/cardano-init/releases/latest/download/cardano-init-installer.ps1 | iex
 ```
 
-If you want a specific version or a manual download, grab it from the [Releases page](https://github.com/input-output-hk/cardano-init/releases).
+To install a specific version, or to download the binary yourself, use the [Releases page](https://github.com/input-output-hk/cardano-init/releases).
 
 ## Nix (flake)
 
@@ -60,4 +60,4 @@ cargo install --path .
 cardano-init --version
 ```
 
-`cardano-init` itself has no runtime dependencies. The projects it generates do: they all use [`just`](https://just.systems), plus each tool's own toolchain (Aiken, Node.js, a JVM, Docker, …). You don't need to install them up front. Generate a project, then run [`cardano-init doctor`](commands.md#doctor) inside it to see exactly what's missing and how to install it.
+The projects `cardano-init` generates need [`just`](https://just.systems) and the toolchain of each tool you select (Aiken, Node.js, a JVM, Docker, …). You can install these after you generate a project: run [`cardano-init doctor`](commands.md#doctor) inside it to see what is missing and how to install it.

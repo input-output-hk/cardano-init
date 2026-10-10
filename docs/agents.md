@@ -1,11 +1,21 @@
 # For coding agents
 
-`cardano-init` is built to be driven by LLMs from start to finish.
+`cardano-init` can be run completely by an LLM agent.
 
-- **Machine-readable interface.** `cardano-init list --format json` enumerates every role and tool. Every command accepts `--format json` and emits a stable envelope with machine-readable error codes and a `context` that says how to fix each error.
-- **Non-interactive by design.** One-shot mode (`--name …`) never prompts, so an agent can scaffold in a single call. `--format json` also implies non-interactive: if required input is missing, it errors instead of prompting.
-- **Generated `AGENTS.md`.** Every project ships an `AGENTS.md` (plus a `CLAUDE.md` that imports it) tailored to the chosen stack: the layout, the interface contract and its invariants, the exact `just` workflow, official documentation links for each tool, and the [cardano-dev-skills](https://github.com/cardano-foundation/cardano-dev-skills) most relevant to that stack. An agent dropped into a fresh project knows what it is and what to do next.
-- **Works with [cardano-dev-skills](https://github.com/cardano-foundation/cardano-dev-skills).** That Cardano Foundation skill set is the *knowledge* layer (writing validators, building transactions, debugging on-chain failures). `cardano-init` is the *scaffolding* layer. The generated `AGENTS.md` points agents at the plugin and the right skills for their stack.
+- **JSON output.** Every command accepts `--format json` and prints one JSON object. Errors carry a stable `code` and a `context` that says how to fix them. `cardano-init list --format json` returns every role and tool.
+- **No prompts.** One-shot mode (`--name …`) never prompts, so an agent can create a project in one call. `--format json` also turns prompts off: if required input is missing, the command returns an error.
+
+## Generated `AGENTS.md`
+
+Every project includes an `AGENTS.md`, and a `CLAUDE.md` that imports it. It is written for the tools you selected and contains:
+
+- the project layout;
+- the interface contract and the rules it sets;
+- the `just` commands to build, test, and clean;
+- links to the official documentation of each tool;
+- the [cardano-dev-skills](https://github.com/cardano-foundation/cardano-dev-skills) most useful for that stack.
+
+cardano-dev-skills is a Cardano Foundation skill set for agents. It teaches how to write validators, build transactions, and debug on-chain failures. `cardano-init` creates the project, and the generated `AGENTS.md` points the agent to the skills it needs.
 
 ## A typical agent flow
 
@@ -25,14 +35,14 @@ just test
 
 ## JSON envelope
 
-Every `--format json` response is a single JSON object in one of two shapes:
+A `--format json` response has one of two shapes:
 
 ```json
 { "schema_version": 1, "ok": true,  "data":  { } }
 { "schema_version": 1, "ok": false, "error": { "code": "<stable>", "message": "<human>", "context": { } } }
 ```
 
-`message` is meant for humans and may change. `code` and the `context` keys are part of the contract. The process exit code gives the category (`0` success, `1` runtime, `2` usage). See [Exit codes](commands.md#exit-codes).
+`message` is for humans and can change between versions. `code` and the `context` keys are stable. The exit code gives the category: `0` success, `1` runtime error, `2` usage error (see [Exit codes](commands.md#exit-codes)).
 
 ## Error codes
 

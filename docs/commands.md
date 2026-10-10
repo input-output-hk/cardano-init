@@ -4,7 +4,7 @@
 cardano-init [OPTIONS]            # create a project (interactive, or one-shot with --name)
 cardano-init list [--table]       # list roles and tools
 cardano-init doctor               # check this project's dependencies
-cardano-init add [ROLE FLAGS]     # add or swap a tool in the current project
+cardano-init add [ROLE FLAGS]     # add or replace a tool in the current project
 cardano-init remove [ROLE FLAGS]  # remove a role or infrastructure provider
 cardano-init help [COMMAND]       # print help
 ```
@@ -20,7 +20,7 @@ cardano-init --name my-app --on-chain aiken --off-chain meshjs --nix
 cardano-init -n my-app -p scalus -d yaci           # short flags
 ```
 
-**Mode selection:** if `--name` is given, the command runs in **one-shot** mode and never prompts. Otherwise it runs the **interactive** guided setup. Passing any other creation flag without `--name` is an error (`name_required`).
+With `--name`, the command runs in **one-shot** mode and never prompts. Without it, the command starts the **interactive** setup. Any other creation flag without `--name` is an error (`name_required`).
 
 | Flag | Short / aliases | Description |
 |------|-----------------|-------------|
@@ -38,7 +38,7 @@ cardano-init -n my-app -p scalus -d yaci           # short flags
 | `--format <FORMAT>` | | `human` (default) or `json`. |
 | `--help` / `--version` | `-h` / `-V` | Print help / version. |
 
-Short flags and aliases are conveniences only. Errors and JSON output always use the canonical long name. The target directory must not already exist with content (`dir_exists`).
+Short flags and aliases behave exactly like the long flag. Errors and JSON output always use the long name. If the project directory already exists and is not empty, the command stops with `dir_exists`.
 
 ## `list`
 
@@ -56,7 +56,7 @@ cardano-init list --format json   # machine-readable catalog
 
 ## `doctor`
 
-Run inside a generated project. It detects which components the project contains, checks that the toolchains they need are installed, and prints the exact installer command for anything missing. It also lists the supporting tools (editor extensions, language servers) and community channels for the detected stack.
+Run `doctor` inside a generated project. It finds the project's components, checks that the toolchains they need are installed, and prints the install command for each one that is missing. It also lists the supporting tools (editor extensions, language servers) and the community channels for those components.
 
 ```bash
 cd my-protocol
@@ -66,10 +66,10 @@ cardano-init doctor --format json
 
 ## `add`
 
-Add a tool for a role, or swap the current one, in the project in the current directory. It takes the same role flags as project creation. Giving a role flag assigns or replaces that role.
+Add a tool to the project in the current directory, or replace the tool of a role. `add` takes the same role flags as project creation.
 
 ```bash
-cardano-init add --on-chain plinth            # swap the on-chain tool
+cardano-init add --on-chain plinth            # replace the on-chain tool
 cardano-init add --devnet yaci                # add a devnet
 cardano-init add --infra kupo --infra ogmios  # add infrastructure providers
 cardano-init add --fullstack scalus           # switch to a fullstack protocol/ component
@@ -88,7 +88,7 @@ Plus the [shared update flags](#shared-update-flags).
 
 ## `remove`
 
-Remove a role, or a single infrastructure provider, from the project in the current directory. Role flags take no value. `--infra` takes the provider id.
+Remove a role, or one infrastructure provider, from the project in the current directory. Role flags take no value, except `--infra`, which takes the provider id.
 
 ```bash
 cardano-init remove --devnet
@@ -108,7 +108,7 @@ Plus the [shared update flags](#shared-update-flags).
 
 ## Shared update flags
 
-`add` and `remove` work out the project's current selection from its component directories, apply the change, and re-wire the shared top-level files (`Justfile`, `README.md`, `AGENTS.md`, …). By default they require a **clean git working tree**, so the whole change can be reviewed with `git diff` and reverted if needed.
+`add` and `remove` read the project's current tools from its component directories, apply the change, and update the shared top-level files (`Justfile`, `README.md`, `AGENTS.md`, …). By default they need a **clean git working tree**, so you can review the change with `git diff` and revert it.
 
 | Flag | Short / aliases | Description |
 |------|-----------------|-------------|
@@ -121,8 +121,8 @@ Plus the [shared update flags](#shared-update-flags).
 
 | Code | Meaning |
 |------|---------|
-| `0` | Success, including `--dry-run` and declining the interactive confirmation. |
+| `0` | Success. Also returned for `--dry-run`, and when you answer No to the interactive confirmation. |
 | `1` | Runtime error: the target directory exists, a dirty git tree, I/O or rendering failures. |
 | `2` | Usage or validation error: unknown tool, tool in the wrong role, invalid project name, missing `--name`, incompatible tools, … |
 
-For the exact reason, use `--format json` and read `error.code` (see [For coding agents](agents.md#error-codes)).
+For the exact error, use `--format json` and read `error.code`. See [Error codes](agents.md#error-codes).

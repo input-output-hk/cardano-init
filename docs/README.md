@@ -2,9 +2,9 @@
 
 **Go from zero to a running Cardano protocol in one command.**
 
-Pick a tool for each role you need (on-chain, off-chain, devnet, infrastructure, formal-methods) and `cardano-init` generates a monorepo where every component is **already wired together**, plus a worked end-to-end example that **builds and passes its tests out of the box**.
+Pick a tool for each role you need (on-chain, off-chain, devnet, infrastructure, formal-methods). `cardano-init` generates a monorepo where every component is **already connected** to the others. It also includes a worked end-to-end example that **builds and passes its tests** as soon as it is generated.
 
-![cardano-init scaffolds a full stack in one command, then just test passes out of the box](https://raw.githubusercontent.com/input-output-hk/cardano-init/main/assets/demo.gif)
+![cardano-init scaffolds a full stack in one command, then just test passes](https://raw.githubusercontent.com/input-output-hk/cardano-init/main/assets/demo.gif)
 
 ```console
 $ cardano-init --name my-protocol --on-chain aiken --off-chain meshjs --devnet yaci
@@ -25,18 +25,19 @@ $ cd my-protocol && just test
 
 ## Why `cardano-init`?
 
-- **Zero to running in one command.** You get a wired-together monorepo that builds and passes its tests immediately.
-- **Mix and match freely.** Components talk to a shared *contract*, so you can combine tools from different roles however you want and they work together.
-- **Agent-native.** Every command can emit machine-readable JSON, and every project gets a generated `AGENTS.md`, so coding agents know what the project is and what to do next.
-- **Never stuck on setup.** The built-in dependency `doctor` detects your toolchains and tells you the exact installer to run for anything missing.
-- **A real example.** Every stack ships the same worked gift-card scenario end to end, so what you generate actually runs.
+- **One command to a working project.** The generated monorepo builds and passes its tests immediately.
+- **Combine tools freely.** Components share a common *contract*, so a tool from one role works with any tool from another.
+- **Built for coding agents.** Every command can print JSON, and every project includes an `AGENTS.md` that tells an agent what the project is and what to do next.
+- **Help with setup.** The built-in `doctor` checks your toolchains and prints the install command for anything missing.
+- **A real example.** Every stack ships the same gift-card scenario, and it runs end to end.
 
 ## Where to go next
 
-- New here? Start with [Installation](installation.md) and the [Quick start](quick-start.md).
-- Want to understand how the pieces compose? Read [How it works](how-it-works.md).
-- Looking for a flag? See the [Command reference](commands.md).
-- Driving `cardano-init` from an LLM? See [For coding agents](agents.md).
-- Want to add your tool to the registry? See [Adding a tool](ADDING_A_TOOL.md).
+- **New to Cardano:** the [Cardano Developer Portal](https://developers.cardano.org/) has a hands-on onboarding path, from wallets and transactions to writing and testing validators.
+- **First project:** [Installation](installation.md), then the [Quick start](quick-start.md).
+- **How the components connect:** [How it works](how-it-works.md).
+- **All flags:** the [Command reference](commands.md).
+- **Using `cardano-init` from an LLM:** [For coding agents](agents.md).
+- **Adding your tool to the registry:** [Adding a tool](ADDING_A_TOOL.md).
 
 `cardano-init` is open source (Apache-2.0) and developed on [GitHub](https://github.com/input-output-hk/cardano-init).

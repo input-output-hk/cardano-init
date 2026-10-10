@@ -16,23 +16,23 @@ my-protocol/
 └── devnet/         # local chain + its own Justfile
 ```
 
-Only the directories for the roles you selected are created. Add `--nix` to also get a `flake.nix` and `.envrc` that pin the project's toolchains. Run `--dry-run` to see the exact file list for a given selection before writing anything.
+Only the roles you select get a directory. Add `--nix` to also get a `flake.nix` and `.envrc` that pin the project's toolchains. Add `--dry-run` to see the full file list without writing anything.
 
 ## The Justfile workflow
 
-Every component has its own `Justfile` and works standalone. The top-level `Justfile` aggregates the tasks that terminate and compose:
+Every component has its own `Justfile` and works on its own. The top-level `Justfile` runs the tasks that finish and can be combined:
 
 | Target | What it does |
 |--------|--------------|
-| `just build` | Builds every component. On-chain builds first so `blueprint/plutus.json` exists for everyone else. |
+| `just build` | Builds every component. On-chain builds first, so `blueprint/plutus.json` exists for the other components. |
 | `just test` | Builds the on-chain blueprint, then runs each component's tests (including formal verification, if selected). |
 | `just clean` | Removes build artifacts from every component. |
 
-Per-role targets such as `just build-on-chain` or `just test-off-chain` are also available. Run `just` on its own to list them.
+There are also targets for each role, such as `just build-on-chain` and `just test-off-chain`. Run `just` with no arguments to list them.
 
 ### Long-running tasks: `dev`
 
-Watch modes, local devnets, and service stacks are **per component** and never aggregated at the top level. A component provides a `dev` target only when it has such a mode. Run it directly:
+Tasks that keep running (watch modes, local devnets, service stacks) belong to **one component**, and the top-level `Justfile` does not run them. A component has a `dev` target only when it has such a task. Run it from the component's `Justfile`:
 
 ```bash
 just -f devnet/Justfile dev
@@ -42,11 +42,11 @@ just -f <dir>/Justfile --list   # see what a component offers
 
 ## `blueprint/`
 
-The on-chain component's `build` writes the compiled validators to `blueprint/plutus.json` (a [CIP-57](https://cips.cardano.org/cip/CIP-0057) blueprint). Off-chain code reads the compiled scripts from there and applies its parameters, which is why any off-chain tool can drive any on-chain tool.
+The on-chain component's `build` writes the compiled validators to `blueprint/plutus.json`, a [CIP-57](https://cips.cardano.org/cip/CIP-0057) blueprint. The off-chain code reads the compiled scripts from this file and applies its parameters. See [The interface contract](how-it-works.md#the-interface-contract).
 
 ## `.env`
 
-`.env` is the shared, stable place for chain connection details:
+`.env` holds the chain connection details for all components:
 
 ```bash
 CARDANO_NETWORK=preview
@@ -60,12 +60,12 @@ DOLOS_GRPC_URL=
 CARDANO_NODE_API_URL=
 ```
 
-The values start blank. Whichever component provisions a local endpoint (a devnet such as Yaci DevKit, or an [infrastructure provider](infrastructure.md)) fills them in during its `dev` task. Consumers read them and fall back gracefully when they're empty, for example by using a public provider instead of a local one.
+The values start empty. A component that starts a local endpoint (a devnet such as Yaci DevKit, or an [infrastructure provider](infrastructure.md)) fills them in during its `dev` task. When a value is empty, the components that read it keep working, for example by connecting to a public provider.
 
 ## `AGENTS.md`
 
-Every project ships an `AGENTS.md` (and a `CLAUDE.md` that imports it) tailored to the chosen stack: the layout, the interface contract, the exact `just` workflow, official documentation links for each tool, and the most relevant Cardano developer skills. See [For coding agents](agents.md).
+Every project includes an `AGENTS.md`, and a `CLAUDE.md` that imports it, written for the tools you selected. See [For coding agents](agents.md#generated-agentsmd) for what it contains.
 
 ## Changing the stack later
 
-From inside the project, use [`add`](commands.md#add) and [`remove`](commands.md#remove) to add, swap, or drop components. `cardano-init` detects the current selection from the directories on disk (there's no metadata file) and re-wires the shared top-level files.
+From inside the project, use [`add`](commands.md#add) and [`remove`](commands.md#remove) to add, replace, or remove components. `cardano-init` reads the current selection from the component directories (the project has no metadata file) and updates the shared top-level files.

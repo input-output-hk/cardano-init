@@ -2,19 +2,24 @@
 
 ## Roles
 
-You choose tools for **roles**. Only the directories for the roles you select are created, and a base layer (top-level `Justfile`, `README.md`, `.env`, `blueprint/`) wires them together.
+You choose a tool for each **role** you need. `cardano-init` creates a directory only for the roles you select, plus a base layer (top-level `Justfile`, `README.md`, `.env`, `blueprint/`) that connects them.
 
 | Role | What it does | Directory | Multiple tools? |
 |------|--------------|-----------|-----------------|
-| `on-chain` | Validators / smart-contract logic; produces the CIP-57 blueprint | `on-chain/` | no |
+| `on-chain` | Validators (smart-contract logic); produces the CIP-57 blueprint | `on-chain/` | no |
 | `off-chain` | Transaction building and submission | `off-chain/` | no |
-| `devnet` | A local throwaway chain to develop and integration-test against | `devnet/` | no |
+| `devnet` | A local test chain to develop and run integration tests against | `devnet/` | no |
 | `infrastructure` | Indexers, node providers, chain followers | `infra/` | **yes** |
 | `formal-methods` | Specification and verification | `formal-methods/` | no |
 
 ## The interface contract
 
-What makes this work is the **interface contract**. On-chain components always emit `blueprint/plutus.json`, and whatever provisions a local endpoint writes standard variables (like `INDEXER_URL`) into `.env`. Consumers read those and degrade gracefully when they're blank. Because components talk to the *contract* rather than to each other, you can mix and match tools freely.
+Components connect through an **interface contract** with two parts:
+
+- Every on-chain component writes its compiled validators to `blueprint/plutus.json`.
+- Every component that starts a local chain endpoint writes its address (for example `INDEXER_URL`) to `.env`.
+
+Other components read these two files and keep working when a value is empty. No component reads another component's files directly, so you can replace a tool on one side and the other side still works.
 
 ```mermaid
 flowchart LR
@@ -24,42 +29,43 @@ flowchart LR
     ENV --> OFF
 ```
 
-Every tool writes to and reads from those two seams (`blueprint/` and `.env`), never from each other, so swapping one side never breaks the other.
-
 ## The worked example: a gift card
 
-Every on-chain and off-chain template ships the **same worked example: a gift card**. It's a one-shot minting policy that mints a unique token gated by a specific UTxO, plus a `redeem` validator that releases a locked gift when the token is burned.
+Every on-chain and off-chain template includes the same example, a **gift card**. It has two validators:
 
-Because all tools demonstrate the same scenario with a shared parameter ABI, a generated project builds and tests end to end, and any on-chain tool composes with any off-chain one. For example, an Aiken contract can be driven by the Scalus off-chain, or a Scalus contract by the MeshJS off-chain.
+- a one-shot minting policy, which mints a unique token and can run only once because it requires a specific UTxO to be spent;
+- a `redeem` validator, which releases a locked gift when that token is burned.
+
+All tools implement this example with the same parameters. As a result, any on-chain tool works with any off-chain tool. For example, the Scalus off-chain code can drive an Aiken contract, and the MeshJS off-chain code can drive a Scalus contract.
 
 ## Fullstack tools
 
-Some tools (for example Scalus) implement both on-chain and off-chain in one language. Pick such a tool for both roles and, instead of two folders, you get a single unified **`protocol/`** component:
+Some tools, such as Scalus, write both the on-chain and the off-chain code in one language. If you select such a tool for both roles, you get one **`protocol/`** component in place of two directories:
 
 ```bash
 cardano-init --name my-protocol --fullstack scalus
-# equivalent to
+# same result as
 cardano-init --name my-protocol --on-chain scalus --off-chain scalus
 ```
 
-The `protocol/` component still writes the standard `blueprint/plutus.json` and reads `.env`, so it composes with devnet, formal-methods, and infrastructure tools like any other.
+`protocol/` also writes `blueprint/plutus.json` and reads `.env`, so it works with devnet, formal-methods, and infrastructure tools.
 
 ## Compatibility checks
 
-Not every off-chain tool can talk to every provider, and each devnet or infrastructure provider serves only some of them. `cardano-init` knows these relationships and **stops before generating** a project whose off-chain tool can't reach a chain through any of its selected providers. The error lists the providers that *would* work.
+Each off-chain tool can connect to some providers and not to others. `cardano-init` knows which pairs work. If the off-chain tool you select cannot reach any of the providers you select, it **stops before generating the project** and lists the providers that would work.
 
-- Pass `--ignore-warning` to scaffold the combination anyway (the stop becomes a warning).
-- In interactive mode, incompatible options are simply hidden.
+- Pass `--ignore-warning` to generate the project anyway. The error becomes a warning.
+- Interactive mode hides the options that would not work.
 
 ## Experimental tools
 
-Some tools are marked **experimental**: either the upstream tool is still pre-release, or its `cardano-init` integration isn't yet fully build-green. They still generate, but you have to opt in:
+A tool is **experimental** when the tool itself is still in development, or when its `cardano-init` template does not yet pass every build check. Experimental tools still generate, but you must opt in:
 
 - In one-shot or JSON mode, pass `--allow-experimental` (`-e`). Without it, selecting an experimental tool is an error and nothing is generated.
-- In interactive mode, choosing an experimental tool asks for confirmation (default **No**).
+- In interactive mode, you are asked to confirm. The default answer is **No**.
 
-`cardano-init list` tags these tools as `[experimental]`.
+`cardano-init list` marks these tools as `[experimental]`.
 
 ## Networks
 
-Generated projects target the **preview** testnet by default. To switch, edit `CARDANO_NETWORK` in the generated `.env`.
+Generated projects use the **preview** testnet. To change the network, edit `CARDANO_NETWORK` in the generated `.env`.
