@@ -17,6 +17,8 @@ edit-url-template = "https://github.com/input-output-hk/cardano-init/edit/main/d
 additional-js = ["theme/mermaid-init.js"]
 default-theme = "rust"
 preferred-dark-theme = "navy"
+# Don't list the current page's headings under its sidebar entry.
+sidebar-header-nav = false
 
 [output.html.search]
 enable = true
