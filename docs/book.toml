@@ -1,0 +1,23 @@
+[book]
+title = "cardano-init"
+description = "Scaffold a complete, runnable Cardano protocol project in seconds."
+language = "en"
+# The book source is docs/ itself. Only pages listed in SUMMARY.md are
+# published; internal design docs (PRD, TECH_SPEC, ROADMAP, RELEASING) stay
+# in the repository only.
+src = "."
+
+[build]
+build-dir = "../target/book"
+create-missing = false
+
+[output.html]
+site-url = "/cardano-init/"
+git-repository-url = "https://github.com/input-output-hk/cardano-init"
+edit-url-template = "https://github.com/input-output-hk/cardano-init/edit/main/docs/{path}"
+additional-js = ["theme/mermaid-init.js"]
+default-theme = "light"
+preferred-dark-theme = "navy"
+
+[output.html.search]
+enable = true
