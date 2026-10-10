@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Last updated:** 2026-06-01 · **Owner:** Robertino Martinez
 
-> This is the **canonical** architecture document. It supersedes the legacy root-level `REQUIREMENTS.md` and `ARCHITECTURE.md` (now deleted; available in git history). Read [PRD.md](https://github.com/input-output-hk/cardano-init/blob/main/docs/PRD.md) for the *why* and *for whom*; this document owns the *how*. Detailed contracts, data shapes, and edge cases live in [TECH_SPEC.md](https://github.com/input-output-hk/cardano-init/blob/main/docs/TECH_SPEC.md); sequencing lives in [ROADMAP.md](https://github.com/input-output-hk/cardano-init/blob/main/docs/ROADMAP.md).
+> This is the **canonical** architecture document. It supersedes the legacy root-level `REQUIREMENTS.md` and `ARCHITECTURE.md` (now deleted; available in git history). Read [PRD.md](../design/prd.md) for the *why* and *for whom*; this document owns the *how*. Detailed contracts, data shapes, and edge cases live in [TECH_SPEC.md](../design/tech-spec.md); sequencing lives in [ROADMAP.md](../design/roadmap.md).
 
 ---
 

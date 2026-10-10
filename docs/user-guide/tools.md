@@ -27,4 +27,4 @@ Use the **tool id** shown by `list` (for example `aiken`, `meshjs`, `yaci`, `tx-
 - **Scalus** fills both on-chain and off-chain and supports `--fullstack`, which generates a single `protocol/` component. See [Fullstack tools](how-it-works.md#fullstack-tools).
 - **Experimental** tools (🧪) require `--allow-experimental` in one-shot mode. See [Experimental tools](how-it-works.md#experimental-tools).
 - **Infrastructure** is the only role that accepts several tools. See [Infrastructure providers](infrastructure.md).
-- To add a tool to the registry, see [Adding a tool](ADDING_A_TOOL.md).
+- To add a tool to the registry, see [Adding a tool](../contributing/adding-a-tool.md).

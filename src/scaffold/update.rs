@@ -4,7 +4,7 @@
 //! This module is **pure** (no I/O): it diffs two selections at the
 //! *component-directory* level and re-renders the shared top-level layer, all
 //! from embedded assets. The disk side effects live in
-//! [`super::writer::apply_update`]. See `docs/TECH_SPEC.md` §16.
+//! [`super::writer::apply_update`]. See `docs/design/tech-spec.md` §16.
 //!
 //! The load-bearing property is that each component is **standalone** (interface
 //! contract): a slot whose tool is unchanged is not in the change set at all, so

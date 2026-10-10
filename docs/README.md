@@ -34,10 +34,10 @@ $ cd my-protocol && just test
 ## Where to go next
 
 - **New to Cardano:** the [Cardano Developer Portal](https://developers.cardano.org/) has a hands-on onboarding path, from wallets and transactions to writing and testing validators.
-- **First project:** [Installation](installation.md), then the [Quick start](quick-start.md).
-- **How the components connect:** [How it works](how-it-works.md).
-- **All flags:** the [Command reference](commands.md).
-- **Using `cardano-init` from an LLM:** [For coding agents](agents.md).
-- **Adding your tool to the registry:** [Adding a tool](ADDING_A_TOOL.md).
+- **First project:** [Installation](user-guide/installation.md), then the [Quick start](user-guide/quick-start.md).
+- **How the components connect:** [How it works](user-guide/how-it-works.md).
+- **All flags:** the [Command reference](user-guide/commands.md).
+- **Using `cardano-init` from an LLM:** [For coding agents](user-guide/agents.md).
+- **Adding your tool to the registry:** [Adding a tool](contributing/adding-a-tool.md).
 
 `cardano-init` is open source (Apache-2.0) and developed on [GitHub](https://github.com/input-output-hk/cardano-init).

@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`cardano-init` is a Rust CLI tool that scaffolds Cardano protocol projects. Users select tools for each functional role (on-chain, off-chain, infrastructure, devnet, formal-methods) and the CLI generates a working monorepo. The authoritative docs live in `docs/`: read `docs/PRD.md` (product), `docs/ARCHITECTURE.md` (system design), and `docs/TECH_SPEC.md` (contracts, schemas, edge cases) before making any significant changes; `docs/ADDING_A_TOOL.md` is the contributor guide and `docs/ROADMAP.md` is the milestone plan.
+`cardano-init` is a Rust CLI tool that scaffolds Cardano protocol projects. Users select tools for each functional role (on-chain, off-chain, infrastructure, devnet, formal-methods) and the CLI generates a working monorepo. The authoritative docs live in `docs/`: read `docs/design/prd.md` (product), `docs/contributing/architecture.md` (system design), and `docs/design/tech-spec.md` (contracts, schemas, edge cases) before making any significant changes; `docs/contributing/adding-a-tool.md` is the contributor guide and `docs/design/roadmap.md` is the milestone plan.
 
-`docs/` is also the source of the user docs site (mdBook, published to GitHub Pages by `.github/workflows/docs.yml`). Only pages listed in `docs/SUMMARY.md` are published; PRD/TECH_SPEC/ROADMAP/RELEASING stay repo-only, so link to them from published pages with absolute GitHub URLs. Preview with `mdbook serve docs`.
+`docs/` is the source of the docs site (mdBook, published to GitHub Pages by `.github/workflows/docs.yml`), in three folders: `user-guide/` (CLI users; follows the Cardano Developer Portal writing rules), `contributing/`, and `design/`. Every page must be listed in `docs/SUMMARY.md`. Preview with `mdbook serve docs`.
 
-It's an early prototype: the dependency `doctor`, `list`, and `--format json` are implemented, while a few capabilities (a version-update check, min-version checks) remain **planned, not yet implemented**. `docs/ROADMAP.md` tracks what's real vs. upcoming.
+It's an early prototype: the dependency `doctor`, `list`, and `--format json` are implemented, while a few capabilities (a version-update check, min-version checks) remain **planned, not yet implemented**. `docs/design/roadmap.md` tracks what's real vs. upcoming.
 
 ## Commands
 
@@ -32,7 +32,7 @@ cargo clippy
 
 ## Architecture
 
-The codebase is a single Rust crate. The module structure is as follows (see `docs/ARCHITECTURE.md` §2):
+The codebase is a single Rust crate. The module structure is as follows (see `docs/contributing/architecture.md` §2):
 
 - `src/cli/`: impure edge: argument parsing (clap), interactive prompts (dialoguer), and the output presenter. Orchestrates the core; holds no generation logic.
 - `src/registry/`: deserializes embedded TOML tool definitions into typed structs. The `Role` enum (5 roles) is the sole source of truth for the role vocabulary; the registry only *references* roles.
@@ -51,7 +51,7 @@ The codebase is a single Rust crate. The module structure is as follows (see `do
 
 ### Registry and templates
 
-Tool definitions live in `registry/tools/<tool>.toml`. Templates live in `templates/<tool>/<role>/` with a `manifest.toml` listing files. Both are embedded into the binary at compile time via **rust-embed** (`#[folder = "…"]`). There is **no `build.rs`**. (Dependency install recipes live in `registry/deps.toml`, consumed by `doctor`, see `docs/TECH_SPEC.md` §9.)
+Tool definitions live in `registry/tools/<tool>.toml`. Templates live in `templates/<tool>/<role>/` with a `manifest.toml` listing files. Both are embedded into the binary at compile time via **rust-embed** (`#[folder = "…"]`). There is **no `build.rs`**. (Dependency install recipes live in `registry/deps.toml`, consumed by `doctor`, see `docs/design/tech-spec.md` §9.)
 
 The **interface contract** (`contract.rs`) is what enables any on-chain tool to compose with any off-chain tool without per-pair logic:
 - On-chain templates must produce `blueprint/plutus.json` during `build`.

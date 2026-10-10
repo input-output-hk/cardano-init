@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Last updated:** 2026-06-01 · **Owner:** Robertino Martinez
 
-> Companion documents: [ARCHITECTURE.md](./ARCHITECTURE.md) (system design), [TECH_SPEC.md](./TECH_SPEC.md) (technical decisions, contracts, data models), [ROADMAP.md](./ROADMAP.md) (phases and milestones). This PRD owns the *why* and *for whom*; those documents own the *how* and *when*.
+> Companion documents: [ARCHITECTURE.md](../contributing/architecture.md) (system design), [TECH_SPEC.md](tech-spec.md) (technical decisions, contracts, data models), [ROADMAP.md](roadmap.md) (phases and milestones). This PRD owns the *why* and *for whom*; those documents own the *how* and *when*.
 
 ---
 
@@ -74,7 +74,7 @@ The PRD commits to two headline metrics. Both are measurable in CI and tied to t
 
 ### 5.1 In scope for v1
 
-- **Roles are a fixed, code-defined vocabulary; tools are the open-ended part.** The set of roles is defined in code, not data: the registry *references* roles but cannot introduce them. It is *not* frozen at "four": the current set is on-chain, off-chain, infrastructure, devnet, and formal-methods, and it can grow in a future version via a deliberate code change. **Tools**, by contrast, are fully data-driven: adding one is a registry + template change with no core code change (see [ARCHITECTURE.md](./ARCHITECTURE.md) §3.1).
+- **Roles are a fixed, code-defined vocabulary; tools are the open-ended part.** The set of roles is defined in code, not data: the registry *references* roles but cannot introduce them. It is *not* frozen at "four": the current set is on-chain, off-chain, infrastructure, devnet, and formal-methods, and it can grow in a future version via a deliberate code change. **Tools**, by contrast, are fully data-driven: adding one is a registry + template change with no core code change (see [ARCHITECTURE.md](../contributing/architecture.md) §3.1).
 - **At least one working tool per advertised role.** No role is advertised with zero working tools. There is no single "golden path" combination: every shipped tool is verified individually and the interface contract guarantees that any combination composes (§7), so combinations are not tested pairwise.
 - **Whatever ships in the registry must work.** Every registered tool is held to the build/contract bar; adding a tool requires adding its tests (§7, SM-1).
 - **Two surfaces**: One-shot CLI and interactive CLI (§6).
@@ -96,11 +96,11 @@ These are things users might reasonably expect that we deliberately will **not**
 
 ### 5.3 Deferred (post-v1)
 
-- Dependency doctor **auto-install** (running installs with consent): a nice-to-have targeted for the RC ([ROADMAP](./ROADMAP.md) DX.05); `cardano-up` is installed as a dependency like `aikup`. (The standalone `cardano-init doctor` command is **not** deferred: it's a DX.02 deliverable.)
+- Dependency doctor **auto-install** (running installs with consent): a nice-to-have targeted for the RC ([ROADMAP](roadmap.md) DX.05); `cardano-up` is installed as a dependency like `aikup`. (The standalone `cardano-init doctor` command is **not** deferred: it's a DX.02 deliverable.)
 - Plugin / lifecycle hooks for tools, if and when needed (e.g. "after scaffolding, run `devkit start`").
 - Config-file driven runs beyond flags, if needed.
 
-See [ROADMAP.md](./ROADMAP.md) for sequencing.
+See [ROADMAP.md](roadmap.md) for sequencing.
 
 ---
 
@@ -156,7 +156,7 @@ Priority: **M** = Must (v1), **S** = Should (v1 if affordable), **C** = Could (l
 - **FR-18 (M):** Detect the host OS and available package manager(s) and print the **exact install commands** for the missing dependencies.
 - **FR-19 (M):** For the **infrastructure** role, the advised install path uses `cardano-up` as the primary mechanism for provisioning infra tooling. If `cardano-up` itself is absent, v1 instructs the user to install it (auto-install is deferred, §5.3).
 - **FR-20 (M):** If dependencies cannot be satisfied, clearly tell the user which to install manually and state that the generated template is otherwise correct and ready once they do.
-- **FR-21 (C):** Offer to **run** the installs with user consent (auto-install). *Nice-to-have, targeted [ROADMAP](./ROADMAP.md) DX.05.*
+- **FR-21 (C):** Offer to **run** the installs with user consent (auto-install). *Nice-to-have, targeted [ROADMAP](roadmap.md) DX.05.*
 - **FR-22 (S):** Expose the doctor as a standalone `cardano-init doctor` subcommand runnable in an existing project. *Targeted DX.02.*
 - **FR-25 (S):** Edit an existing project's role/tool composition via `cardano-init add`/`remove`: reconstruct the current selection by detection, apply the change (add/remove/replace whole component folders, re-wire the shared top-level files), and never touch user code in a kept component. Guarded by a git-clean check (`--force` to override) with a `--dry-run` preview; reuses the init compatibility/experimental gates on the resulting selection. Not version management (§5.2). See TECH_SPEC §15.
 

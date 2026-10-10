@@ -164,13 +164,13 @@ Infrastructure provisioned via [cardano-up](https://github.com/blinklabs-io/card
 
 Full user docs are published at **[input-output-hk.github.io/cardano-init](https://input-output-hk.github.io/cardano-init/)** (source in [`docs/`](docs/)):
 
-- [Quick start](https://input-output-hk.github.io/cardano-init/quick-start.html): create, check, build, and test your first project
-- [How it works](https://input-output-hk.github.io/cardano-init/how-it-works.html): roles, the interface contract, the worked gift-card example, fullstack tools, and compatibility checks
-- [Command reference](https://input-output-hk.github.io/cardano-init/commands.html): every command, flag, alias, and exit code
-- [For coding agents](https://input-output-hk.github.io/cardano-init/agents.html): the JSON interface, error codes, and generated `AGENTS.md`
-- [Ecosystem: `aikup`, `cardano-up`, and friends](https://input-output-hk.github.io/cardano-init/ecosystem.html)
-- [Infrastructure providers](https://input-output-hk.github.io/cardano-init/infrastructure.html)
-- [Supporting tools and getting help](https://input-output-hk.github.io/cardano-init/help.html): editor extensions, language servers, CBOR/transaction inspectors, and each tool's community channels
+- [Quick start](https://input-output-hk.github.io/cardano-init/user-guide/quick-start.html): create, check, build, and test your first project
+- [How it works](https://input-output-hk.github.io/cardano-init/user-guide/how-it-works.html): roles, the interface contract, the worked gift-card example, fullstack tools, and compatibility checks
+- [Command reference](https://input-output-hk.github.io/cardano-init/user-guide/commands.html): every command, flag, alias, and exit code
+- [For coding agents](https://input-output-hk.github.io/cardano-init/user-guide/agents.html): the JSON interface, error codes, and generated `AGENTS.md`
+- [Ecosystem: `aikup`, `cardano-up`, and friends](https://input-output-hk.github.io/cardano-init/user-guide/ecosystem.html)
+- [Infrastructure providers](https://input-output-hk.github.io/cardano-init/user-guide/infrastructure.html)
+- [Supporting tools and getting help](https://input-output-hk.github.io/cardano-init/user-guide/help.html): editor extensions, language servers, CBOR/transaction inspectors, and each tool's community channels
 
 ## Development Documentation
 
@@ -182,13 +182,13 @@ Internal CI (smoke tests, installer recipes, devnet):
 
 | Doc | Purpose |
 |-----|---------|
-| [docs/PRD.md](docs/PRD.md) | Product requirements: who it's for, problem, scope, success metrics |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, module structure, data model, pipeline |
-| [docs/TECH_SPEC.md](docs/TECH_SPEC.md) | Exact contracts, schemas, algorithms, edge cases |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Phases & milestones (DX.02, DX.05) |
-| [docs/ADDING_A_TOOL.md](docs/ADDING_A_TOOL.md) | Contributor guide for integrating a new tool |
 | [docs/SUMMARY.md](docs/SUMMARY.md) | Docs site table of contents (mdBook; preview with `mdbook serve docs`) |
-| [docs/RELEASING.md](docs/RELEASING.md) | How to cut a release and publish prebuilt binaries (cargo-dist) |
+| [docs/design/prd.md](docs/design/prd.md) | Product requirements: who it's for, problem, scope, success metrics |
+| [docs/contributing/architecture.md](docs/contributing/architecture.md) | System design, module structure, data model, pipeline |
+| [docs/design/tech-spec.md](docs/design/tech-spec.md) | Exact contracts, schemas, algorithms, edge cases |
+| [docs/design/roadmap.md](docs/design/roadmap.md) | Phases & milestones (DX.02, DX.05) |
+| [docs/contributing/adding-a-tool.md](docs/contributing/adding-a-tool.md) | Contributor guide for integrating a new tool |
+| [docs/design/releasing.md](docs/design/releasing.md) | How to cut a release and publish prebuilt binaries (cargo-dist) |
 
 
 ```bash

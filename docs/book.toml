@@ -2,9 +2,8 @@
 title = "cardano-init"
 description = "Scaffold a complete, runnable Cardano protocol project in seconds."
 language = "en"
-# The book source is docs/ itself. Only pages listed in SUMMARY.md are
-# published; internal design docs (PRD, TECH_SPEC, ROADMAP, RELEASING) stay
-# in the repository only.
+# The book source is docs/ itself: user-guide/, contributing/, and design/,
+# ordered by SUMMARY.md.
 src = "."
 
 [build]
