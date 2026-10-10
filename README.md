@@ -1,6 +1,7 @@
 # cardano-init
 
 [![CI](https://github.com/input-output-hk/cardano-init/actions/workflows/ci.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-github%20pages-blue)](https://input-output-hk.github.io/cardano-init/)
 [![Code Quality](https://github.com/input-output-hk/cardano-init/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/github-code-scanning/codeql)
 
 ### Go from zero to a running Cardano protocol in one command.
@@ -161,14 +162,15 @@ Infrastructure provisioned via [cardano-up](https://github.com/blinklabs-io/card
 
 ## User Documentation
 
-Full user docs live in **[docs/USER_DOCS.md](docs/USER_DOCS.md)**:
+Full user docs are published at **[input-output-hk.github.io/cardano-init](https://input-output-hk.github.io/cardano-init/)** (source in [`docs/`](docs/)):
 
-- [How it works](docs/USER_DOCS.md#how-it-works) — roles, the interface contract, the worked gift-card example, fullstack tools, and compatibility checks
-- [For coding agents](docs/USER_DOCS.md#for-coding-agents) — the machine-readable interface and generated `AGENTS.md`
-- [How it relates to `aikup`, `cardano-up`, and friends](docs/USER_DOCS.md#how-it-relates-to-aikup-cardano-up-and-friends)
-- [Infrastructure providers](docs/USER_DOCS.md#infrastructure-providers)
-- [Supporting tools](docs/USER_DOCS.md#supporting-tools): editor extensions (VS Code, Neovim, Zed), language servers, CBOR/transaction inspectors, explorers, and the testnet faucet
-- [Getting help](docs/USER_DOCS.md#getting-help): each tool's official Discord / GitHub Discussions, plus general Cardano developer channels
+- [Quick start](https://input-output-hk.github.io/cardano-init/user-guide/quick-start.html): create, check, build, and test your first project
+- [How it works](https://input-output-hk.github.io/cardano-init/user-guide/how-it-works.html): roles, the interface contract, the worked gift-card example, fullstack tools, and compatibility checks
+- [Command reference](https://input-output-hk.github.io/cardano-init/user-guide/commands.html): every command, flag, alias, and exit code
+- [For coding agents](https://input-output-hk.github.io/cardano-init/user-guide/agents.html): the JSON interface, error codes, and generated `AGENTS.md`
+- [Ecosystem: `aikup`, `cardano-up`, and friends](https://input-output-hk.github.io/cardano-init/user-guide/ecosystem.html)
+- [Infrastructure providers](https://input-output-hk.github.io/cardano-init/user-guide/infrastructure.html)
+- [Supporting tools and getting help](https://input-output-hk.github.io/cardano-init/user-guide/help.html): editor extensions, language servers, CBOR/transaction inspectors, and each tool's community channels
 
 ## Development Documentation
 
@@ -180,12 +182,13 @@ Internal CI (smoke tests, installer recipes, devnet):
 
 | Doc | Purpose |
 |-----|---------|
-| [docs/PRD.md](docs/PRD.md) | Product requirements: who it's for, problem, scope, success metrics |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, module structure, data model, pipeline |
-| [docs/TECH_SPEC.md](docs/TECH_SPEC.md) | Exact contracts, schemas, algorithms, edge cases |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Phases & milestones (DX.02, DX.05) |
-| [docs/ADDING_A_TOOL.md](docs/ADDING_A_TOOL.md) | Contributor guide for integrating a new tool |
-| [docs/RELEASING.md](docs/RELEASING.md) | How to cut a release and publish prebuilt binaries (cargo-dist) |
+| [docs/SUMMARY.md](docs/SUMMARY.md) | Docs site table of contents (mdBook; preview with `mdbook serve docs`) |
+| [docs/design/prd.md](docs/design/prd.md) | Product requirements: who it's for, problem, scope, success metrics |
+| [docs/contributing/architecture.md](docs/contributing/architecture.md) | System design, module structure, data model, pipeline |
+| [docs/design/tech-spec.md](docs/design/tech-spec.md) | Exact contracts, schemas, algorithms, edge cases |
+| [docs/design/roadmap.md](docs/design/roadmap.md) | Phases & milestones (DX.02, DX.05) |
+| [docs/contributing/adding-a-tool.md](docs/contributing/adding-a-tool.md) | Contributor guide for integrating a new tool |
+| [docs/design/releasing.md](docs/design/releasing.md) | How to cut a release and publish prebuilt binaries (cargo-dist) |
 
 
 ```bash

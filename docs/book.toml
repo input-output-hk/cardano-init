@@ -1,0 +1,24 @@
+[book]
+title = "cardano-init"
+description = "Scaffold a complete, runnable Cardano protocol project in seconds."
+language = "en"
+# The book source is docs/ itself: user-guide/, contributing/, and design/,
+# ordered by SUMMARY.md.
+src = "."
+
+[build]
+build-dir = "../target/book"
+create-missing = false
+
+[output.html]
+site-url = "/cardano-init/"
+git-repository-url = "https://github.com/input-output-hk/cardano-init"
+edit-url-template = "https://github.com/input-output-hk/cardano-init/edit/main/docs/{path}"
+additional-js = ["theme/mermaid-init.js"]
+default-theme = "rust"
+preferred-dark-theme = "navy"
+# Don't list the current page's headings under its sidebar entry.
+sidebar-header-nav = false
+
+[output.html.search]
+enable = true
