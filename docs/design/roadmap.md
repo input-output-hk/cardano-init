@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Last updated:** 2026-06-03 · **Owner:** Robertino Martinez
 
-> Sequencing and milestones. The *why/for whom* is in [PRD.md](./PRD.md); the *how* in [ARCHITECTURE.md](./ARCHITECTURE.md) and [TECH_SPEC.md](./TECH_SPEC.md). This roadmap is anchored on two external **Developer Experience Initiative (DX)** milestones tied to delivery; scope may shift after the DX.02 community/key-player review (that review exists precisely to pressure-test the specs before the RC).
+> Sequencing and milestones. The *why/for whom* is in [PRD.md](prd.md); the *how* in [ARCHITECTURE.md](../contributing/architecture.md) and [TECH_SPEC.md](tech-spec.md). This roadmap is anchored on two external **Developer Experience Initiative (DX)** milestones tied to delivery; scope may shift after the DX.02 community/key-player review (that review exists precisely to pressure-test the specs before the RC).
 
 ## Milestones at a glance
 

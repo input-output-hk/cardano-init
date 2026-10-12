@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Last updated:** 2026-06-01 · **Owner:** Robertino Martinez
 
-> This document owns the **exact contracts, schemas, algorithms, and edge cases**. For the *why/for whom* see [PRD.md](./PRD.md); for the *how/structure* see [ARCHITECTURE.md](./ARCHITECTURE.md); for sequencing see [ROADMAP.md](./ROADMAP.md). Where this spec describes behavior not yet in the code, it is marked **(planned)**.
+> This document owns the **exact contracts, schemas, algorithms, and edge cases**. For the *why/for whom* see [PRD.md](prd.md); for the *how/structure* see [ARCHITECTURE.md](../contributing/architecture.md); for sequencing see [ROADMAP.md](roadmap.md). Where this spec describes behavior not yet in the code, it is marked **(planned)**.
 
 ---
 
