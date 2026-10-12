@@ -22,4 +22,3 @@ just -f infra/Justfile dev
 
 - **Dolos and Dingo are nodes themselves.** They need no separate `cardano-node`, and each provides its own `NODE_SOCKET_PATH`. Dingo also serves a Blockfrost-compatible API as `INDEXER_URL`.
 - **One chain index per project.** `.env` has one `INDEXER_URL`, so select either Kupo or Dingo.
-

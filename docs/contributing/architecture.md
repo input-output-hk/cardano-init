@@ -73,6 +73,7 @@ cardano-init/
 └── templates/                  # Embedded data: tool/role template trees
     ├── _base/    (Justfile.jinja, README.md.jinja, AGENTS.md.jinja, CLAUDE.md, gitignore, env.jinja)
     ├── _nix/     (flake.nix.jinja)
+    ├── _spec/    (README.md.jinja, giftcard.md.jinja)
     └── <tool>/<role>/  (manifest.toml + template files)
 ```
 
@@ -138,6 +139,7 @@ pub struct Selection {
     pub assignments: Vec<RoleAssignment>,  // Infrastructure may appear multiple times
     pub network: Network,                  // Always Preview; switch via CARDANO_NETWORK in the generated .env
     pub nix: bool,
+    pub spec: bool,                        // spec/ folder (default true; --no-spec)
 }
 pub struct RoleAssignment { pub role: Role, pub tool_id: String }
 ```
@@ -251,6 +253,7 @@ Produces the ordered `FilePlan`:
    - **Infrastructure is special — it aggregates**: all selected infra tools share one driver template (`_infra/cardano-up`) emitted **once** at `infra/`, rendered over the full set (`TemplateContext.infra_tools`). This is because the infra engine (`cardano-up`) manages the whole stack as a single unit, not per service.
    Every other role is one tool → one directory.
 4. **Optional layer**: `flake.nix` + `.envrc` when `nix` is set.
+5. **Spec layer** (default; skipped by `--no-spec`): `spec/README.md`, plus `spec/giftcard.md` (a plain-Markdown spec of the gift-card worked example) when an on-chain or off-chain role is present. User-owned once generated: `add`/`remove` never touch it.
 
 No I/O: only embedded assets are read. `render` is set from the `.jinja` extension.
 

@@ -135,6 +135,15 @@ fn validate_dest(dest: &str) -> Result<(), ScaffoldError> {
 // Planning
 // ---------------------------------------------------------------------------
 
+/// Whether `spec/giftcard.md` ships: the example describes the gift-card
+/// protocol, which only on-chain/off-chain (incl. fullstack) components implement.
+pub(crate) fn spec_example_present(selection: &Selection) -> bool {
+    selection
+        .assignments
+        .iter()
+        .any(|a| matches!(a.role, Role::OnChain | Role::OffChain))
+}
+
 /// Whether the `blueprint/` directory is scaffolded: true when any
 /// non-infrastructure role is present (equivalently, unless the project is
 /// infrastructure-only). See TECH_SPEC §6.2. Mirrors `TemplateContext::has_blueprint`.
@@ -343,6 +352,23 @@ pub fn plan(selection: &Selection, registry: &Registry) -> Result<FilePlan, Scaf
     }
 
     // --- Optional layers ---
+    // Protocol specification (plain text, non-executable). The worked example
+    // describes the gift-card protocol every on-/off-chain template implements,
+    // so it ships only when one of those roles is present.
+    if selection.spec {
+        entries.push(FileEntry {
+            dest: PathBuf::from("spec/README.md"),
+            source: TemplateSource::Optional("_spec/README.md.jinja".into()),
+            render: true,
+        });
+        if spec_example_present(selection) {
+            entries.push(FileEntry {
+                dest: PathBuf::from("spec/giftcard.md"),
+                source: TemplateSource::Optional("_spec/giftcard.md.jinja".into()),
+                render: true,
+            });
+        }
+    }
     if selection.nix {
         entries.push(FileEntry {
             dest: PathBuf::from("flake.nix"),
@@ -378,6 +404,7 @@ mod tests {
             assignments,
             network: Network::Preview,
             nix: false,
+            spec: true,
         }
     }
 
@@ -576,8 +603,9 @@ mod tests {
         // meshjs off-chain: 11 (package.json, tsconfig.json, Justfile, .env.example,
         //                       scripts/bundle-blueprint.mjs,
         //                       src/{contract,node,index,cli,contract.test,contract.integration.test}.ts)
-        // total: 22
-        assert_eq!(plan.entries.len(), 22);
+        // spec: 2 (spec/README.md, spec/giftcard.md)
+        // total: 24
+        assert_eq!(plan.entries.len(), 24);
     }
 
     #[test]
@@ -719,6 +747,49 @@ mod tests {
         assert!(validate_dest("../escape").is_err());
         assert!(validate_dest("a/../../b").is_err());
         assert!(validate_dest("sub/../../../etc").is_err());
+    }
+
+    fn plan_dests(sel: &Selection) -> Vec<String> {
+        plan(sel, &registry())
+            .unwrap()
+            .entries
+            .iter()
+            .map(|e| e.dest.to_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn spec_true_includes_spec_files() {
+        let sel = selection(vec![RoleAssignment {
+            role: Role::OnChain,
+            tool_id: "aiken".into(),
+        }]);
+        let dests = plan_dests(&sel);
+        assert!(dests.contains(&"spec/README.md".to_string()));
+        assert!(dests.contains(&"spec/giftcard.md".to_string()));
+    }
+
+    #[test]
+    fn spec_false_excludes_spec_files() {
+        let mut sel = selection(vec![RoleAssignment {
+            role: Role::OnChain,
+            tool_id: "aiken".into(),
+        }]);
+        sel.spec = false;
+        assert!(!plan_dests(&sel).iter().any(|d| d.starts_with("spec/")));
+    }
+
+    #[test]
+    fn spec_example_only_with_protocol_roles() {
+        // Infra/devnet-only projects have no gift-card code to describe: the
+        // folder (README) ships, the worked example doesn't.
+        let sel = selection(vec![RoleAssignment {
+            role: Role::Devnet,
+            tool_id: "yaci".into(),
+        }]);
+        let dests = plan_dests(&sel);
+        assert!(dests.contains(&"spec/README.md".to_string()));
+        assert!(!dests.contains(&"spec/giftcard.md".to_string()));
     }
 
     #[test]

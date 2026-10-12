@@ -4,6 +4,8 @@
 
 You choose a tool for each **role** you need. `cardano-init` creates a directory only for the roles you select, plus a base layer (top-level `Justfile`, `README.md`, `.env`, `blueprint/`) that connects them.
 
+It also creates a [`spec/` folder](generated-project.md#spec) for the protocol's specification in plain Markdown. Pass `--no-spec` to skip it.
+
 | Role | What it does | Directory | Multiple tools? |
 |------|--------------|-----------|-----------------|
 | `on-chain` | Validators (smart-contract logic); produces the CIP-57 blueprint | `on-chain/` | no |
@@ -37,6 +39,8 @@ Every on-chain and off-chain template includes the same example, a **gift card**
 - a `redeem` validator, which releases a locked gift when that token is burned.
 
 All tools implement this example with the same parameters. As a result, any on-chain tool works with any off-chain tool. For example, the Scalus off-chain code can drive an Aiken contract, and the MeshJS off-chain code can drive a Scalus contract.
+
+When `spec/` is enabled and you select an on-chain, off-chain, or fullstack component, `spec/giftcard.md` describes the example's actors, assets, validators, transactions, and invariants. Use it as a starting point for specifying your own protocol.
 
 ## Fullstack tools
 

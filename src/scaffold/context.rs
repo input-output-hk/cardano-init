@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use super::ScaffoldError;
+use super::{ScaffoldError, planner};
 use crate::contract;
 use crate::registry::loader::Registry;
 use crate::registry::types::{EnvMapping, Role, Selection};
@@ -95,6 +95,11 @@ pub struct TemplateContext {
     /// whole toolchain composes into the root shell. Canonical (`Role::ALL`)
     /// order, deduped. Empty unless a self-contained tool is selected.
     pub nix_component_flakes: Vec<String>,
+
+    /// Whether the `spec/` protocol-specification folder is generated.
+    pub spec: bool,
+    /// Whether `spec/giftcard.md` (the worked example) is generated.
+    pub spec_example: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +315,8 @@ pub fn build_context(
         blueprint_path: contract::BLUEPRINT_PATH.to_string(),
         env_vars,
 
+        spec: selection.spec,
+        spec_example: selection.spec && planner::spec_example_present(selection),
         nix: selection.nix,
         nix_packages,
         nix_component_flakes: {
@@ -342,6 +349,7 @@ mod tests {
             assignments,
             network: Network::Preview,
             nix: false,
+            spec: true,
         }
     }
 

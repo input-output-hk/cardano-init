@@ -17,6 +17,7 @@ pub fn build_selection(
     devnet: Option<&str>,
     formal_methods: Option<&str>,
     nix: bool,
+    spec: bool,
     registry: &Registry,
 ) -> Result<Selection, CliError> {
     validate_project_name(name)?;
@@ -96,6 +97,7 @@ pub fn build_selection(
         assignments,
         network: Network::Preview,
         nix,
+        spec,
     })
 }
 
@@ -205,6 +207,7 @@ mod tests {
             None,
             None,
             false,
+            true,
             &registry(),
         )
         .unwrap();
@@ -226,12 +229,14 @@ mod tests {
             Some("yaci"),
             None,
             true,
+            true,
             &registry(),
         )
         .unwrap();
 
         assert_eq!(sel.assignments.len(), 3);
         assert!(sel.nix);
+        assert!(sel.spec);
         // Network is fixed at scaffold time; switching is a `.env` edit.
         assert_eq!(sel.network.to_string(), "preview");
     }
@@ -247,6 +252,7 @@ mod tests {
             None,
             Some("blaster"),
             false,
+            true,
             &registry(),
         )
         .unwrap();
@@ -267,6 +273,7 @@ mod tests {
             None,
             None,
             false,
+            true,
             &registry(),
         );
         assert!(matches!(result, Err(CliError::UnknownTool { .. })));
@@ -284,6 +291,7 @@ mod tests {
             None,
             None,
             false,
+            true,
             &registry(),
         );
         assert!(matches!(result, Err(CliError::ToolRoleMismatch { .. })));
@@ -300,6 +308,7 @@ mod tests {
             None,
             None,
             false,
+            true,
             &registry(),
         )
         .unwrap();
@@ -324,6 +333,7 @@ mod tests {
             None,
             None,
             false,
+            true,
             &registry(),
         )
         .unwrap();
@@ -348,6 +358,7 @@ mod tests {
             None,
             None,
             false,
+            true,
             &registry(),
         );
         match result {
@@ -373,6 +384,7 @@ mod tests {
             None,
             None,
             false,
+            true,
             &registry(),
         );
         assert!(matches!(result, Err(CliError::NoRolesSelected)));
@@ -389,6 +401,7 @@ mod tests {
             None,
             None,
             false,
+            true,
             &registry(),
         );
         assert!(matches!(result, Err(CliError::InvalidProjectName { .. })));
@@ -405,6 +418,7 @@ mod tests {
             None,
             None,
             false,
+            true,
             &registry(),
         );
         assert!(matches!(result, Err(CliError::InvalidProjectName { .. })));
@@ -421,6 +435,7 @@ mod tests {
             None,
             None,
             false,
+            true,
             &registry(),
         );
         assert!(matches!(result, Err(CliError::InvalidProjectName { .. })));
