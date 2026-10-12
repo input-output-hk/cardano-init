@@ -48,6 +48,7 @@ snap-project/
 ├── Justfile                    # Task orchestration
 ├── AGENTS.md                   # Guidance for AI coding agents (CLAUDE.md imports it)
 ├── infra/                      # Infrastructure services
+├── spec/                       # Protocol specification (plain Markdown)
 └── README.md
 ```
 
@@ -108,6 +109,7 @@ snap-project/
 ├── AGENTS.md / CLAUDE.md       # This guidance
 ├── .env                        # Shared connection vars (the .env seam)
 ├── infra/                      # Infrastructure services (via cardano-up)
+├── spec/                       # Protocol specification (plain Markdown, not executed)
 └── README.md
 ```
 
@@ -137,9 +139,13 @@ Provisions the selected services and publishes their connection details to `.env
 
 Requires Docker. See `infra/README.md` for the `just` targets.
 
+## Specification (`spec/`)
+
+`spec/` holds the protocol's specification as plain Markdown: actors, assets, validators, transactions and invariants. It is the statement of intent the code is reviewed against. **Read the relevant spec before changing a validator or transaction, and update it in the same change.** If the code and the spec disagree, flag it rather than silently picking one.
+
 ## The worked example
 
-Every generated project ships the **same** worked example — a **gift card**: a one-shot minting policy that mints a unique token gated by a specific UTxO, plus a `redeem` validator that releases a locked gift when the token is burned. On- and off-chain sides share the same parameter ABI through the blueprint, which is why the project builds and its tests pass out of the box. Use it as the template for real logic; replace it, don't accrete around it.
+Every generated project ships the **same** worked example — a **gift card**: a one-shot minting policy that mints a unique token gated by a specific UTxO, plus a `redeem` validator that releases a locked gift when the token is burned. On- and off-chain sides share the same parameter ABI through the blueprint, which is why the project builds and its tests pass out of the box. Use it as the template for real logic; replace it, don't accrete around it. Its human-readable specification, when present, is under [`spec/`](spec/).
 
 ## Cardano knowledge: use cardano-dev-skills
 
@@ -328,4 +334,30 @@ set_key() {
 # the connection keys below, so a hand-edited network survives `just dev`.
 set_key NODE_SOCKET_PATH "$DOLOS_SOCKET_PATH"
 set_key DOLOS_GRPC_URL "$DOLOS_GRPC"
+
+=== spec/README.md ===
+# Protocol specification
+
+This folder holds the **specification** of snap-project: what the protocol
+does and why it is safe, written as plain text (Markdown) for people to read.
+Nothing in it is executed or built.
+
+Use it to design a change before writing validators, and to review changes
+against: if the code and the spec disagree, one of them is wrong.
+
+## Conventions
+
+- One document per protocol or feature (e.g. `giftcard.md`). Add new ones next
+  to it and list them below.
+- Each document describes **actors**, **assets**, **validators** (parameters,
+  datum, redeemer, and the rules they enforce), **transactions** (inputs,
+  outputs, mint), and the **invariants** the protocol must keep.
+- Keep the spec in step with the code: a pull request that changes a validator
+  updates its spec in the same change.
+- Formal, machine-checked specifications belong to the formal-methods
+  component, not here. This folder is the human-readable source of intent.
+
+## Documents
+
+_None yet._ Add a document per protocol or feature as you design it.
 

@@ -47,12 +47,17 @@ pub fn run_interactive(
         .with_prompt("Set up Nix for dependency management?")
         .default(false)
         .interact()?;
+    let spec = Confirm::with_theme(&theme)
+        .with_prompt("Add a spec/ folder for the protocol specification?")
+        .default(true)
+        .interact()?;
     // Always preview; switch networks by editing CARDANO_NETWORK in the generated .env.
     let selection = Selection {
         project_name,
         assignments,
         network: Network::Preview,
         nix,
+        spec,
     };
 
     // Step 4: Summary + confirmation

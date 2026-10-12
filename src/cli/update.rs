@@ -256,6 +256,7 @@ mod tests {
             assignments,
             network: Network::Preview,
             nix: false,
+            spec: true,
         }
     }
 
