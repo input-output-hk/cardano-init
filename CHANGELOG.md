@@ -5,6 +5,40 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.3.0] - 2026-10-12
+
+### Documentation
+
+- Explain supporting tools and help channels instead of listing links by @paulobressan
+- Tidy DepRecipe struct comment by @paulobressan
+- Publish usage docs site with mdBook on GitHub Pages by @paulobressan
+- Align usage docs with developer portal writing rules by @paulobressan
+- Organize docs into user-guide, contributing, and design sections by @paulobressan
+- Hide page headings in the sidebar by @paulobressan
+
+### Features
+
+- Return unsigned Evolution gift-card transactions by @0xBora
+- Add flag aliases and short flags by @paulobressan
+- List supporting tools and community channels by @paulobressan
+- Show community and supporting tool links by @paulobressan
+- Add pre-generation version-update notice by @paulobressan
+- Cache the version-update check once a day by @paulobressan
+- Generate a spec/ protocol specification folder (--no-spec to skip) by @paulobressan
+
+### Fixes
+
+- Avoid logging environment values (#81) by @wolf31o2
+- Restore contributor attribution in release notes by @rober-m
+- Report missing Cardano project and list all installed tooling by @paulobressan
+- Show only the project's required tooling inside a project by @paulobressan
+- Link spec/ instead of a possibly missing giftcard.md in AGENTS.md by @paulobressan
+
+### Refactor
+
+- Resolve the update-check cache dir with dirs by @paulobressan
+- Simplify install-method detection by @paulobressan
+
 ## [v0.2.1] - 2026-08-20
 
 ### Documentation
@@ -87,6 +121,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Remove redundant borrow in println (clippy 1.97) by @paulobressan
 
+[v0.3.0]: https://github.com/input-output-hk/cardano-init/compare/v0.2.1..v0.3.0
 [v0.2.1]: https://github.com/input-output-hk/cardano-init/compare/v0.2.0..v0.2.1
 [v0.2.0]: https://github.com/input-output-hk/cardano-init/compare/v0.1.0..v0.2.0
 [v0.1.0]: https://github.com/input-output-hk/cardano-init/releases/tag/v0.1.0
