@@ -83,7 +83,7 @@ Deliverables below are tracked as checklists (`[ ]` = not yet done).
 **Engineering hardening:**
 - [X] **CI/CD pipeline** improvements: per-tool build smoke tests (toolchains or Nix), snapshot/determinism gates, contract-compliance gates, release artifacts.
 - [X] **Scheduled maintenance smoke run** (weekly cron): re-runs the per-tool build+test matrix to catch generated projects breaking from a hardfork / upstream release / dependency bitrot *between* commits, opening a tracking issue on failure. Distinct from PR gates (ARCHITECTURE §10).
-- [ ] Version-update check (pre-generation notice, §10 TECH_SPEC).
+- [X] Version-update check (pre-generation notice, §10 TECH_SPEC).
 
 ### Success criteria
 

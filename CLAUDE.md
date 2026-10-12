@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `docs/` is the source of the docs site (mdBook, published to GitHub Pages by `.github/workflows/docs.yml`), in three folders: `user-guide/` (CLI users; follows the Cardano Developer Portal writing rules), `contributing/`, and `design/`. Every page must be listed in `docs/SUMMARY.md`. Preview with `mdbook serve docs`.
 
-It's an early prototype: the dependency `doctor`, `list`, and `--format json` are implemented, while a few capabilities (a version-update check, min-version checks) remain **planned, not yet implemented**. `docs/design/roadmap.md` tracks what's real vs. upcoming.
+The dependency `doctor`, `list`, `--format json`, and the pre-generation version-update notice are implemented. Minimum-version checks remain **planned, not yet implemented**. `docs/design/roadmap.md` tracks what's real vs. upcoming.
 
 ## Commands
 

@@ -183,6 +183,8 @@ fn finish_update(
         }
     }
 
+    super::version_check::announce(format);
+
     if flags.dry_run {
         output::print_update_plan(&old, &new, &plan, registry, format);
         return Ok(());
