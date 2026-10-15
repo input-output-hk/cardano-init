@@ -63,6 +63,7 @@ cardano-init/
 │   │
 │   └── contract.rs             # Interface-contract constants (paths, env vars, dirs)
 │
+├── registry/mcp/               # Embedded data: one TOML per MCP server (cardano-debug, yaci-devkit)
 ├── registry/tools/             # Embedded data: one TOML per tool (15 tools)
 │   ├── aiken.toml  plinth.toml  scalus.toml                       # on-chain
 │   ├── meshjs.toml  evolution.toml  tx3.toml                      # off-chain
@@ -140,6 +141,7 @@ pub struct Selection {
     pub network: Network,                  // Always Preview; switch via CARDANO_NETWORK in the generated .env
     pub nix: bool,
     pub spec: bool,                        // spec/ folder (default true; --no-spec)
+    pub mcp: Vec<String>,                  // MCP server ids → .mcp.json (default: applicable defaults; --mcp / --no-mcp)
 }
 pub struct RoleAssignment { pub role: Role, pub tool_id: String }
 ```
@@ -220,6 +222,8 @@ template = "aiken/on-chain"    # path under templates/
 
 `loader.rs` iterates embedded assets, parses each TOML into a `ToolDef`, and builds a `Registry` with two indexes: `by_id` (lookup) and `by_role` (list tools for a role). Loading rejects duplicate ids and an empty registry. The registry is immutable after load.
 
+**MCP servers** are a second, optional layer of the same registry: one TOML per server under `registry/mcp/` (`McpDef`, TECH_SPEC §3.6). They are neither roles nor tools — a cross-cutting concern like `spec/` — chosen at setup time and written to the project's `.mcp.json`. A server may declare `requires = { role, tool }`, so e.g. Yaci DevKit's own MCP endpoint is offered only when Yaci fills the devnet role. `registry::mcp` resolves a selection's server set and renders the JSON; the loader validates that a `requires` names a real tool filling that role.
+
 ---
 
 ## 6. Scaffolding pipeline
@@ -254,6 +258,7 @@ Produces the ordered `FilePlan`:
    Every other role is one tool → one directory.
 4. **Optional layer**: `flake.nix` + `.envrc` when `nix` is set.
 5. **Spec layer** (default; skipped by `--no-spec`): `spec/README.md`, plus `spec/giftcard.md` (a plain-Markdown spec of the gift-card worked example) when an on-chain or off-chain role is present. User-owned once generated: `add`/`remove` never touch it.
+6. **MCP layer**: `.mcp.json` when the selection resolves to at least one MCP server (`registry::mcp::resolve`: `selection.mcp` ∩ registry ∩ applicable). Emitted as `Inline` bytes rendered by `registry::mcp::render_mcp_json` (exact, key-sorted JSON), not through MiniJinja. On `add`/`remove` it is **merged** (`merge_mcp_json`): registry entries follow the new selection, user-added entries are kept (TECH_SPEC §15.1).
 
 No I/O: only embedded assets are read. `render` is set from the `.jinja` extension.
 

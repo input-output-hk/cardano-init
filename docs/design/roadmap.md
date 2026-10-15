@@ -85,6 +85,9 @@ Deliverables below are tracked as checklists (`[ ]` = not yet done).
 - [X] **Scheduled maintenance smoke run** (weekly cron): re-runs the per-tool build+test matrix to catch generated projects breaking from a hardfork / upstream release / dependency bitrot *between* commits, opening a tracking issue on failure. Distinct from PR gates (ARCHITECTURE §10).
 - [X] Version-update check (pre-generation notice, §10 TECH_SPEC).
 
+**Agent support (PRD US-5):**
+- [X] Generated `.mcp.json` + `AGENTS.md` section wiring Cardano MCP servers (`registry/mcp/`: cardano-debug always, Yaci DevKit's own MCP when Yaci is the devnet); selectable at setup (`--mcp` / `--no-mcp`, interactive multi-select), listed by `list`. TECH_SPEC §3.6.
+
 ### Success criteria
 
 - Public repo at RC quality (non-critical defects acceptable).

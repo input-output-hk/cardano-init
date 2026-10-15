@@ -355,7 +355,12 @@ fn summary_rows(selection: &Selection, registry: &Registry) -> Vec<String> {
     let label_w = comps
         .iter()
         .map(|c| c.kebab.len())
-        .chain([NETWORK_LABEL.len(), NIX_LABEL.len(), SPEC_LABEL.len()])
+        .chain([
+            NETWORK_LABEL.len(),
+            NIX_LABEL.len(),
+            SPEC_LABEL.len(),
+            MCP_LABEL.len(),
+        ])
         .max()
         .unwrap_or(0);
     let name_w = comps
@@ -400,7 +405,33 @@ fn summary_rows(selection: &Selection, registry: &Registry) -> Vec<String> {
         theme::dim("no").to_string()
     };
     rows.push(format!("{SPEC_LABEL:<label_w$}  {spec}"));
+    let mcp = mcp_names(selection, registry);
+    let mcp_cell = if mcp.is_empty() {
+        theme::dim("no").to_string()
+    } else {
+        theme::accent(mcp.join(", ")).to_string()
+    };
+    rows.push(format!("{MCP_LABEL:<label_w$}  {mcp_cell}"));
     rows
+}
+
+/// Display names of the MCP servers the selection resolves to (id order).
+fn mcp_names(selection: &Selection, registry: &Registry) -> Vec<String> {
+    crate::registry::mcp::resolve(selection, registry)
+        .iter()
+        .map(|m| m.name.clone())
+        .collect()
+}
+
+/// Ids of the **registry** MCP servers the selection resolves to (id order) —
+/// the JSON `mcp` field. After `init` this is exactly what `.mcp.json` carries;
+/// after `add`/`remove` the file is merged to match (registry keys follow the
+/// selection, user-added keys are kept and not listed here).
+fn mcp_ids(selection: &Selection, registry: &Registry) -> Vec<String> {
+    crate::registry::mcp::resolve(selection, registry)
+        .iter()
+        .map(|m| m.id.clone())
+        .collect()
 }
 
 /// Print the pre-generation "newer version available" banner (TECH_SPEC §10):
@@ -494,6 +525,7 @@ pub fn print_summary(selection: &Selection, registry: &Registry) {
 const NETWORK_LABEL: &str = "network";
 const NIX_LABEL: &str = "nix";
 const SPEC_LABEL: &str = "spec";
+const MCP_LABEL: &str = "mcp";
 
 /// A generated component as reported to the user: its role (kebab) and tool id.
 struct Component {
@@ -559,6 +591,7 @@ pub fn print_dry_run(selection: &Selection, registry: &Registry, plan: &FilePlan
             "network": selection.network.to_string(),
             "nix": selection.nix,
             "spec": selection.spec,
+            "mcp": mcp_ids(selection, registry),
             "dry_run": true,
             "generated": false,
             "components": components_json(selection, registry),
@@ -669,6 +702,7 @@ pub fn print_success(
             "network": selection.network.to_string(),
             "nix": selection.nix,
             "spec": selection.spec,
+            "mcp": mcp_ids(selection, registry),
             "generated": true,
             "components": components_json(selection, registry),
             "git": git.as_str(),
@@ -742,20 +776,46 @@ fn update_change_buckets(
     (create, replace, rerender, remove)
 }
 
-fn changes_json(plan: &UpdatePlan) -> serde_json::Value {
+fn changes_json(
+    old: &Selection,
+    new: &Selection,
+    plan: &UpdatePlan,
+    registry: &Registry,
+) -> serde_json::Value {
     let (create, replace, rerender, remove) = update_change_buckets(plan);
     let shared_removed: Vec<String> = plan
         .shared_removals
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
+    let (mcp_add, mcp_remove) = mcp_delta(old, new, registry);
     json!({
         "create": create,
         "replace": replace,
         "rerender": rerender,
         "remove": remove,
         "shared_removed": shared_removed,
+        "mcp": { "add": mcp_add, "remove": mcp_remove },
     })
+}
+
+/// Registry MCP servers (ids) the update adds to / removes from `.mcp.json`:
+/// the delta of the resolved sets, so a server dropped because its role went
+/// away counts as removed, exactly as the merge treats it.
+fn mcp_delta(old: &Selection, new: &Selection, registry: &Registry) -> (Vec<String>, Vec<String>) {
+    let before = mcp_ids(old, registry);
+    let after = mcp_ids(new, registry);
+    let add = after
+        .iter()
+        .filter(|id| !before.contains(id))
+        .cloned()
+        .collect();
+    let remove = before
+        .iter()
+        .filter(|id| !after.contains(id))
+        .cloned()
+        .collect();
+    (add, remove)
 }
 
 /// Map a slot's tool ids to their display names (falling back to the id when a
@@ -846,6 +906,23 @@ fn update_change_rows(
             theme::dim(verb("remove"))
         ));
     }
+    // MCP servers: one row with the +/- delta by display name, like infra.
+    let (mcp_add, mcp_remove) = mcp_delta(old, new, registry);
+    if !mcp_add.is_empty() || !mcp_remove.is_empty() {
+        let name = |id: &String| {
+            registry
+                .mcp(id)
+                .map_or_else(|| id.clone(), |m| m.name.clone())
+        };
+        let mut parts: Vec<String> = mcp_add.iter().map(|id| format!("+{}", name(id))).collect();
+        parts.extend(mcp_remove.iter().map(|id| format!("-{}", name(id))));
+        rows.push(format!(
+            "{}  {}  {}",
+            theme::warn("~"),
+            crate::scaffold::planner::MCP_CONFIG_PATH,
+            theme::dim(format!("{} {}", verb("update"), parts.join(", ")))
+        ));
+    }
     if rows.is_empty() {
         rows.push(theme::dim("no component changes").to_string());
     }
@@ -867,7 +944,7 @@ pub fn print_update_plan(
             "project": new.project_name,
             "applied": false,
             "dry_run": true,
-            "changes": changes_json(plan),
+            "changes": changes_json(old, new, plan, registry),
         }));
         return;
     }
@@ -903,8 +980,9 @@ pub fn print_update_success(
             "network": selection.network.to_string(),
             "nix": selection.nix,
             "spec": selection.spec,
+            "mcp": mcp_ids(selection, registry),
             "components": components_json(selection, registry),
-            "changes": changes_json(plan),
+            "changes": changes_json(old, selection, plan, registry),
             "dependencies": report,
         }));
         return;
@@ -1304,6 +1382,7 @@ pub fn print_list(registry: &Registry, catalog: &DepCatalog, format: Format, tab
         emit_json_ok(json!({
             "roles": view::role_views(),
             "tools": tools,
+            "mcp": view::mcp_views(registry),
         }));
         return;
     }
@@ -1343,6 +1422,22 @@ pub fn print_list(registry: &Registry, catalog: &DepCatalog, format: Format, tab
     for tool in tools {
         block.push('\n');
         super::format_tool(&mut block, tool, &super::tool_support_links(tool, catalog));
+    }
+    print!("{block}");
+    println!();
+
+    print_rule("MCP servers");
+    println!();
+    println!(
+        "  {}",
+        theme::dim(
+            "Written to the project's .mcp.json for coding agents (--mcp <id> to pick, --no-mcp to skip)."
+        )
+    );
+    let mut block = String::new();
+    for server in registry.mcp_servers() {
+        block.push('\n');
+        super::format_mcp(&mut block, server);
     }
     print!("{block}");
     println!();
@@ -1436,6 +1531,7 @@ mod tests {
             network: Network::Preview,
             nix: false,
             spec: true,
+            mcp: vec![],
         }
     }
 

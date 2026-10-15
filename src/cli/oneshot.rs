@@ -1,6 +1,19 @@
 use super::CliError;
 use crate::registry::loader::Registry;
+use crate::registry::mcp;
 use crate::registry::types::{Network, Role, RoleAssignment, Selection};
+
+/// What the one-shot flags said about MCP servers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpChoice {
+    /// Neither `--mcp` nor `--no-mcp`: every applicable server with
+    /// `default = true` (the same set the wizard pre-selects).
+    Default,
+    /// `--no-mcp`: no `.mcp.json`.
+    None,
+    /// `--mcp <id>…`: exactly these servers; each must exist and apply.
+    Explicit(Vec<String>),
+}
 
 /// Build a `Selection` from one-shot CLI flags.
 ///
@@ -18,6 +31,7 @@ pub fn build_selection(
     formal_methods: Option<&str>,
     nix: bool,
     spec: bool,
+    mcp: McpChoice,
     registry: &Registry,
 ) -> Result<Selection, CliError> {
     validate_project_name(name)?;
@@ -91,6 +105,8 @@ pub fn build_selection(
         return Err(CliError::NoRolesSelected);
     }
 
+    let mcp = resolve_mcp_choice(mcp, &assignments, registry)?;
+
     // Always preview; switch networks by editing CARDANO_NETWORK in the generated .env.
     Ok(Selection {
         project_name: name.to_string(),
@@ -98,7 +114,53 @@ pub fn build_selection(
         network: Network::Preview,
         nix,
         spec,
+        mcp,
     })
+}
+
+/// Turn the `--mcp` / `--no-mcp` flags into the selection's server ids.
+/// Explicit ids are validated: unknown → `unknown_mcp` (listing the registry
+/// ids); known but not applicable to these assignments → `mcp_requires_tool`.
+/// Duplicates are deduped keep-first; the result is id-sorted (§11).
+fn resolve_mcp_choice(
+    choice: McpChoice,
+    assignments: &[RoleAssignment],
+    registry: &Registry,
+) -> Result<Vec<String>, CliError> {
+    match choice {
+        McpChoice::Default => Ok(mcp::default_ids(registry, assignments)),
+        McpChoice::None => Ok(Vec::new()),
+        McpChoice::Explicit(ids) => {
+            let mut out: Vec<String> = Vec::new();
+            for id in ids {
+                if out.contains(&id) {
+                    continue;
+                }
+                let def = registry.mcp(&id).ok_or_else(|| CliError::UnknownMcp {
+                    mcp_id: id.clone(),
+                    valid_mcp: registry
+                        .mcp_servers()
+                        .iter()
+                        .map(|m| m.id.clone())
+                        .collect(),
+                })?;
+                if !def.applies_to(assignments) {
+                    let req = def
+                        .requires
+                        .as_ref()
+                        .expect("a server that does not apply must have a requirement");
+                    return Err(CliError::McpRequiresTool {
+                        mcp_id: id,
+                        role: req.role.as_kebab().to_string(),
+                        tool: req.tool.clone(),
+                    });
+                }
+                out.push(id);
+            }
+            out.sort();
+            Ok(out)
+        }
+    }
 }
 
 /// Validate a project name: non-empty, no path separators, no leading dots,
@@ -208,6 +270,7 @@ mod tests {
             None,
             false,
             true,
+            McpChoice::Default,
             &registry(),
         )
         .unwrap();
@@ -230,6 +293,7 @@ mod tests {
             None,
             true,
             true,
+            McpChoice::Default,
             &registry(),
         )
         .unwrap();
@@ -253,6 +317,7 @@ mod tests {
             Some("blaster"),
             false,
             true,
+            McpChoice::Default,
             &registry(),
         )
         .unwrap();
@@ -274,6 +339,7 @@ mod tests {
             None,
             false,
             true,
+            McpChoice::Default,
             &registry(),
         );
         assert!(matches!(result, Err(CliError::UnknownTool { .. })));
@@ -292,6 +358,7 @@ mod tests {
             None,
             false,
             true,
+            McpChoice::Default,
             &registry(),
         );
         assert!(matches!(result, Err(CliError::ToolRoleMismatch { .. })));
@@ -309,6 +376,7 @@ mod tests {
             None,
             false,
             true,
+            McpChoice::Default,
             &registry(),
         )
         .unwrap();
@@ -334,6 +402,7 @@ mod tests {
             None,
             false,
             true,
+            McpChoice::Default,
             &registry(),
         )
         .unwrap();
@@ -359,6 +428,7 @@ mod tests {
             None,
             false,
             true,
+            McpChoice::Default,
             &registry(),
         );
         match result {
@@ -385,9 +455,135 @@ mod tests {
             None,
             false,
             true,
+            McpChoice::Default,
             &registry(),
         );
         assert!(matches!(result, Err(CliError::NoRolesSelected)));
+    }
+
+    #[test]
+    fn mcp_default_picks_applicable_defaults() {
+        let sel = build_selection(
+            "p",
+            Some("aiken"),
+            None,
+            None,
+            &[],
+            None,
+            None,
+            false,
+            true,
+            McpChoice::Default,
+            &registry(),
+        )
+        .unwrap();
+        assert_eq!(sel.mcp, vec!["cardano-debug"]);
+
+        let sel = build_selection(
+            "p",
+            Some("aiken"),
+            None,
+            None,
+            &[],
+            Some("yaci"),
+            None,
+            false,
+            true,
+            McpChoice::Default,
+            &registry(),
+        )
+        .unwrap();
+        // yaci-devkit applies here but is opt-in (`default = false`), so the
+        // default set is unchanged; it must be named explicitly.
+        assert_eq!(sel.mcp, vec!["cardano-debug"]);
+    }
+
+    #[test]
+    fn mcp_none_is_empty() {
+        let sel = build_selection(
+            "p",
+            Some("aiken"),
+            None,
+            None,
+            &[],
+            Some("yaci"),
+            None,
+            false,
+            true,
+            McpChoice::None,
+            &registry(),
+        )
+        .unwrap();
+        assert!(sel.mcp.is_empty());
+    }
+
+    #[test]
+    fn mcp_explicit_is_validated_deduped_and_sorted() {
+        let sel = build_selection(
+            "p",
+            Some("aiken"),
+            None,
+            None,
+            &[],
+            Some("yaci"),
+            None,
+            false,
+            true,
+            McpChoice::Explicit(vec![
+                "yaci-devkit".into(),
+                "cardano-debug".into(),
+                "yaci-devkit".into(),
+            ]),
+            &registry(),
+        )
+        .unwrap();
+        assert_eq!(sel.mcp, vec!["cardano-debug", "yaci-devkit"]);
+
+        let err = build_selection(
+            "p",
+            Some("aiken"),
+            None,
+            None,
+            &[],
+            None,
+            None,
+            false,
+            true,
+            McpChoice::Explicit(vec!["bogus".into()]),
+            &registry(),
+        )
+        .unwrap_err();
+        match err {
+            CliError::UnknownMcp { mcp_id, valid_mcp } => {
+                assert_eq!(mcp_id, "bogus");
+                assert_eq!(valid_mcp, vec!["cardano-debug", "yaci-devkit"]);
+            }
+            other => panic!("expected UnknownMcp, got {other:?}"),
+        }
+
+        // yaci-devkit without a yaci devnet is a usage error naming the gap.
+        let err = build_selection(
+            "p",
+            Some("aiken"),
+            None,
+            None,
+            &[],
+            None,
+            None,
+            false,
+            true,
+            McpChoice::Explicit(vec!["yaci-devkit".into()]),
+            &registry(),
+        )
+        .unwrap_err();
+        match err {
+            CliError::McpRequiresTool { mcp_id, role, tool } => {
+                assert_eq!(mcp_id, "yaci-devkit");
+                assert_eq!(role, "devnet");
+                assert_eq!(tool, "yaci");
+            }
+            other => panic!("expected McpRequiresTool, got {other:?}"),
+        }
     }
 
     #[test]
@@ -402,6 +598,7 @@ mod tests {
             None,
             false,
             true,
+            McpChoice::Default,
             &registry(),
         );
         assert!(matches!(result, Err(CliError::InvalidProjectName { .. })));
@@ -419,6 +616,7 @@ mod tests {
             None,
             false,
             true,
+            McpChoice::Default,
             &registry(),
         );
         assert!(matches!(result, Err(CliError::InvalidProjectName { .. })));
@@ -436,6 +634,7 @@ mod tests {
             None,
             false,
             true,
+            McpChoice::Default,
             &registry(),
         );
         assert!(matches!(result, Err(CliError::InvalidProjectName { .. })));

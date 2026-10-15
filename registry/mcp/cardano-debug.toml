@@ -1,0 +1,48 @@
+# MCP server definition. Servers are offered to the user at setup time and
+# written to the generated project's `.mcp.json` (see TECH_SPEC §3.6).
+[mcp]
+id = "cardano-debug"
+name = "Cardano Debug"
+description = """\
+Inspect, validate and step-debug Cardano transactions and Plutus scripts \
+before submitting them. Runs phase-1 and phase-2 validation locally, shows the \
+error and traces of a failing redeemer, decompiles scripts, and steps through \
+the UPLC evaluation. Works with any on-chain tool (it operates on UPLC and \
+CBOR) and needs no API key: transactions whose inputs live on a public network \
+are resolved through Koios; a bundle or a hand-assembled context replays \
+offline."""
+website = "https://github.com/cardananium/cardano-debug-mcp"
+# Pre-selected in the interactive wizard and in one-shot mode without --mcp.
+default = true
+# What the generated AGENTS.md tells the agent about this server (Markdown).
+agent_notes = """\
+- **Validate before you submit.** Load the transaction CBOR with `tx_load`, run \
+`tx_validate`, and only submit on a clean verdict. A failing redeemer: \
+`tx_redeemer(part='error' | 'traces')`, then `script_decompile` to read the \
+logic, then `debug_open` / `debug_run(until='error')` to step to the failure.
+- **Public networks resolve automatically.** Inputs on preview/preprod/mainnet \
+are fetched through Koios (rate limited; set `KOIOS_API_KEY`, or a \
+`BLOCKFROST_PROJECT_ID_<NETWORK>` plus `CARDANO_DEBUG_PROVIDER=blockfrost`, \
+in your shell — `.mcp.json` passes them through).
+- **Devnet or unsubmitted chains need an assembled context.** Inputs that are \
+not on a public network come back as `missing_utxos`; supply them in a \
+`DebuggerContext` bundle (`docs(topic='debug-playbook', \
+section='assemble-a-chain-context')`). Chaining transactions this way lets you \
+exercise the validator logic without a running devnet.
+- Read `docs()` before guessing at an error name or a tool's arguments."""
+
+# The entry written to `.mcp.json` (Claude Code format). Env values use
+# `${VAR:-}` so an unset variable is passed as empty rather than as literal
+# text — Claude Code expands it; Cursor/VS Code use `${env:VAR}` instead, which
+# the generated AGENTS.md tells users to substitute when they copy the file.
+[server]
+type = "stdio"
+command = "npx"
+args = ["-y", "@cardananium/cardano-debug-mcp"]
+timeout = 600000
+
+[server.env]
+KOIOS_API_KEY = "${KOIOS_API_KEY:-}"
+BLOCKFROST_PROJECT_ID_PREVIEW = "${BLOCKFROST_PROJECT_ID_PREVIEW:-}"
+BLOCKFROST_PROJECT_ID_PREPROD = "${BLOCKFROST_PROJECT_ID_PREPROD:-}"
+BLOCKFROST_PROJECT_ID_MAINNET = "${BLOCKFROST_PROJECT_ID_MAINNET:-}"

@@ -173,6 +173,7 @@ mod tests {
             network: Network::Preview,
             nix: false,
             spec: true,
+            mcp: vec!["cardano-debug".to_string()],
         }
     }
 
@@ -190,7 +191,7 @@ mod tests {
         let (_tmp, root) = scaffolded(&old);
 
         let new = apply(&old, &Mutation::Add(a(Role::OffChain, "meshjs")));
-        let plan = plan_update(&old, &new, &reg()).unwrap();
+        let plan = plan_update(&old, &new, &reg(), None).unwrap();
         apply_update(&plan, &root).unwrap();
 
         assert!(root.join("off-chain/package.json").is_file());
@@ -211,7 +212,7 @@ mod tests {
         let validator_before = fs::read(root.join("on-chain/validators/giftcard.ak")).unwrap();
 
         let new = apply(&old, &Mutation::Remove(Role::OffChain));
-        let plan = plan_update(&old, &new, &reg()).unwrap();
+        let plan = plan_update(&old, &new, &reg(), None).unwrap();
         apply_update(&plan, &root).unwrap();
 
         assert!(!root.join("off-chain").exists()); // removed
@@ -235,7 +236,7 @@ mod tests {
         fs::write(root.join("off-chain/USER.txt"), b"gone after swap").unwrap();
 
         let new = apply(&old, &Mutation::Add(a(Role::OffChain, "tx3")));
-        let plan = plan_update(&old, &new, &reg()).unwrap();
+        let plan = plan_update(&old, &new, &reg(), None).unwrap();
         apply_update(&plan, &root).unwrap();
 
         // The replaced dir is wiped (user file gone) and now matches a fresh
@@ -262,7 +263,7 @@ mod tests {
                 Mutation::Add(a(Role::OffChain, "scalus")),
             ],
         );
-        let plan = plan_update(&old, &new, &reg()).unwrap();
+        let plan = plan_update(&old, &new, &reg(), None).unwrap();
         apply_update(&plan, &root).unwrap();
 
         assert!(!root.join("on-chain").exists());

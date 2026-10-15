@@ -4,8 +4,8 @@ use rust_embed::RustEmbed;
 use serde::Deserialize;
 
 use super::types::{
-    CompatConfig, DetectSignature, EnvMapping, InfraConfig, Link, Role, RoleConfig, Seam, ToolDef,
-    UnknownRoleError, UnknownSeamError,
+    CompatConfig, DetectSignature, EnvMapping, InfraConfig, Link, McpDef, McpRequirement,
+    McpServer, Role, RoleAssignment, RoleConfig, Seam, ToolDef, UnknownRoleError, UnknownSeamError,
 };
 
 // ---------------------------------------------------------------------------
@@ -58,6 +58,26 @@ pub enum RegistryError {
 
     #[error("no tool definitions found in registry")]
     Empty,
+
+    #[error("duplicate MCP server id '{id}'")]
+    DuplicateMcpId { id: String },
+
+    #[error("unknown role '{role}' in MCP server file '{file}': {source}")]
+    McpUnknownRole {
+        file: String,
+        role: String,
+        source: UnknownRoleError,
+    },
+
+    #[error(
+        "MCP server '{file}' requires tool '{tool}' to fill the {role} role, but no such tool \
+         fills that role"
+    )]
+    McpRequiresUnknownTool {
+        file: String,
+        tool: String,
+        role: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +169,32 @@ impl DetectToml {
             DetectToml::Detailed { file, contains } => DetectSignature { file, contains },
         }
     }
+}
+
+#[derive(Deserialize)]
+struct McpFileToml {
+    mcp: McpMetaToml,
+    server: McpServer,
+}
+
+#[derive(Deserialize)]
+struct McpMetaToml {
+    id: String,
+    name: String,
+    description: String,
+    website: String,
+    #[serde(default)]
+    default: bool,
+    #[serde(default)]
+    requires: Option<McpRequirementToml>,
+    #[serde(default)]
+    agent_notes: String,
+}
+
+#[derive(Deserialize)]
+struct McpRequirementToml {
+    role: String,
+    tool: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +298,33 @@ fn parse_seams(file_name: &str, raw: &[String]) -> Result<Vec<Seam>, RegistryErr
         .collect()
 }
 
+/// Convert a parsed MCP server file. The `requires` role is validated against
+/// the `Role` vocabulary here; that the required tool exists and fills that
+/// role is checked by the registry once all tools are loaded.
+fn to_mcp_def(file_name: &str, raw: McpFileToml) -> Result<McpDef, RegistryError> {
+    let requires = match raw.mcp.requires {
+        Some(r) => {
+            let role = Role::from_kebab(&r.role).map_err(|e| RegistryError::McpUnknownRole {
+                file: file_name.to_string(),
+                role: r.role.clone(),
+                source: e,
+            })?;
+            Some(McpRequirement { role, tool: r.tool })
+        }
+        None => None,
+    };
+    Ok(McpDef {
+        id: raw.mcp.id,
+        name: raw.mcp.name,
+        description: raw.mcp.description,
+        website: raw.mcp.website,
+        default: raw.mcp.default,
+        requires,
+        agent_notes: raw.mcp.agent_notes,
+        server: raw.server,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
@@ -261,6 +334,8 @@ pub struct Registry {
     tools: Vec<ToolDef>,
     by_id: HashMap<String, usize>,
     by_role: HashMap<Role, Vec<usize>>,
+    /// MCP servers (`registry/mcp/`), sorted by id (canonical order, §11).
+    mcp: Vec<McpDef>,
 }
 
 impl Registry {
@@ -304,10 +379,45 @@ impl Registry {
             return Err(RegistryError::Empty);
         }
 
+        // MCP servers: a separate, optional layer. Loaded after the tools so a
+        // `requires` can be checked against them.
+        let mut mcp: Vec<McpDef> = Vec::new();
+        for file_name in RegistryAssets::iter() {
+            if !file_name.starts_with("mcp/") || !file_name.ends_with(".toml") {
+                continue;
+            }
+            let data = RegistryAssets::get(&file_name).expect("asset listed by iter() must exist");
+            let text = std::str::from_utf8(&data.data).expect("MCP TOML files must be valid UTF-8");
+            let raw: McpFileToml = toml::from_str(text).map_err(|e| RegistryError::Parse {
+                file: file_name.to_string(),
+                source: e,
+            })?;
+            let def = to_mcp_def(&file_name, raw)?;
+
+            if mcp.iter().any(|m| m.id == def.id) {
+                return Err(RegistryError::DuplicateMcpId { id: def.id });
+            }
+            if let Some(req) = &def.requires {
+                let fills = by_id
+                    .get(&req.tool)
+                    .is_some_and(|&idx| tools[idx].roles.contains_key(&req.role));
+                if !fills {
+                    return Err(RegistryError::McpRequiresUnknownTool {
+                        file: file_name.to_string(),
+                        tool: req.tool.clone(),
+                        role: req.role.as_kebab().to_string(),
+                    });
+                }
+            }
+            mcp.push(def);
+        }
+        mcp.sort_by(|a, b| a.id.cmp(&b.id));
+
         Ok(Registry {
             tools,
             by_id,
             by_role,
+            mcp,
         })
     }
 
@@ -327,6 +437,25 @@ impl Registry {
     /// All loaded tool definitions.
     pub fn all_tools(&self) -> &[ToolDef] {
         &self.tools
+    }
+
+    /// All MCP server definitions, sorted by id.
+    pub fn mcp_servers(&self) -> &[McpDef] {
+        &self.mcp
+    }
+
+    /// Look up an MCP server by its id.
+    pub fn mcp(&self, id: &str) -> Option<&McpDef> {
+        self.mcp.iter().find(|m| m.id == id)
+    }
+
+    /// The MCP servers that may be offered for these assignments (every server
+    /// whose `requires` the assignments satisfy), in id order.
+    pub fn mcp_applicable(&self, assignments: &[RoleAssignment]) -> Vec<&McpDef> {
+        self.mcp
+            .iter()
+            .filter(|m| m.applies_to(assignments))
+            .collect()
     }
 }
 
@@ -542,6 +671,93 @@ mod tests {
         assert!(matches!(
             to_tool_def("demo.toml", raw),
             Err(RegistryError::FullstackRolesMissing { .. })
+        ));
+    }
+
+    #[test]
+    fn mcp_servers_load_sorted_with_requirements() {
+        let reg = registry();
+        let ids: Vec<&str> = reg.mcp_servers().iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["cardano-debug", "yaci-devkit"]);
+
+        let debug = reg.mcp("cardano-debug").unwrap();
+        assert!(debug.default);
+        assert!(debug.requires.is_none());
+        assert_eq!(debug.server.transport(), "stdio");
+
+        let yaci = reg.mcp("yaci-devkit").unwrap();
+        let req = yaci.requires.as_ref().expect("yaci-devkit requires yaci");
+        assert_eq!(req.role, Role::Devnet);
+        assert_eq!(req.tool, "yaci");
+        assert_eq!(yaci.server.transport(), "http");
+        assert!(reg.mcp("nonexistent").is_none());
+    }
+
+    #[test]
+    fn mcp_applicable_honors_requires() {
+        let reg = registry();
+        let a = |role, tool: &str| RoleAssignment {
+            role,
+            tool_id: tool.to_string(),
+        };
+        let without = reg.mcp_applicable(&[a(Role::OnChain, "aiken")]);
+        assert_eq!(
+            without.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["cardano-debug"]
+        );
+        let with = reg.mcp_applicable(&[a(Role::OnChain, "aiken"), a(Role::Devnet, "yaci")]);
+        assert_eq!(
+            with.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["cardano-debug", "yaci-devkit"]
+        );
+    }
+
+    #[test]
+    fn mcp_fields_populated() {
+        for m in registry().mcp_servers() {
+            assert!(!m.name.is_empty(), "{}: name", m.id);
+            assert!(!m.description.is_empty(), "{}: description", m.id);
+            assert!(m.website.starts_with("https://"), "{}: website", m.id);
+            assert!(!m.agent_notes.is_empty(), "{}: agent_notes", m.id);
+        }
+    }
+
+    #[test]
+    fn mcp_server_rejects_unknown_fields() {
+        // `env` makes no sense for an http server; a typo would otherwise be
+        // dropped silently and the generated .mcp.json would be lossy.
+        let toml = r#"
+            [mcp]
+            id = "demo"
+            name = "Demo"
+            description = "d"
+            website = "https://x"
+            [server]
+            type = "http"
+            url = "http://localhost:1/mcp"
+            [server.env]
+            TOKEN = "x"
+        "#;
+        assert!(toml::from_str::<McpFileToml>(toml).is_err());
+    }
+
+    #[test]
+    fn mcp_unknown_role_in_requires_is_rejected() {
+        let toml = r#"
+            [mcp]
+            id = "demo"
+            name = "Demo"
+            description = "d"
+            website = "https://x"
+            requires = { role = "backend", tool = "aiken" }
+            [server]
+            type = "http"
+            url = "http://localhost:1/mcp"
+        "#;
+        let raw: McpFileToml = toml::from_str(toml).unwrap();
+        assert!(matches!(
+            to_mcp_def("demo.toml", raw),
+            Err(RegistryError::McpUnknownRole { .. })
         ));
     }
 

@@ -5,6 +5,7 @@ use serde::Serialize;
 use super::{ScaffoldError, planner};
 use crate::contract;
 use crate::registry::loader::Registry;
+use crate::registry::mcp;
 use crate::registry::types::{EnvMapping, Role, Selection};
 
 /// `cardano-up`'s output var for the cardano-node UNIX socket path. It appears in
@@ -43,6 +44,20 @@ pub struct InfraToolContext {
     pub website: String,
     pub cardano_up_package: String,
     pub env: Vec<EnvMapping>,
+}
+
+/// One MCP server wired into the project, for the `AGENTS.md` section that
+/// tells the agent what it has and how to use it (TECH_SPEC §3.6).
+#[derive(Debug, Clone, Serialize)]
+pub struct McpContext {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub website: String,
+    /// `stdio` or `http`.
+    pub transport: String,
+    /// Markdown bullets from the registry (`agent_notes`).
+    pub agent_notes: String,
 }
 
 /// The complete context passed to MiniJinja templates.
@@ -100,6 +115,11 @@ pub struct TemplateContext {
     pub spec: bool,
     /// Whether `spec/giftcard.md` (the worked example) is generated.
     pub spec_example: bool,
+
+    /// True when `.mcp.json` is generated (at least one server resolved).
+    pub has_mcp: bool,
+    /// The resolved MCP servers, id order — the same set `.mcp.json` carries.
+    pub mcp: Vec<McpContext>,
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +305,18 @@ pub fn build_context(
         String::new(),
     );
 
+    let mcp_ctx: Vec<McpContext> = mcp::resolve(selection, registry)
+        .iter()
+        .map(|m| McpContext {
+            id: m.id.clone(),
+            name: m.name.clone(),
+            description: m.description.clone(),
+            website: m.website.clone(),
+            transport: m.server.transport().to_string(),
+            agent_notes: m.agent_notes.clone(),
+        })
+        .collect();
+
     Ok(TemplateContext {
         project_name: selection.project_name.clone(),
         network: selection.network.to_string(),
@@ -317,6 +349,8 @@ pub fn build_context(
 
         spec: selection.spec,
         spec_example: selection.spec && planner::spec_example_present(selection),
+        has_mcp: !mcp_ctx.is_empty(),
+        mcp: mcp_ctx,
         nix: selection.nix,
         nix_packages,
         nix_component_flakes: {
@@ -350,6 +384,7 @@ mod tests {
             network: Network::Preview,
             nix: false,
             spec: true,
+            mcp: vec!["cardano-debug".to_string()],
         }
     }
 

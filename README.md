@@ -24,6 +24,7 @@ my-protocol/
 ├── .env          # shared between components
 ├── Justfile      # Commands to build, test, and clean
 ├── AGENTS.md     # Agent brief
+├── .mcp.json     # MCP servers for coding agents (--no-mcp to skip)
 └── README.md
 
 $ cd my-protocol && just test
@@ -34,7 +35,7 @@ $ cd my-protocol && just test
 
 - ⚡ **Zero to running in one command:** A wired-together monorepo that builds and passes its tests immediately.
 - 🧩 **Mix and match, freely:** Components talk to a shared *contract*. So, you can combine tools of different roles however you want and it'll just work.
-- 🤖 **Agent-native:** Machine-readable JSON on every command and a generated `AGENTS.md` in every project, so coding agents know what the project is and what to do next.
+- 🤖 **Agent-native:** Machine-readable JSON on every command, a generated `AGENTS.md` in every project, and a `.mcp.json` wiring Cardano MCP servers (transaction debugging, devnet control), so coding agents know what the project is, what to do next, and have the tools to do it.
 - 🩺 **Never stuck on setup:** A built-in dependency `doctor` detects your toolchains and tells you the exact installer to run for anything missing.
 - 🧪 **Real example:** Every stack ships the same worked gift-card scenario end-to-end, so what you generate actually runs.
 

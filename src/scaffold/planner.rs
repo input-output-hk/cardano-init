@@ -5,7 +5,12 @@ use serde::Deserialize;
 use super::{ScaffoldError, TemplateAssets};
 use crate::contract;
 use crate::registry::loader::Registry;
+use crate::registry::mcp;
 use crate::registry::types::{Role, RoleAssignment, Selection};
+
+/// Where the agent MCP configuration lands in a generated project (the Claude
+/// Code project-scope file; Cursor/VS Code users copy it, see `AGENTS.md`).
+pub const MCP_CONFIG_PATH: &str = ".mcp.json";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -381,6 +386,20 @@ pub fn plan(selection: &Selection, registry: &Registry) -> Result<FilePlan, Scaf
             render: true,
         });
     }
+    // MCP layer: the agent's server config, rendered here (not via MiniJinja)
+    // from the resolved server set so the JSON is exact and key-sorted (§11).
+    // Omitted when no server resolves — a `.mcp.json` with an empty map would
+    // only invite a "no servers found" prompt.
+    let mcp_servers = mcp::resolve(selection, registry);
+    if !mcp_servers.is_empty() {
+        entries.push(FileEntry {
+            dest: PathBuf::from(MCP_CONFIG_PATH),
+            source: TemplateSource::Inline(
+                mcp::render_mcp_json(&mcp_servers, registry).into_bytes(),
+            ),
+            render: false,
+        });
+    }
 
     Ok(FilePlan { entries })
 }
@@ -405,6 +424,7 @@ mod tests {
             network: Network::Preview,
             nix: false,
             spec: true,
+            mcp: vec!["cardano-debug".to_string()],
         }
     }
 
@@ -604,8 +624,9 @@ mod tests {
         //                       scripts/bundle-blueprint.mjs,
         //                       src/{contract,node,index,cli,contract.test,contract.integration.test}.ts)
         // spec: 2 (spec/README.md, spec/giftcard.md)
-        // total: 24
-        assert_eq!(plan.entries.len(), 24);
+        // mcp: 1 (.mcp.json)
+        // total: 25
+        assert_eq!(plan.entries.len(), 25);
     }
 
     #[test]
@@ -756,6 +777,66 @@ mod tests {
             .iter()
             .map(|e| e.dest.to_str().unwrap().to_string())
             .collect()
+    }
+
+    #[test]
+    fn mcp_json_emitted_last_for_selected_servers() {
+        let sel = selection(vec![RoleAssignment {
+            role: Role::OnChain,
+            tool_id: "aiken".into(),
+        }]);
+        let plan = plan(&sel, &registry()).unwrap();
+        let last = plan.entries.last().unwrap();
+        assert_eq!(last.dest.to_str().unwrap(), ".mcp.json");
+        assert!(!last.render);
+        let TemplateSource::Inline(bytes) = &last.source else {
+            panic!("mcp.json is inline");
+        };
+        let v: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        assert!(v["mcpServers"]["cardano-debug"].is_object());
+        assert!(v["mcpServers"].get("yaci-devkit").is_none());
+    }
+
+    #[test]
+    fn mcp_json_omitted_when_no_server_selected() {
+        let mut sel = selection(vec![RoleAssignment {
+            role: Role::OnChain,
+            tool_id: "aiken".into(),
+        }]);
+        sel.mcp.clear();
+        assert!(!plan_dests(&sel).iter().any(|d| d == ".mcp.json"));
+    }
+
+    #[test]
+    fn mcp_json_includes_yaci_only_with_yaci_devnet() {
+        let mut sel = selection(vec![
+            RoleAssignment {
+                role: Role::OnChain,
+                tool_id: "aiken".into(),
+            },
+            RoleAssignment {
+                role: Role::Devnet,
+                tool_id: "yaci".into(),
+            },
+        ]);
+        sel.mcp = vec!["cardano-debug".into(), "yaci-devkit".into()];
+        let mcp_json = |sel: &Selection| -> serde_json::Value {
+            let p = plan(sel, &registry()).unwrap();
+            let TemplateSource::Inline(bytes) = &p.entries.last().unwrap().source else {
+                panic!("mcp.json is inline");
+            };
+            serde_json::from_slice(bytes).unwrap()
+        };
+        let v = mcp_json(&sel);
+        assert_eq!(
+            v["mcpServers"]["yaci-devkit"]["url"],
+            "http://localhost:10000/mcp"
+        );
+
+        // Same ids, but the devnet is gone: the stale id is dropped silently.
+        sel.assignments.retain(|a| a.role != Role::Devnet);
+        let v = mcp_json(&sel);
+        assert!(v["mcpServers"].get("yaci-devkit").is_none());
     }
 
     #[test]

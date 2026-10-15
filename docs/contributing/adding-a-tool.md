@@ -449,6 +449,40 @@ cargo run -- --name test-project --off-chain mytool --dry-run
 
 ---
 
+## Adding an MCP server
+
+MCP servers are the other kind of registry entry. They are not tools and fill no role: a server is a capability the generated project hands to a coding agent through `.mcp.json`. Add one with a single file, `registry/mcp/<id>.toml`, and no template:
+
+```toml
+[mcp]
+id          = "my-server"
+name        = "My Server"
+description = "One to three sentences: what the agent can do with it."
+website     = "https://…"
+default     = true                      # pre-selected in the wizard / without --mcp (default false)
+requires    = { role = "devnet", tool = "yaci" }   # optional: offered only when this tool fills this role
+agent_notes = """\
+- Markdown bullets for the generated AGENTS.md: when to reach for the server, \
+the typical tool sequence, and any prerequisite (a key, a running process)."""
+
+[server]                                # the entry written under mcpServers.<id>
+type    = "stdio"                       # or "http"
+command = "npx"
+args    = ["-y", "my-server-mcp"]
+timeout = 600000                        # optional, ms
+[server.env]                            # optional; use ${VAR:-} to pass a key through from the shell
+MY_API_KEY = "${MY_API_KEY:-}"
+```
+
+For `type = "http"`, give `url` instead of `command`/`args`/`env`. Keep secrets out of the file: pass them through with `${VAR:-}` so the generated `.mcp.json` is safe to commit.
+
+A `requires` must name a tool that fills that role, or the registry fails to load (`McpRequiresUnknownTool`). The loader test `mcp_fields_populated` checks the required fields. Verify with:
+
+```bash
+cargo run -- list                                      # the server appears under "MCP servers"
+cargo run -- --name demo --on-chain aiken --mcp my-server --dry-run
+```
+
 ## Testing your integration
 
 **Dry run**: check the file plan without writing anything:

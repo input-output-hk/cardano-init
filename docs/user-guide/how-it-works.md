@@ -4,7 +4,7 @@
 
 You choose a tool for each **role** you need. `cardano-init` creates a directory only for the roles you select, plus a base layer (top-level `Justfile`, `README.md`, `.env`, `blueprint/`) that connects them.
 
-It also creates a [`spec/` folder](generated-project.md#spec) for the protocol's specification in plain Markdown. Pass `--no-spec` to skip it.
+It also creates a [`spec/` folder](generated-project.md#spec) for the protocol's specification in plain Markdown, and a [`.mcp.json`](generated-project.md#mcpjson) that gives coding agents Cardano tools. Pass `--no-spec` or `--no-mcp` to skip them.
 
 | Role | What it does | Directory | Multiple tools? |
 |------|--------------|-----------|-----------------|
