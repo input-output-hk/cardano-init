@@ -51,6 +51,11 @@ Prefer the Docker distribution? Download it and replace the last line of the
 `dev` recipe with the devkit directory's `./bin/devkit.sh start`. See the
 [DevKit docs](https://devkit.yaci.xyz/introduction) for both paths.
 
+DevKit 0.12.0-beta5 and later also serve an **MCP endpoint** for coding agents
+on the admin port (`http://localhost:10000/mcp`); the stable 0.10.x line does
+not. If the project's `.mcp.json` lists `yaci-devkit`, install the beta:
+`npm install -g @bloxbean/yaci-devkit@beta`. See `../AGENTS.md`.
+
 ## Funding test wallets
 
 Inside the running devnet shell you can top up any address:

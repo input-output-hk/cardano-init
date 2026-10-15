@@ -42,6 +42,9 @@ These invariants are what let the components compose. Preserve them in any chang
 ├── Justfile                    # Top-level task orchestration (build/test/clean)
 ├── AGENTS.md / CLAUDE.md       # This guidance
 ├── .env                        # Shared connection vars (the .env seam)
+{%- if has_mcp %}
+├── .mcp.json                   # MCP servers for coding agents (see below)
+{%- endif %}
 {%- if has_fullstack %}
 ├── {{ fullstack.dir }}/                  # {{ fullstack.tool_name }} — fullstack: on-chain + off-chain in one build
 {%- endif %}
@@ -170,6 +173,24 @@ Then run `/cardano-context` to persist Cardano directives into this project. (Ot
 {%- endif %}
 {%- if has_off_chain or has_infra or has_fullstack %}
 - `query-chain` — choosing how to read chain data (Blockfrost / Ogmios / indexers)
+{%- endif %}
+{%- if has_mcp %}
+
+## MCP servers (`.mcp.json`)
+
+The project ships a `.mcp.json` wiring the servers below. **Claude Code** reads it from the project root (approve the servers on first use). **Cursor:** copy it to `.cursor/mcp.json`. **VS Code:** copy it to `.vscode/mcp.json` and rename the top-level key `mcpServers` to `servers`. In either copy, replace each `${VAR:-}` in an `env` block with `${env:VAR}` (their syntax; only Claude Code expands `${VAR:-}`), or delete the `env` block to run without keys. A `stdio` server is started on demand (`npx` fetches it on first use); an `http` server must already be running. Add servers of your own to `.mcp.json` freely: `cardano-init add`/`remove` only touch the entries listed below (adding or removing them as the stack changes) and keep everything else as is.
+{%- for m in mcp %}
+
+### {{ m.name }} (`{{ m.id }}`, {{ m.transport }})
+
+{{ m.description }} Docs: {{ m.website }}
+
+{{ m.agent_notes }}
+{%- endfor %}
+{%- if has_devnet and devnet.tool_id == "yaci" and not (mcp | selectattr("id", "eq", "yaci-devkit") | list) %}
+
+The devnet also serves its own MCP endpoint (`http://localhost:10000/mcp`, Yaci DevKit ≥ 0.12.0-beta5). To let the agent drive the devnet directly, run `cardano-init add --mcp yaci-devkit` (or add `"yaci-devkit": { "type": "http", "url": "http://localhost:10000/mcp" }` to `.mcp.json` by hand).
+{%- endif %}
 {%- endif %}
 
 ## Gotchas

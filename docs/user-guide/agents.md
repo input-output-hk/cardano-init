@@ -17,13 +17,22 @@ Every project includes an `AGENTS.md`, and a `CLAUDE.md` that imports it. It is 
 
 cardano-dev-skills is a Cardano Foundation skill set for agents. It teaches how to write validators, build transactions, and debug on-chain failures. `cardano-init` creates the project, and the generated `AGENTS.md` points the agent to the skills it needs.
 
+## Generated `.mcp.json`
+
+Skills give the agent knowledge; [MCP servers](generated-project.md#mcpjson) give it tools. Every project ships a `.mcp.json` with the servers you selected, and `AGENTS.md` documents each one: what it does, when it applies, and how to use it in this project.
+
+- `cardano-debug` validates a transaction before it is submitted and shows where a script fails. It works without a running devnet: inputs on a public network are resolved automatically, and inputs that only exist locally can be supplied as an assembled context.
+- `yaci-devkit` lets the agent drive the local devnet (fund addresses, submit, reset). It is offered only when Yaci DevKit is the devnet tool, and is opt-in until a stable DevKit release serves the endpoint.
+
+Pass `--mcp <id>` to pick servers, or `--no-mcp` to skip the file. `cardano-init list --format json` returns the servers under `mcp`, each with its `requires` condition.
+
 ## A typical agent flow
 
 ```bash
 # 1. Discover what's available
 cardano-init list --format json
 
-# 2. Scaffold in one call
+# 2. Scaffold in one call (the default MCP servers are included; add --no-mcp to skip them)
 cardano-init --format json --name my-protocol --on-chain aiken --off-chain meshjs --devnet yaci
 
 # 3. Check toolchains from inside the project
@@ -54,6 +63,8 @@ A `--format json` response has one of two shapes:
 | `tool_role_mismatch` | 2 | `{ tool_id, role, valid_roles }` | The tool exists but doesn't fill that role. |
 | `fullstack_conflict` | 2 | `{}` | `--fullstack` combined with `--on-chain` / `--off-chain`. |
 | `fullstack_unsupported` | 2 | `{ tool_id, valid_tools }` | The tool has no fullstack template. |
+| `unknown_mcp` | 2 | `{ mcp_id, valid_mcp }` | No MCP server with that id. |
+| `mcp_requires_tool` | 2 | `{ mcp_id, role, tool }` | The server needs `tool` as the `role` tool, and the selection lacks it. |
 | `no_roles_selected` | 2 | `{}` | No role flag was given. |
 | `experimental_not_allowed` | 2 | `{ tools, remedy }` | An experimental tool was selected without `--allow-experimental`. |
 | `incompatible_tools` | 2 | `{ tools, reason, compatible_providers, compatible_off_chain, remedy }` | The off-chain tool can't reach any selected provider. |

@@ -51,6 +51,7 @@ pub fn run_interactive(
         .with_prompt("Add a spec/ folder for the protocol specification?")
         .default(true)
         .interact()?;
+    let mcp = select_mcp(&theme, registry, &assignments)?;
     // Always preview; switch networks by editing CARDANO_NETWORK in the generated .env.
     let selection = Selection {
         project_name,
@@ -58,6 +59,7 @@ pub fn run_interactive(
         network: Network::Preview,
         nix,
         spec,
+        mcp,
     };
 
     // Step 4: Summary + confirmation
@@ -256,6 +258,35 @@ fn confirm_experimental(
         .into_iter()
         .filter(|a| !registry.get(&a.tool_id).is_some_and(|t| t.experimental))
         .collect())
+}
+
+/// Offer the MCP servers applicable to the chosen tools (TECH_SPEC §3.6) as a
+/// `MultiSelect` with the `default` ones pre-checked; selecting nothing means no
+/// `.mcp.json`. Skipped silently when no server applies. Returns id-sorted ids.
+fn select_mcp(
+    theme: &ColorfulTheme,
+    registry: &Registry,
+    assignments: &[RoleAssignment],
+) -> Result<Vec<String>, CliError> {
+    let servers = registry.mcp_applicable(assignments);
+    if servers.is_empty() {
+        return Ok(Vec::new());
+    }
+    let items: Vec<String> = servers
+        .iter()
+        .map(|m| format!("{} — {}", m.name, output::first_sentence(&m.description)))
+        .collect();
+    let defaults: Vec<bool> = servers.iter().map(|m| m.default).collect();
+    let picked = MultiSelect::with_theme(theme)
+        .with_prompt(
+            "MCP servers for your coding agent (.mcp.json; space to toggle, enter to confirm):",
+        )
+        .items(&items)
+        .defaults(&defaults)
+        .interact()?;
+    let mut ids: Vec<String> = picked.iter().map(|&i| servers[i].id.clone()).collect();
+    ids.sort();
+    Ok(ids)
 }
 
 fn prompt_project_name(theme: &ColorfulTheme) -> Result<String, CliError> {

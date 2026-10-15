@@ -141,6 +141,7 @@ mod tests {
             network: Network::Preview,
             nix: false,
             spec: true,
+            mcp: vec!["cardano-debug".to_string()],
         }
     }
 
@@ -276,13 +277,18 @@ mod tests {
         assert_eq!(actual, expected, "snapshot '{name}' drifted");
     }
 
+    /// A snapshot selection with the **default** MCP servers for its tools (the
+    /// same set the wizard pre-selects), so the fixtures show the out-of-the-box
+    /// `.mcp.json` / `AGENTS.md`.
     fn sel(assignments: Vec<RoleAssignment>, network: Network, nix: bool) -> Selection {
+        let mcp = crate::registry::mcp::default_ids(&registry(), &assignments);
         Selection {
             project_name: "snap-project".to_string(),
             assignments,
             network,
             nix,
             spec: true,
+            mcp,
         }
     }
 

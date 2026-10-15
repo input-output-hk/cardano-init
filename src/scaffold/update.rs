@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 use crate::contract;
 use crate::registry::loader::Registry;
+use crate::registry::mcp::{self, McpMerge};
 use crate::registry::types::{Role, RoleAssignment, Selection};
 
 use super::renderer::RenderedFile;
@@ -36,12 +37,17 @@ pub enum Mutation {
     Remove(Role),
     /// Remove a single infrastructure provider by tool id.
     RemoveInfra(String),
+    /// Add an MCP server (registry id) to `.mcp.json`; a no-op if present.
+    AddMcp(String),
+    /// Remove an MCP server (registry id) from `.mcp.json`; a no-op if absent.
+    RemoveMcp(String),
 }
 
 /// Apply one mutation to `old`, returning the new selection (pure; the input is
 /// left untouched).
 pub fn apply(old: &Selection, mutation: &Mutation) -> Selection {
     let mut assignments = old.assignments.clone();
+    let mut mcp = old.mcp.clone();
     match mutation {
         Mutation::Add(new_asg) if new_asg.role == Role::Infrastructure => {
             let already = assignments
@@ -60,6 +66,13 @@ pub fn apply(old: &Selection, mutation: &Mutation) -> Selection {
         Mutation::RemoveInfra(tool_id) => {
             assignments.retain(|a| !(a.role == Role::Infrastructure && a.tool_id == *tool_id))
         }
+        Mutation::AddMcp(id) => {
+            if !mcp.contains(id) {
+                mcp.push(id.clone());
+                mcp.sort();
+            }
+        }
+        Mutation::RemoveMcp(id) => mcp.retain(|m| m != id),
     }
     Selection {
         project_name: old.project_name.clone(),
@@ -67,6 +80,10 @@ pub fn apply(old: &Selection, mutation: &Mutation) -> Selection {
         network: old.network,
         nix: old.nix,
         spec: old.spec,
+        // Carried (or edited by the MCP mutations); a server whose `requires`
+        // the new assignments no longer satisfy is dropped at plan time
+        // (`registry::mcp::resolve`).
+        mcp,
     }
 }
 
@@ -196,11 +213,14 @@ pub fn slot_tools(sel: &Selection, registry: &Registry) -> BTreeMap<String, Vec<
 }
 
 /// Compute the change set between two selections. Pure: renders only from
-/// embedded assets, touches no disk.
+/// embedded assets, touches no disk — `existing_mcp_json` is the project's
+/// current `.mcp.json` content (read by the caller, `None` when absent), merged
+/// at key level rather than overwritten so user-added servers survive (§15.1).
 pub fn plan_update(
     old: &Selection,
     new: &Selection,
     registry: &Registry,
+    existing_mcp_json: Option<&str>,
 ) -> Result<UpdatePlan, ScaffoldError> {
     let old_slots = slots(old, registry);
     let new_slots = slots(new, registry);
@@ -258,6 +278,19 @@ pub fn plan_update(
     if old.nix && !new.nix {
         shared_removals.push(PathBuf::from("flake.nix"));
         shared_removals.push(PathBuf::from(".envrc"));
+    }
+
+    // `.mcp.json`: not a plain shared file (the planner's fresh render would
+    // clobber user-added servers), so merge instead: registry entries follow
+    // the new selection, everything else in the file is kept verbatim.
+    let mcp_path = PathBuf::from(planner::MCP_CONFIG_PATH);
+    match mcp::merge_mcp_json(existing_mcp_json, &mcp::resolve(new, registry), registry) {
+        McpMerge::Write(content) => shared_files.push(RenderedFile {
+            dest: mcp_path,
+            content: content.into_bytes(),
+        }),
+        McpMerge::Remove => shared_removals.push(mcp_path),
+        McpMerge::Unchanged => {}
     }
 
     Ok(UpdatePlan {
@@ -323,6 +356,7 @@ mod tests {
             network: Network::Preview,
             nix: false,
             spec: true,
+            mcp: vec![],
         }
     }
 
@@ -342,7 +376,7 @@ mod tests {
         let reg = registry();
         let old = sel(vec![a(Role::OnChain, "aiken")]);
         let new = apply(&old, &Mutation::Add(a(Role::OffChain, "meshjs")));
-        let plan = plan_update(&old, &new, &reg).unwrap();
+        let plan = plan_update(&old, &new, &reg, None).unwrap();
 
         assert_eq!(
             plan.slot_ops,
@@ -371,7 +405,7 @@ mod tests {
             apply(&old, &Mutation::Add(a(Role::Devnet, "yaci"))),
         ] {
             assert!(new.spec, "spec carries over");
-            let plan = plan_update(&old, &new, &reg).unwrap();
+            let plan = plan_update(&old, &new, &reg, None).unwrap();
             assert!(!creates_under(&plan, "spec"));
             assert!(!plan.shared_files.iter().any(|f| f.dest.starts_with("spec")));
             assert!(!plan.shared_removals.iter().any(|p| p.starts_with("spec")));
@@ -379,11 +413,88 @@ mod tests {
     }
 
     #[test]
+    fn mcp_json_is_merged_not_clobbered_on_update() {
+        let reg = registry();
+        let old = sel(vec![a(Role::OnChain, "aiken"), a(Role::Devnet, "yaci")]);
+        let mut old = old;
+        old.mcp = vec!["cardano-debug".into(), "yaci-devkit".into()];
+        let new = apply(&old, &Mutation::Remove(Role::Devnet));
+        let existing = r#"{ "mcpServers": { "cardano-debug": {}, "yaci-devkit": { "type": "http", "url": "u" }, "mine": { "type": "http", "url": "m" } } }"#;
+        let plan = plan_update(&old, &new, &reg, Some(existing)).unwrap();
+        let file = plan
+            .shared_files
+            .iter()
+            .find(|f| f.dest.to_str() == Some(".mcp.json"))
+            .expect(".mcp.json is re-merged");
+        let v: serde_json::Value = serde_json::from_slice(&file.content).unwrap();
+        let keys: Vec<&String> = v["mcpServers"].as_object().unwrap().keys().collect();
+        // yaci-devkit no longer applies (devnet gone) → removed; cardano-debug
+        // refreshed to its current rendering; the user's `mine` kept.
+        assert_eq!(keys, vec!["cardano-debug", "mine"]);
+        assert_eq!(v["mcpServers"]["cardano-debug"]["command"], "npx");
+        assert!(
+            !plan
+                .shared_removals
+                .iter()
+                .any(|p| p.ends_with(".mcp.json"))
+        );
+    }
+
+    #[test]
+    fn mcp_mutations_edit_the_server_set() {
+        let mut old = sel(vec![a(Role::OnChain, "aiken"), a(Role::Devnet, "yaci")]);
+        old.mcp = vec!["cardano-debug".into()];
+        let added = apply(&old, &Mutation::AddMcp("yaci-devkit".into()));
+        assert_eq!(added.mcp, vec!["cardano-debug", "yaci-devkit"]);
+        // Idempotent.
+        assert_eq!(
+            apply(&added, &Mutation::AddMcp("yaci-devkit".into())),
+            added
+        );
+        let removed = apply(&added, &Mutation::RemoveMcp("cardano-debug".into()));
+        assert_eq!(removed.mcp, vec!["yaci-devkit"]);
+        // Removing an absent id changes nothing.
+        assert_eq!(
+            apply(&removed, &Mutation::RemoveMcp("cardano-debug".into())),
+            removed
+        );
+        // An MCP-only change still re-merges .mcp.json and touches no slot.
+        let plan = plan_update(&old, &added, &registry(), None).unwrap();
+        assert!(plan.slot_ops.is_empty());
+        assert!(
+            plan.shared_files
+                .iter()
+                .any(|f| f.dest.ends_with(".mcp.json"))
+        );
+    }
+
+    #[test]
+    fn mcp_json_removed_when_no_server_remains() {
+        let reg = registry();
+        let old = sel(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
+        let mut new = apply(&old, &Mutation::Remove(Role::OffChain));
+        new.mcp.clear(); // e.g. the file only ever held registry keys
+        let existing = r#"{ "mcpServers": { "cardano-debug": {} } }"#;
+        let plan = plan_update(&old, &new, &reg, Some(existing)).unwrap();
+        assert!(
+            plan.shared_removals
+                .iter()
+                .any(|p| p.ends_with(".mcp.json"))
+        );
+        assert!(
+            !plan
+                .shared_files
+                .iter()
+                .any(|f| f.dest.ends_with(".mcp.json"))
+        );
+    }
+
+    #[test]
     fn add_protocol_role_does_not_link_missing_spec_example() {
         let reg = registry();
         let old = sel(vec![a(Role::Devnet, "yaci")]);
         let new = apply(&old, &Mutation::Add(a(Role::OnChain, "aiken")));
-        let plan = plan_update(&old, &new, &reg).unwrap();
+        let plan = plan_update(&old, &new, &reg, None).unwrap();
         let agents = plan
             .shared_files
             .iter()
@@ -399,7 +510,7 @@ mod tests {
         let reg = registry();
         let old = sel(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
         let new = apply(&old, &Mutation::Remove(Role::OffChain));
-        let plan = plan_update(&old, &new, &reg).unwrap();
+        let plan = plan_update(&old, &new, &reg, None).unwrap();
 
         assert_eq!(
             plan.slot_ops,
@@ -414,7 +525,7 @@ mod tests {
         let reg = registry();
         let old = sel(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
         let new = apply(&old, &Mutation::Add(a(Role::OffChain, "tx3")));
-        let plan = plan_update(&old, &new, &reg).unwrap();
+        let plan = plan_update(&old, &new, &reg, None).unwrap();
 
         assert_eq!(
             plan.slot_ops,
@@ -436,7 +547,7 @@ mod tests {
                 Mutation::Add(a(Role::OffChain, "scalus")),
             ],
         );
-        let plan = plan_update(&old, &new, &reg).unwrap();
+        let plan = plan_update(&old, &new, &reg, None).unwrap();
 
         let mut touched = dirs_touched(&plan);
         touched.sort();
@@ -464,7 +575,7 @@ mod tests {
             a(Role::Infrastructure, "kupo"),
         ]);
         let new = apply(&old, &Mutation::Add(a(Role::Infrastructure, "ogmios")));
-        let plan = plan_update(&old, &new, &reg).unwrap();
+        let plan = plan_update(&old, &new, &reg, None).unwrap();
 
         assert_eq!(
             plan.slot_ops,
@@ -482,7 +593,7 @@ mod tests {
             a(Role::Infrastructure, "kupo"),
         ]);
         let new = apply(&old, &Mutation::Remove(Role::OnChain));
-        let plan = plan_update(&old, &new, &reg).unwrap();
+        let plan = plan_update(&old, &new, &reg, None).unwrap();
 
         assert_eq!(
             plan.slot_ops,
@@ -498,7 +609,7 @@ mod tests {
     fn identical_selection_is_a_noop() {
         let reg = registry();
         let old = sel(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
-        let plan = plan_update(&old, &old, &reg).unwrap();
+        let plan = plan_update(&old, &old, &reg, None).unwrap();
         assert!(plan.slot_ops.is_empty());
         assert!(plan.shared_removals.is_empty());
     }

@@ -389,6 +389,7 @@ pub fn reconstruct(root: &Path, registry: &Registry) -> Reconstructed {
     });
     let nix = root.join("flake.nix").is_file();
     let spec = root.join("spec").is_dir();
+    let mcp = read_mcp_ids(root, registry);
     let project_name = root
         .file_name()
         .and_then(|s| s.to_str())
@@ -402,6 +403,7 @@ pub fn reconstruct(root: &Path, registry: &Registry) -> Reconstructed {
             network,
             nix,
             spec,
+            mcp,
         },
         unrecognized: scan.unrecognized,
         low_confidence,
@@ -458,6 +460,29 @@ fn tool_for_package(pkg: &str, registry: &Registry) -> Option<String> {
                 .is_some_and(|i| i.cardano_up_package == pkg)
         })
         .map(|t| t.id.clone())
+}
+
+/// The registry MCP servers listed in the project's `.mcp.json` (its
+/// `mcpServers` keys ∩ registry ids, id-sorted). Servers the user added by hand
+/// are not registry servers, so they are ignored here — `.mcp.json` is
+/// user-owned after generation and never rewritten by an update (§15.1); this
+/// only feeds the re-rendered `AGENTS.md`. Missing or unparsable ⇒ empty.
+fn read_mcp_ids(root: &Path, registry: &Registry) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(root.join(".mcp.json")) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    let Some(servers) = value.get("mcpServers").and_then(|v| v.as_object()) else {
+        return Vec::new();
+    };
+    registry
+        .mcp_servers()
+        .iter()
+        .filter(|m| servers.contains_key(&m.id))
+        .map(|m| m.id.clone())
+        .collect()
 }
 
 /// Read `CARDANO_NETWORK` from the project's `.env`, if present and valid.
@@ -715,6 +740,7 @@ mod tests {
             network,
             nix,
             spec: true,
+            mcp: vec!["cardano-debug".to_string()],
         };
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join(&sel.project_name);
@@ -800,11 +826,38 @@ mod tests {
             network: Network::Preview,
             nix: false,
             spec: false,
+            mcp: vec![],
         };
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join(&sel.project_name);
         crate::scaffold::scaffold(&sel, &reg, &root).unwrap();
-        assert!(!reconstruct(&root, &reg).selection.spec);
+        let r = reconstruct(&root, &reg);
+        assert!(!r.selection.spec);
+        // No .mcp.json was generated → no servers recovered.
+        assert!(r.selection.mcp.is_empty());
+    }
+
+    #[test]
+    fn reconstruct_recovers_mcp_servers_from_mcp_json() {
+        let r = roundtrip(vec![a(Role::OnChain, "aiken")], Network::Preview, false);
+        assert_eq!(r.selection.mcp, vec!["cardano-debug".to_string()]);
+    }
+
+    #[test]
+    fn reconstruct_ignores_hand_added_mcp_servers() {
+        // A user-added server (not in the registry) is left alone: it is not a
+        // registry id, so it never enters the selection.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("on-chain")).unwrap();
+        fs::write(root.join("on-chain/aiken.toml"), "").unwrap();
+        fs::write(
+            root.join(".mcp.json"),
+            r#"{ "mcpServers": { "my-own": { "type": "http", "url": "http://x" }, "cardano-debug": {} } }"#,
+        )
+        .unwrap();
+        let r = reconstruct(root, &registry());
+        assert_eq!(r.selection.mcp, vec!["cardano-debug".to_string()]);
     }
 
     #[test]

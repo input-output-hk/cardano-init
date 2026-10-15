@@ -111,6 +111,7 @@ mod tests {
             network: Network::Preview,
             nix: false,
             spec: true,
+            mcp: vec!["cardano-debug".to_string()],
         }
     }
 

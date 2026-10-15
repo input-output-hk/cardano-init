@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -283,6 +283,101 @@ pub struct ToolDef {
 }
 
 // ---------------------------------------------------------------------------
+// MCP servers
+// ---------------------------------------------------------------------------
+
+/// A condition on the selection for an MCP server to be offered: the named
+/// tool must fill the named role (e.g. the Yaci DevKit server only makes sense
+/// when Yaci fills the devnet role).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct McpRequirement {
+    pub role: Role,
+    pub tool: String,
+}
+
+impl Serialize for Role {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_kebab())
+    }
+}
+
+/// How an MCP client launches or reaches the server — the entry written under
+/// `mcpServers.<id>` in the generated `.mcp.json`, in the Claude Code format
+/// (`"type": "stdio" | "http"`). Cursor and VS Code read the same shape but do
+/// not expand `${VAR:-}` in `env` (their syntax is `${env:VAR}`); the generated
+/// `AGENTS.md` says so where it tells users to copy the file.
+/// `deny_unknown_fields`: a registry author who puts `env` under an `http`
+/// server, or misspells a key, gets a load error rather than a silently
+/// lossy `.mcp.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
+pub enum McpServer {
+    /// A local process speaking MCP over stdio.
+    Stdio {
+        command: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<String>,
+        /// Environment passed to the process. A `BTreeMap` so the rendered JSON
+        /// is key-sorted (determinism, §11). Values may use `${VAR:-}` to pass
+        /// a variable through from the user's shell.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        env: BTreeMap<String, String>,
+        /// Per-call timeout in milliseconds, when the server needs more than
+        /// the client default (long validations / debug runs).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<u64>,
+    },
+    /// A remote (or locally served) endpoint over streamable HTTP.
+    Http { url: String },
+}
+
+impl McpServer {
+    /// The transport name as it appears in `.mcp.json` (`stdio` / `http`).
+    pub fn transport(&self) -> &'static str {
+        match self {
+            McpServer::Stdio { .. } => "stdio",
+            McpServer::Http { .. } => "http",
+        }
+    }
+}
+
+/// An MCP server the CLI can wire into a generated project, loaded from
+/// `registry/mcp/<id>.toml`. Not a role and not a tool: servers are a
+/// cross-cutting layer (like `spec/`) chosen at setup time and written to
+/// `.mcp.json` (TECH_SPEC §3.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpDef {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub website: String,
+    /// Pre-selected in the wizard, and chosen in one-shot mode when `--mcp` is
+    /// not given.
+    pub default: bool,
+    /// When `Some`, the server is only offered (and only valid to select) if
+    /// the selection satisfies it.
+    pub requires: Option<McpRequirement>,
+    /// Markdown bullet points for the generated `AGENTS.md`: what the server is
+    /// for and how the agent should use it in this project.
+    pub agent_notes: String,
+    pub server: McpServer,
+}
+
+impl McpDef {
+    /// Whether this server may be offered for a selection with these
+    /// assignments: true when it has no `requires`, or the required tool fills
+    /// the required role.
+    pub fn applies_to(&self, assignments: &[RoleAssignment]) -> bool {
+        match &self.requires {
+            None => true,
+            Some(req) => assignments
+                .iter()
+                .any(|a| a.role == req.role && a.tool_id == req.tool),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Selection / RoleAssignment / Network
 // ---------------------------------------------------------------------------
 
@@ -337,6 +432,12 @@ pub struct Selection {
     /// Generate the `spec/` protocol-specification folder (default on;
     /// `--no-spec` turns it off).
     pub spec: bool,
+    /// MCP server ids (registry `mcp/`) to write into the project's
+    /// `.mcp.json`, in canonical (id-sorted) order. Empty ⇒ no `.mcp.json`.
+    /// An id whose `requires` the assignments no longer satisfy is ignored at
+    /// plan time rather than being an error (a reconstructed selection may
+    /// carry one after `remove`).
+    pub mcp: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

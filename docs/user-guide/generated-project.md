@@ -10,6 +10,7 @@ my-protocol/
 ├── CLAUDE.md       # imports AGENTS.md
 ├── .gitignore
 ├── .env            # shared connection details
+├── .mcp.json       # MCP servers for coding agents
 ├── blueprint/      # CIP-57 blueprint, written by on-chain `build`
 ├── spec/           # protocol specification in plain Markdown
 ├── on-chain/       # validators + their own Justfile
@@ -77,6 +78,23 @@ The values start empty. A component that starts a local endpoint (a devnet such 
 ## `AGENTS.md`
 
 Every project includes an `AGENTS.md`, and a `CLAUDE.md` that imports it, written for the tools you selected. See [For coding agents](agents.md#generated-agentsmd) for what it contains.
+
+## `.mcp.json`
+
+`.mcp.json` lists the [MCP](https://modelcontextprotocol.io) servers a coding agent can use in this project. Claude Code reads the file from the project root. For Cursor, copy it to `.cursor/mcp.json`; for VS Code, copy it to `.vscode/mcp.json` and rename the top-level key `mcpServers` to `servers`.
+
+Two servers are available:
+
+| Server | What the agent gets | Offered when |
+|--------|---------------------|--------------|
+| `cardano-debug` | Validates and step-debugs transactions and Plutus scripts before they are submitted: phase-1 and phase-2 validation, redeemer errors and traces, script decompilation, a UPLC debugger. Runs locally through `npx`; no API key needed. | always; selected by default |
+| `yaci-devkit` | Drives the local devnet: status, faucet top-up, UTxOs, submit, reset. Served by Yaci DevKit itself while `just -f devnet/Justfile dev` runs. Needs Yaci DevKit 0.12.0-beta5 or later (`npm install -g @bloxbean/yaci-devkit@beta`); the stable release has no MCP endpoint, which is why this one is opt-in. | the devnet tool is `yaci`; opt-in |
+
+Interactive setup lets you toggle them. In one-shot mode, pass [`--mcp <id>`](commands.md#create-a-project) to choose, or `--no-mcp` to skip the file. `cardano-init list` shows the same table.
+
+API keys never go into the file. The `cardano-debug` entry passes `KOIOS_API_KEY` and `BLOCKFROST_PROJECT_ID_<NETWORK>` through from your shell with `${VAR:-}`, so set them there when the public Koios rate limit gets in the way. Claude Code expands that syntax; in a Cursor or VS Code copy, use `${env:VAR}` instead or remove the `env` block.
+
+You can add servers of your own to the file. `add --mcp <id>` and `remove --mcp <id>` add or remove the servers above later on, and a role change adds or removes the ones tied to it; your own entries are never touched. The generated `AGENTS.md` explains each server to the agent.
 
 ## Changing the stack later
 

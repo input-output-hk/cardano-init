@@ -7,7 +7,7 @@
 use serde::Serialize;
 
 use super::loader::Registry;
-use super::types::{Link, Role};
+use super::types::{Link, McpRequirement, Role};
 
 /// A role, as exposed to consumers (TECH_SPEC §8). `multiple` is `true` only for
 /// the role that may be filled by several tools at once (Infrastructure).
@@ -39,6 +39,39 @@ pub struct ToolView {
     /// filter or warn before selecting it (selecting one needs
     /// `--allow-experimental`).
     pub experimental: bool,
+}
+
+/// An MCP server, as exposed to consumers (TECH_SPEC §8). Additive to the
+/// `list` schema. `requires`, when set, names the role/tool the selection must
+/// include for the server to be offered (`--mcp <id>` is otherwise rejected).
+#[derive(Debug, Clone, Serialize)]
+pub struct McpView {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub website: String,
+    /// `stdio` or `http`.
+    pub transport: &'static str,
+    /// Pre-selected in the wizard / chosen without `--mcp`.
+    pub default: bool,
+    pub requires: Option<McpRequirement>,
+}
+
+/// All MCP servers, sorted by id.
+pub fn mcp_views(registry: &Registry) -> Vec<McpView> {
+    registry
+        .mcp_servers()
+        .iter()
+        .map(|m| McpView {
+            id: m.id.clone(),
+            name: m.name.clone(),
+            description: m.description.clone(),
+            website: m.website.clone(),
+            transport: m.server.transport(),
+            default: m.default,
+            requires: m.requires.clone(),
+        })
+        .collect()
 }
 
 /// All roles in canonical (`Role::ALL`) order.
@@ -149,6 +182,21 @@ mod tests {
         let aiken = views.iter().find(|t| t.id == "aiken").unwrap();
         assert_eq!(aiken.roles, vec!["on-chain"]);
         assert!(!aiken.fullstack);
+    }
+
+    #[test]
+    fn mcp_views_sorted_with_requirement() {
+        let views = mcp_views(&registry());
+        let ids: Vec<&str> = views.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["cardano-debug", "yaci-devkit"]);
+        let yaci = &views[1];
+        assert_eq!(yaci.transport, "http");
+        let req = yaci.requires.as_ref().unwrap();
+        assert_eq!(req.role, Role::Devnet);
+        // `requires.role` serializes as the kebab (the flag/TOML vocabulary).
+        let json = serde_json::to_value(yaci).unwrap();
+        assert_eq!(json["requires"]["role"], "devnet");
+        assert!(views[0].requires.is_none());
     }
 
     #[test]

@@ -51,11 +51,54 @@ pub fn run_add(args: AddArgs, registry: &Registry, format: Format) -> Result<(),
         validate_tool_for_role(id, Role::FormalMethods, registry)?;
         mutations.push(add(Role::FormalMethods, id));
     }
+    for id in &args.mcp {
+        validate_mcp_exists(id, registry)?;
+        mutations.push(Mutation::AddMcp(id.clone()));
+    }
 
     let cwd = current_dir();
     let old = detect_selection(&cwd, registry, format)?;
-    let new = update::apply_all(&old, &mutations);
+    let mut new = update::apply_all(&old, &mutations);
+    // A role change can make a default MCP server newly applicable (e.g. a
+    // devnet-bound one): wire it in, as a fresh scaffold would have.
+    new.mcp
+        .extend(crate::registry::mcp::newly_applicable_defaults(
+            registry,
+            &old.assignments,
+            &new.assignments,
+        ));
+    new.mcp.sort();
+    new.mcp.dedup();
+    // An explicit `--mcp` must apply to the *resulting* stack (so
+    // `add --devnet yaci --mcp yaci-devkit` works in one call) — the same rule
+    // as init's `--mcp`.
+    for id in &args.mcp {
+        let def = registry.mcp(id).expect("validated above");
+        if !def.applies_to(&new.assignments) {
+            let req = def.requires.as_ref().expect("inapplicable ⇒ has requires");
+            return Err(CliError::McpRequiresTool {
+                mcp_id: id.clone(),
+                role: req.role.as_kebab().to_string(),
+                tool: req.tool.clone(),
+            });
+        }
+    }
     finish_update(&cwd, old, new, &args.flags, registry, format)
+}
+
+/// `--mcp <id>` on add/remove must name a registry server (`unknown_mcp`).
+fn validate_mcp_exists(id: &str, registry: &Registry) -> Result<(), CliError> {
+    if registry.mcp(id).is_some() {
+        return Ok(());
+    }
+    Err(CliError::UnknownMcp {
+        mcp_id: id.to_string(),
+        valid_mcp: registry
+            .mcp_servers()
+            .iter()
+            .map(|m| m.id.clone())
+            .collect(),
+    })
 }
 
 /// `cardano-init remove …` — drop roles / infra providers from the project.
@@ -75,6 +118,10 @@ pub fn run_remove(args: RemoveArgs, registry: &Registry, format: Format) -> Resu
     }
     for id in &args.infra {
         mutations.push(Mutation::RemoveInfra(id.clone()));
+    }
+    for id in &args.mcp {
+        validate_mcp_exists(id, registry)?;
+        mutations.push(Mutation::RemoveMcp(id.clone()));
     }
 
     let cwd = current_dir();
@@ -167,7 +214,11 @@ fn finish_update(
         }
     }
 
-    let plan = update::plan_update(&old, &new, registry)?;
+    // `.mcp.json` is merged, not re-rendered: the planner needs its current
+    // content to keep user-added servers (TECH_SPEC §15.1).
+    let existing_mcp =
+        std::fs::read_to_string(cwd.join(crate::scaffold::planner::MCP_CONFIG_PATH)).ok();
+    let plan = update::plan_update(&old, &new, registry, existing_mcp.as_deref())?;
 
     // A create target must not already exist (a foreign/renamed dir would have
     // been flagged unrecognized; this is the last-line guard).
@@ -257,6 +308,7 @@ mod tests {
             network: Network::Preview,
             nix: false,
             spec: true,
+            mcp: vec!["cardano-debug".to_string()],
         }
     }
 

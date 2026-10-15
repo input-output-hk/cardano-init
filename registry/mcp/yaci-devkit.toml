@@ -1,0 +1,32 @@
+# MCP server definition. Servers are offered to the user at setup time and
+# written to the generated project's `.mcp.json` (see TECH_SPEC §3.6).
+[mcp]
+id = "yaci-devkit"
+name = "Yaci DevKit"
+description = """\
+Drive the local Yaci devnet from the agent (needs Yaci DevKit 0.12.0-beta5 or \
+later). Check its status and tip, fund an address from the faucet, list UTxOs, \
+submit a signed transaction, and reset the chain. Served by the devnet itself \
+on its admin port, so it is only available while `just -f devnet/Justfile dev` \
+is running. Local devnet only — it never reaches a public network."""
+website = "https://devkit.yaci.xyz/mcp-integration"
+# Opt-in for now: the devnet template installs the stable DevKit line
+# (0.10.x), which has no MCP endpoint; a default entry would point at a server
+# the project's own devnet does not serve. Flip to true once 0.12 is stable
+# and the template installs it.
+default = false
+# Only offered when this tool fills this role in the selection.
+requires = { role = "devnet", tool = "yaci" }
+agent_notes = """\
+- Tools: `devnet_status`, `devnet_topup`, `devnet_utxos`, `devnet_submit_tx`, \
+`devnet_reset`. They act on the **local** devnet started by \
+`just -f devnet/Justfile dev`; start it first, or the server is unreachable.
+- The MCP endpoint ships with Yaci DevKit **0.12.0-beta5 or later** \
+(`npm install -g @bloxbean/yaci-devkit@beta`); the stable 0.10.x line has no \
+MCP server.
+- Pair it with the Cardano Debug server: submit through Yaci, and when a \
+transaction fails, hand its CBOR to `tx_validate` to see why."""
+
+[server]
+type = "http"
+url = "http://localhost:10000/mcp"

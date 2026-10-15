@@ -128,12 +128,16 @@ pub struct AddArgs {
     #[arg(long, visible_aliases = ["formal", "formalmethods"], value_name = "TOOL_ID")]
     pub formal_methods: Option<String>,
 
+    /// MCP server to add to `.mcp.json` (repeatable; see `list`)
+    #[arg(long, value_name = "MCP_ID")]
+    pub mcp: Vec<String>,
+
     #[command(flatten)]
     pub flags: UpdateFlags,
 }
 
 /// Arguments for `remove`: bare role flags drop that role; `--infra <id>` drops
-/// one provider.
+/// one provider; `--mcp <id>` drops one MCP server.
 #[derive(clap::Args, Debug)]
 pub struct RemoveArgs {
     /// Remove the on-chain component
@@ -160,6 +164,10 @@ pub struct RemoveArgs {
     /// Remove the formal-methods component
     #[arg(long, visible_aliases = ["formal", "formalmethods"])]
     pub formal_methods: bool,
+
+    /// Remove an MCP server from `.mcp.json` by id (repeatable)
+    #[arg(long, value_name = "MCP_ID")]
+    pub mcp: Vec<String>,
 
     #[command(flatten)]
     pub flags: UpdateFlags,
@@ -216,6 +224,15 @@ pub struct InitArgs {
     #[arg(long)]
     pub no_spec: bool,
 
+    /// MCP server to write into the project's `.mcp.json` (repeatable; see
+    /// `list`). Without this flag, the applicable default servers are used
+    #[arg(long, value_name = "MCP_ID", conflicts_with = "no_mcp")]
+    pub mcp: Vec<String>,
+
+    /// Skip `.mcp.json` (no MCP servers for coding agents)
+    #[arg(long)]
+    pub no_mcp: bool,
+
     /// Opt in to experimental tools
     #[arg(long, short = 'e', visible_alias = "experimental")]
     pub allow_experimental: bool,
@@ -240,7 +257,20 @@ impl InitArgs {
             || self.formal_methods.is_some()
             || self.nix
             || self.no_spec
+            || !self.mcp.is_empty()
+            || self.no_mcp
             || self.dry_run
+    }
+
+    /// The `--mcp` / `--no-mcp` flags as a single choice (clap rejects both).
+    fn mcp_choice(&self) -> oneshot::McpChoice {
+        if self.no_mcp {
+            oneshot::McpChoice::None
+        } else if self.mcp.is_empty() {
+            oneshot::McpChoice::Default
+        } else {
+            oneshot::McpChoice::Explicit(self.mcp.clone())
+        }
     }
 }
 
@@ -334,6 +364,28 @@ pub enum CliError {
     FullstackUnsupported {
         tool_id: String,
         valid_tools: Vec<String>,
+    },
+
+    #[error("no MCP server named '{mcp_id}'")]
+    #[diagnostic(
+        code(cardano_init::unknown_mcp),
+        help("available MCP servers: {}", valid_mcp.join(", "))
+    )]
+    UnknownMcp {
+        mcp_id: String,
+        valid_mcp: Vec<String>,
+    },
+
+    #[error("MCP server '{mcp_id}' needs '{tool}' as the {role} tool, which this selection lacks")]
+    #[diagnostic(
+        code(cardano_init::mcp_requires_tool),
+        help("add `--{role} {tool}`, or drop `--mcp {mcp_id}`.")
+    )]
+    McpRequiresTool {
+        mcp_id: String,
+        /// Role kebab (`devnet`), as used by the role flag.
+        role: String,
+        tool: String,
     },
 
     #[error("--fullstack cannot be combined with --on-chain or --off-chain")]
@@ -447,6 +499,8 @@ impl CliError {
             | CliError::ExperimentalNotAllowed { .. }
             | CliError::FullstackUnsupported { .. }
             | CliError::FullstackConflict
+            | CliError::UnknownMcp { .. }
+            | CliError::McpRequiresTool { .. }
             | CliError::IncompatibleTools(_)
             | CliError::InvalidProjectName { .. }
             | CliError::NameRequired
@@ -478,6 +532,8 @@ impl CliError {
             CliError::ExperimentalNotAllowed { .. } => "experimental_not_allowed",
             CliError::FullstackUnsupported { .. } => "fullstack_unsupported",
             CliError::FullstackConflict => "fullstack_conflict",
+            CliError::UnknownMcp { .. } => "unknown_mcp",
+            CliError::McpRequiresTool { .. } => "mcp_requires_tool",
             CliError::IncompatibleTools(_) => "incompatible_tools",
             CliError::InvalidProjectName { .. } => "invalid_project_name",
             CliError::NameRequired => "name_required",
@@ -515,6 +571,12 @@ impl CliError {
             } => json!({ "tool_id": tool_id, "valid_tools": valid_tools }),
             CliError::InvalidProjectName { name, reason } => {
                 json!({ "name": name, "reason": reason })
+            }
+            CliError::UnknownMcp { mcp_id, valid_mcp } => {
+                json!({ "mcp_id": mcp_id, "valid_mcp": valid_mcp })
+            }
+            CliError::McpRequiresTool { mcp_id, role, tool } => {
+                json!({ "mcp_id": mcp_id, "role": role, "tool": tool })
             }
             CliError::ExperimentalNotAllowed { tools, .. } => {
                 json!({ "tools": tools, "remedy": "--allow-experimental" })
@@ -568,6 +630,10 @@ fn build_help_footer() -> String {
         out,
         "  cardano-init -n my-app -p scalus -d yaci            # short flags"
     );
+    let _ = writeln!(
+        out,
+        "  cardano-init -n my-app --on-chain aiken --no-mcp    # skip the agent .mcp.json"
+    );
 
     out
 }
@@ -616,10 +682,17 @@ pub(super) fn format_tool(out: &mut String, tool: &ToolDef, support: &[Link]) {
         let _ = writeln!(out, "    {label:<10} {}: {}", link.name, link.url);
     }
 
-    // Wrap description to ~72 chars with 4-space indent
+    write_wrapped_description(out, &tool.description);
+}
+
+/// Append `text` word-wrapped to ~72 columns under a 4-space indent (the
+/// description block of a `list` entry), ending with a newline.
+fn write_wrapped_description(out: &mut String, text: &str) {
+    use std::fmt::Write;
+
     let _ = write!(out, "    ");
     let mut col = 4;
-    for word in tool.description.split_whitespace() {
+    for word in text.split_whitespace() {
         if col + word.len() + 1 > 76 && col > 4 {
             let _ = write!(out, "\n    ");
             col = 4;
@@ -632,6 +705,25 @@ pub(super) fn format_tool(out: &mut String, tool: &ToolDef, support: &[Link]) {
         col += word.len();
     }
     let _ = writeln!(out);
+}
+
+/// One MCP server block for the human `list` output.
+pub(super) fn format_mcp(out: &mut String, server: &crate::registry::types::McpDef) {
+    use std::fmt::Write;
+
+    let default_tag = if server.default { "  [default]" } else { "" };
+    let _ = writeln!(out, "  {} ({}){}", server.name, server.id, default_tag);
+    let _ = writeln!(out, "    Transport: {}", server.server.transport());
+    if let Some(req) = &server.requires {
+        let _ = writeln!(
+            out,
+            "    Requires:  {} as the {} tool",
+            req.tool,
+            req.role.as_kebab()
+        );
+    }
+    let _ = writeln!(out, "    Website:   {}", server.website);
+    write_wrapped_description(out, &server.description);
 }
 
 // ---------------------------------------------------------------------------
@@ -888,6 +980,7 @@ fn run_init(args: InitArgs, registry: &Registry, format: Format) -> Result<(), C
             args.formal_methods.as_deref(),
             args.nix,
             !args.no_spec,
+            args.mcp_choice(),
             registry,
         )?;
         // Experimental gate (one-shot / JSON): selecting a not-yet-build-green
@@ -1036,6 +1129,21 @@ mod tests {
     }
 
     #[test]
+    fn add_and_remove_accept_mcp() {
+        let Some(Command::Add(add)) =
+            parse(&["add", "--devnet", "yaci", "--mcp", "yaci-devkit"]).command
+        else {
+            panic!("expected add");
+        };
+        assert_eq!(add.mcp, vec!["yaci-devkit"]);
+        let Some(Command::Remove(rm)) = parse(&["remove", "--mcp", "cardano-debug"]).command else {
+            panic!("expected remove");
+        };
+        assert_eq!(rm.mcp, vec!["cardano-debug"]);
+        assert!(!rm.devnet);
+    }
+
+    #[test]
     fn format_tool_lists_community_links() {
         let registry = Registry::load().unwrap();
         for tool in registry.all_tools() {
@@ -1083,6 +1191,76 @@ mod tests {
     }
 
     #[test]
+    fn mcp_flags_parse_and_count_as_oneshot() {
+        let cli = parse(&["--mcp", "cardano-debug", "--mcp", "yaci-devkit"]);
+        assert_eq!(cli.init.mcp, vec!["cardano-debug", "yaci-devkit"]);
+        assert!(cli.init.has_oneshot_flags());
+        assert_eq!(
+            cli.init.mcp_choice(),
+            oneshot::McpChoice::Explicit(vec!["cardano-debug".into(), "yaci-devkit".into()])
+        );
+
+        let cli = parse(&["--no-mcp"]);
+        assert!(cli.init.no_mcp);
+        assert!(cli.init.has_oneshot_flags());
+        assert_eq!(cli.init.mcp_choice(), oneshot::McpChoice::None);
+
+        let cli = parse(&[]);
+        assert_eq!(cli.init.mcp_choice(), oneshot::McpChoice::Default);
+
+        // The two are contradictory; clap rejects the pair.
+        assert!(
+            Cli::try_parse_from(["cardano-init", "--mcp", "cardano-debug", "--no-mcp"]).is_err()
+        );
+    }
+
+    #[test]
+    fn mcp_error_codes_and_contexts() {
+        let registry = Registry::load().unwrap();
+        let err = oneshot::build_selection(
+            "demo",
+            Some("aiken"),
+            None,
+            None,
+            &[],
+            None,
+            None,
+            false,
+            true,
+            oneshot::McpChoice::Explicit(vec!["bogus".into()]),
+            &registry,
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "unknown_mcp");
+        assert_eq!(err.exit_code(), 2);
+        assert_eq!(err.context()["mcp_id"], "bogus");
+
+        let err = oneshot::build_selection(
+            "demo",
+            Some("aiken"),
+            None,
+            None,
+            &[],
+            None,
+            None,
+            false,
+            true,
+            oneshot::McpChoice::Explicit(vec!["yaci-devkit".into()]),
+            &registry,
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "mcp_requires_tool");
+        assert_eq!(err.exit_code(), 2);
+        let ctx = err.context();
+        assert_eq!(ctx["role"], "devnet");
+        assert_eq!(ctx["tool"], "yaci");
+        let help = miette::Diagnostic::help(&err)
+            .map(|h| h.to_string())
+            .unwrap_or_default();
+        assert!(help.contains("--devnet yaci"), "help: {help}");
+    }
+
+    #[test]
     fn unknown_tool_error_code_and_context() {
         let registry = Registry::load().unwrap();
         // `bogus` is not a tool; one-shot validation should surface it with the
@@ -1097,6 +1275,7 @@ mod tests {
             None,
             false,
             true,
+            oneshot::McpChoice::Default,
             &registry,
         )
         .unwrap_err();
@@ -1129,6 +1308,7 @@ mod tests {
             None,
             false,
             true,
+            oneshot::McpChoice::Default,
             &registry,
         )
         .unwrap_err();
@@ -1152,6 +1332,8 @@ mod tests {
             formal_methods: None,
             nix: false,
             no_spec: false,
+            mcp: vec![],
+            no_mcp: false,
             allow_experimental: false,
             dry_run: true,
             ignore_warning: false,
@@ -1173,6 +1355,8 @@ mod tests {
             formal_methods: formal_methods.map(str::to_string),
             nix: false,
             no_spec: false,
+            mcp: vec![],
+            no_mcp: false,
             allow_experimental,
             dry_run: true,
             ignore_warning: false,
@@ -1252,6 +1436,8 @@ mod tests {
             formal_methods: None,
             nix: false,
             no_spec: false,
+            mcp: vec![],
+            no_mcp: false,
             allow_experimental: true,
             dry_run: true,
             ignore_warning,
