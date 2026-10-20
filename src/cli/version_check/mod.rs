@@ -6,7 +6,7 @@
 //!
 //! Informational, never a gate: it never alters generated output, never blocks
 //! beyond a ≤1s deadline, and every failure (offline, timeout, parse) is a
-//! silent no-op. It runs only for human, attended output; `--format json` and
+//! silent no-op. It runs only for human, attended output; `--json` and
 //! non-TTY runs never touch the network.
 //!
 //! [`start`] (called from `run()` for the generating commands) answers from a
@@ -22,7 +22,7 @@ use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-use super::{Format, output};
+use super::output;
 pub use install::InstallMethod;
 
 const LATEST_RELEASE_API: &str =
@@ -66,8 +66,8 @@ static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 /// Look up the latest version, for human + attended runs only (and unless opted
 /// out via `CARDANO_INIT_NO_UPDATE_CHECK` or `CI`): from a fresh cache
 /// synchronously, else via GitHub on a background thread.
-pub fn start(format: Format) {
-    if format != Format::Human
+pub fn start(json: bool) {
+    if json
         || !console::user_attended()
         || std::env::var_os(OPT_OUT_ENV).is_some()
         || std::env::var_os("CI").is_some()
@@ -98,7 +98,7 @@ pub fn start(format: Format) {
 /// Print the pre-generation banner if a newer version is available. Joins the
 /// pending request within the remaining deadline (behind a spinner only when it
 /// isn't already done); a timeout or failure prints nothing.
-pub fn announce(format: Format) {
+pub fn announce(json: bool) {
     let Some(pending) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take() else {
         return;
     };
@@ -107,7 +107,7 @@ pub fn announce(format: Format) {
         Err(mpsc::TryRecvError::Disconnected) => None,
         Err(mpsc::TryRecvError::Empty) => {
             let remaining = DEADLINE.saturating_sub(pending.started.elapsed());
-            super::with_spinner("Checking for updates…", format, || {
+            super::with_spinner("Checking for updates…", json, || {
                 pending.rx.recv_timeout(remaining).ok().flatten()
             })
         }

@@ -18,14 +18,6 @@ use crate::scaffold::ScaffoldError;
 // CLI arguments
 // ---------------------------------------------------------------------------
 
-/// Output format. `json` implies non-interactive: it never prompts; if required
-/// input is missing it errors instead (TECH_SPEC §2.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum Format {
-    Human,
-    Json,
-}
-
 /// Scaffold a new Cardano protocol project.
 #[derive(Parser, Debug)]
 #[command(name = "cardano-init", version, about)]
@@ -33,9 +25,9 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
 
-    /// Output format (global): human-readable text or machine-readable JSON
-    #[arg(long, value_enum, global = true, default_value = "human")]
-    pub format: Format,
+    /// Print machine-readable JSON instead of human-readable text (global)
+    #[arg(long, global = true)]
+    pub json: bool,
 
     #[command(flatten)]
     pub init: InitArgs,
@@ -47,7 +39,7 @@ pub enum Command {
     /// advise how to install any that are missing
     Doctor,
 
-    /// List the available roles and tools (use --format json for agents)
+    /// List the available roles and tools (use --json for agents)
     List(ListArgs),
 
     /// Add or swap a tool/role in the project in the current directory
@@ -61,8 +53,8 @@ pub enum Command {
 /// Arguments for `list`.
 #[derive(clap::Args, Debug, Default)]
 pub struct ListArgs {
-    /// Show a compact matrix of tools by role (human output only; `--format
-    /// json` is unaffected)
+    /// Show a compact matrix of tools by role (human output only; `--json` is
+    /// unaffected)
     #[arg(long)]
     pub table: bool,
 }
@@ -644,11 +636,11 @@ pub fn run() -> i32 {
     let registry = match Registry::load() {
         Ok(r) => r,
         Err(e) => {
-            // Registry load happens before we know the requested format; this
-            // is a packaging bug (embedded data), so default to human output.
+            // Registry load happens before we know whether `--json` was passed;
+            // this is a packaging bug (embedded data), so default to human output.
             let err = CliError::from(e);
             let code = err.exit_code();
-            output::print_error(err, Format::Human);
+            output::print_error(err, false);
             return code;
         }
     };
@@ -658,30 +650,30 @@ pub fn run() -> i32 {
     let cmd = Cli::command().after_help(build_help_footer());
     let matches = cmd.get_matches();
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated");
-    let format = cli.format;
+    let json = cli.json;
 
     if matches!(
         cli.command,
         None | Some(Command::Add(_)) | Some(Command::Remove(_))
     ) {
-        version_check::start(format);
+        version_check::start(json);
     }
 
     let result = match cli.command {
-        Some(Command::Doctor) => run_doctor(&registry, format),
+        Some(Command::Doctor) => run_doctor(&registry, json),
         Some(Command::List(args)) => crate::doctor::catalog::DepCatalog::load()
             .map_err(CliError::from)
-            .map(|catalog| output::print_list(&registry, &catalog, format, args.table)),
-        Some(Command::Add(args)) => update::run_add(args, &registry, format),
-        Some(Command::Remove(args)) => update::run_remove(args, &registry, format),
-        None => run_init(cli.init, &registry, format),
+            .map(|catalog| output::print_list(&registry, &catalog, json, args.table)),
+        Some(Command::Add(args)) => update::run_add(args, &registry, json),
+        Some(Command::Remove(args)) => update::run_remove(args, &registry, json),
+        None => run_init(cli.init, &registry, json),
     };
 
     match result {
         Ok(()) => 0,
         Err(e) => {
             let code = e.exit_code();
-            output::print_error(e, format);
+            output::print_error(e, json);
             code
         }
     }
@@ -766,14 +758,14 @@ fn incompatible_tools_error(inc: crate::registry::compat::Incompatibility) -> Cl
 
 /// Run `work` while showing a transient spinner labelled `message`, clearing it
 /// before returning. The spinner is shown only for **human, attended** (TTY)
-/// output — under `--format json` or when piped it would corrupt the stream, so
+/// output — under `--json` or when piped it would corrupt the stream, so
 /// `work` runs plainly. indicatif draws to stderr, keeping stdout clean either
 /// way. Scoped to genuinely latency-bearing work (system probing / dep
 /// resolution), not near-instant steps (clig.dev: no fake progress).
-fn with_spinner<T>(message: &str, format: Format, work: impl FnOnce() -> T) -> T {
+fn with_spinner<T>(message: &str, json: bool, work: impl FnOnce() -> T) -> T {
     use indicatif::{ProgressBar, ProgressStyle};
 
-    if format != Format::Human || !console::user_attended() {
+    if json || !console::user_attended() {
         return work();
     }
 
@@ -791,7 +783,7 @@ fn with_spinner<T>(message: &str, format: Format, work: impl FnOnce() -> T) -> T
 
 /// Run the standalone `doctor`: scan the current directory for generated
 /// components, then report dependency status + install plans.
-fn run_doctor(registry: &Registry, format: Format) -> Result<(), CliError> {
+fn run_doctor(registry: &Registry, json: bool) -> Result<(), CliError> {
     use crate::doctor::{self, catalog::DepCatalog, probe};
 
     let catalog = DepCatalog::load()?;
@@ -799,7 +791,7 @@ fn run_doctor(registry: &Registry, format: Format) -> Result<(), CliError> {
     let scan = probe::scan_project(&cwd, registry);
 
     let required = required_deps(scan.components.iter().map(|c| c.tool_id.as_str()), registry);
-    let (env, report, tooling) = with_spinner("Probing environment…", format, || {
+    let (env, report, tooling) = with_spinner("Probing environment…", json, || {
         let env = probe::detect_environment(&catalog);
         let report = doctor::resolve_all(&required, &catalog, &env);
         let tooling = if scan.components.is_empty() && scan.unrecognized.is_empty() {
@@ -815,7 +807,7 @@ fn run_doctor(registry: &Registry, format: Format) -> Result<(), CliError> {
         (env, report, tooling)
     });
 
-    output::print_doctor(&scan, &report, &env, &tooling, registry, format);
+    output::print_doctor(&scan, &report, &env, &tooling, registry, json);
     Ok(())
 }
 
@@ -863,10 +855,10 @@ fn role_flag(role: Role) -> &'static str {
 }
 
 /// Run the default init mode (interactive or one-shot).
-fn run_init(args: InitArgs, registry: &Registry, format: Format) -> Result<(), CliError> {
+fn run_init(args: InitArgs, registry: &Registry, json: bool) -> Result<(), CliError> {
     // `--name` is required for one-shot flags, and always in JSON mode (which
     // is non-interactive and must never prompt — TECH_SPEC §2.1).
-    if args.name.is_none() && (args.has_oneshot_flags() || format == Format::Json) {
+    if args.name.is_none() && (args.has_oneshot_flags() || json) {
         return Err(CliError::NameRequired);
     }
 
@@ -906,7 +898,7 @@ fn run_init(args: InitArgs, registry: &Registry, format: Format) -> Result<(), C
     // with --ignore-warning it degrades to a warning and proceeds anyway.
     if let Some(inc) = crate::registry::compat::check(&selection.assignments, registry) {
         if args.ignore_warning {
-            if format == Format::Human {
+            if !json {
                 output::print_incompatibility_warning(&inc);
             }
         } else {
@@ -928,11 +920,11 @@ fn run_init(args: InitArgs, registry: &Registry, format: Format) -> Result<(), C
         });
     }
 
-    version_check::announce(format);
+    version_check::announce(json);
 
     if args.dry_run {
         let plan = crate::scaffold::dry_run(&selection, registry)?;
-        output::print_dry_run(&selection, registry, &plan, format);
+        output::print_dry_run(&selection, registry, &plan, json);
         return Ok(());
     }
 
@@ -940,7 +932,7 @@ fn run_init(args: InitArgs, registry: &Registry, format: Format) -> Result<(), C
     // at its confirm step, and the one-shot path goes straight to the success
     // panel (same rows + a CREATED badge), so a separate preview would just
     // duplicate it.
-    with_spinner("Scaffolding project…", format, || {
+    with_spinner("Scaffolding project…", json, || {
         crate::scaffold::scaffold(&selection, registry, &root)
     })?;
 
@@ -950,10 +942,10 @@ fn run_init(args: InitArgs, registry: &Registry, format: Format) -> Result<(), C
     let git = git::init_project_repo(&root);
 
     // Check-and-advise: resolve the deps this selection needs (TECH_SPEC §9).
-    let report = with_spinner("Checking dependencies…", format, || {
+    let report = with_spinner("Checking dependencies…", json, || {
         resolve_selection_deps(&selection, registry)
     })?;
-    output::print_success(&selection, registry, &report, git, format);
+    output::print_success(&selection, registry, &report, git, json);
 
     Ok(())
 }
@@ -1156,7 +1148,7 @@ mod tests {
             dry_run: true,
             ignore_warning: false,
         };
-        let err = run_init(args, &registry, Format::Json).unwrap_err();
+        let err = run_init(args, &registry, true).unwrap_err();
         assert_eq!(err.code(), "fullstack_conflict");
         assert_eq!(err.exit_code(), 2);
     }
@@ -1184,7 +1176,7 @@ mod tests {
         // One-shot selecting blaster (experimental) without --allow-experimental
         // is a usage error before any generation happens.
         let registry = Registry::load().unwrap();
-        let err = run_init(init_args(Some("blaster"), false), &registry, Format::Json).unwrap_err();
+        let err = run_init(init_args(Some("blaster"), false), &registry, true).unwrap_err();
         assert_eq!(err.code(), "experimental_not_allowed");
         assert_eq!(err.exit_code(), 2);
         let ctx = err.context();
@@ -1227,7 +1219,7 @@ mod tests {
         // With --allow-experimental the same selection passes the gate (dry-run
         // → Ok, no disk write).
         let registry = Registry::load().unwrap();
-        let res = run_init(init_args(Some("blaster"), true), &registry, Format::Json);
+        let res = run_init(init_args(Some("blaster"), true), &registry, true);
         assert!(res.is_ok(), "expected Ok, got {res:?}");
     }
 
@@ -1235,7 +1227,7 @@ mod tests {
     fn non_experimental_selection_needs_no_flag() {
         // A selection with no experimental tool is unaffected by the gate.
         let registry = Registry::load().unwrap();
-        let res = run_init(init_args(None, false), &registry, Format::Json);
+        let res = run_init(init_args(None, false), &registry, true);
         assert!(res.is_ok(), "expected Ok, got {res:?}");
     }
 
@@ -1263,7 +1255,7 @@ mod tests {
         // tx3 (TRP, self-hosted devnet) + yaci (Blockfrost) don't share a seam,
         // so generation stops before any disk write.
         let registry = Registry::load().unwrap();
-        let err = run_init(tx3_devnet_args("yaci", false), &registry, Format::Json).unwrap_err();
+        let err = run_init(tx3_devnet_args("yaci", false), &registry, true).unwrap_err();
         assert_eq!(err.code(), "incompatible_tools");
         assert_eq!(err.exit_code(), 2);
         let ctx = err.context();
@@ -1281,7 +1273,7 @@ mod tests {
     fn incompatible_offchain_devnet_allowed_with_ignore_warning() {
         // --ignore-warning downgrades the stop to a warning and proceeds.
         let registry = Registry::load().unwrap();
-        let res = run_init(tx3_devnet_args("yaci", true), &registry, Format::Json);
+        let res = run_init(tx3_devnet_args("yaci", true), &registry, true);
         assert!(res.is_ok(), "expected Ok, got {res:?}");
     }
 

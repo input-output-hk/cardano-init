@@ -8,7 +8,7 @@
 
 ## 1. Conventions & versioning
 
-- **Schema version.** All machine-readable (`--format json`) output carries a single integer `schema_version`, starting at **1**, global across every command. Additive fields do **not** bump it; removing/renaming/retyping a field or changing semantics does. Agents should tolerate unknown additive fields.
+- **Schema version.** All machine-readable (`--json`) output carries a single integer `schema_version`, starting at **1**, global across every command. Additive fields do **not** bump it; removing/renaming/retyping a field or changing semantics does. Agents should tolerate unknown additive fields.
 - **Embedded data is versioned with the binary.** The registry (tools + `registry/deps.toml`), templates, and the code-side installer table are compiled in; there is no on-disk schema-version negotiation. A given binary is the single source of truth for what it generates (PRD A-3).
 - **Determinism (§11) is a hard contract**, relied on by snapshot tests and agents.
 
@@ -21,14 +21,14 @@
 ```
 cardano-init [INIT_FLAGS]            # default: one-shot if --name given, else interactive
 cardano-init doctor                  # check this project's dependencies + advise installs (§9)
-cardano-init list [--table] [--format <fmt>]   # capability discovery: roles + tools (§8)
+cardano-init list [--table] [--json]   # capability discovery: roles + tools (§8)
 cardano-init add [ROLE_FLAGS]        # add/swap tools in the project in the cwd (see proposal)
 cardano-init remove [ROLE_FLAGS]     # remove a role / infra provider from the cwd project
 ```
 
 The `add`/`remove` commands operate on the project in the current directory: they reconstruct its `Selection` by **detection** (no metadata file; §9.6), apply the change at the component-directory level, and re-wire the shared top-level files. They accept `--dry-run` (preview only), `--force` (update despite a dirty git tree), `--ignore-warning`, and `--allow-experimental`. `add` takes the same role flags as init (`--on-chain`, `--off-chain`, `--fullstack`, `--infra` (repeatable), `--devnet`, `--formal-methods`); `remove` takes bare role flags plus `--infra <id>`. The full algorithm and edge-case matrix are in §15.
 
-`--format human|json` is a global flag; default `human`. `json` **implies non-interactive**: it never prompts; if required input is missing it errors instead.
+`--json` is a global flag; without it, output is human-readable. `--json` **implies non-interactive**: it never prompts; if required input is missing it errors instead.
 
 ### 2.2 Init flags (one-shot)
 
@@ -73,7 +73,7 @@ The fine-grained "what" is the JSON `error.code` (§2.5); exit code is only the 
 
 ### 2.4 JSON envelope
 
-Every `--format json` response is one of:
+Every `--json` response is one of:
 
 ```json
 { "schema_version": 1, "ok": true,  "data":  { /* command payload */ } }
@@ -485,7 +485,7 @@ A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) 
 
 ## 8. `list` subcommand schema
 
-`cardano-init list` (human default) / `cardano-init list --format json`:
+`cardano-init list` (human default) / `cardano-init list --json`:
 
 ```json
 { "schema_version": 1, "ok": true, "data": {
@@ -506,7 +506,7 @@ A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) 
 }}
 ```
 
-`list` renders from a shared model (`registry::view`: `role_views()` / `tool_views()`). The human output has two forms: the default (a Roles table plus a per-tool block), and a compact **`--table`** view — a full-grid matrix with one column per role (in `Role::ALL` order), each role's tools stacked and experimental ones tagged `🧪`. `--table` is a human-presentation flag only; it has no effect under `--format json` (the JSON already carries the same data). `roles[].multiple` is `true` only for infrastructure (`Role::multiple`). `tools[].fullstack` is `true` when the tool declares a `[fullstack]` template (i.e. `--fullstack <tool>` is valid); it is an additive field (no `schema_version` bump). `fullstack` is a capability, **not** a role — it never appears in `tools[].roles` or in the `roles` array. `tools[].experimental` is `true` for tools that are unstable and/or not yet build-green (§3.2.1); selecting one needs `--allow-experimental` — also additive. `tools[].community` lists the tool's official help channels (Discord, GitHub Discussions, …) as `{ name, url }`, from the optional `community` field in the tool's TOML; empty when none (additive). The default human `list` prints them as a `Community:` line in each tool block; the standalone `doctor` shows these for each detected component under a "Get help" heading. `tools[].support` lists the tool's supporting tools (editor extensions, language servers, playgrounds): the `support` links of every dep in its `system_deps` (§9), deduplicated by URL; empty when none (additive). The human `list` prints them as a `Tooling:` line.
+`list` renders from a shared model (`registry::view`: `role_views()` / `tool_views()`). The human output has two forms: the default (a Roles table plus a per-tool block), and a compact **`--table`** view — a full-grid matrix with one column per role (in `Role::ALL` order), each role's tools stacked and experimental ones tagged `🧪`. `--table` is a human-presentation flag only; it has no effect under `--json` (the JSON already carries the same data). `roles[].multiple` is `true` only for infrastructure (`Role::multiple`). `tools[].fullstack` is `true` when the tool declares a `[fullstack]` template (i.e. `--fullstack <tool>` is valid); it is an additive field (no `schema_version` bump). `fullstack` is a capability, **not** a role — it never appears in `tools[].roles` or in the `roles` array. `tools[].experimental` is `true` for tools that are unstable and/or not yet build-green (§3.2.1); selecting one needs `--allow-experimental` — also additive. `tools[].community` lists the tool's official help channels (Discord, GitHub Discussions, …) as `{ name, url }`, from the optional `community` field in the tool's TOML; empty when none (additive). The default human `list` prints them as a `Community:` line in each tool block; the standalone `doctor` shows these for each detected component under a "Get help" heading. `tools[].support` lists the tool's supporting tools (editor extensions, language servers, playgrounds): the `support` links of every dep in its `system_deps` (§9), deduplicated by URL; empty when none (additive). The human `list` prints them as a `Tooling:` line.
 
 ---
 
@@ -710,7 +710,7 @@ Goal: surface "a newer `cardano-init` is available" **before generation**, so th
 - **Scope.** The generating commands: `init` (interactive + one-shot, incl. `--dry-run`) and `add`/`remove`.
 - **Rule.** Each run compares this binary's version (`CARGO_PKG_VERSION`) with the latest GitHub release; a newer release → notice.
 - **Cached once/day.** `update-check` (JSON `{ checked_at, latest }`) under the OS cache dir: `~/Library/Caches/cardano-init/` (macOS), `$XDG_CACHE_HOME|~/.cache/cardano-init/` (Linux), `%LOCALAPPDATA%\cardano-init\` (Windows). Checked within 24h → cached result, **zero network, zero latency**; also keeps us far below GitHub's unauthenticated rate limit (60 req/hour/IP).
-- **Gating.** Runs only when stdout is a **TTY and the format is `human`**. Disabled entirely when `CARDANO_INIT_NO_UPDATE_CHECK` or `CI` is set. `--format json` and non-TTY runs never touch the network and report no update info.
+- **Gating.** Runs only when stdout is a **TTY and `--json` is not set**. Disabled entirely when `CARDANO_INIT_NO_UPDATE_CHECK` or `CI` is set. `--json` and non-TTY runs never touch the network and report no update info.
 - **Surfaced before the write phase; latency hidden where possible:**
   - **Interactive:** the check fires on a background thread at process start and completes during tool selection; the notice (if any) shows before generation with **no added latency**.
   - **Human one-shot:** the check is joined with a **≤1s deadline** (measured from process start) behind a `Checking for updates…` spinner before writing; on hit → notice then generate; on timeout/offline → proceed (worst case **+1s, once/day**).
@@ -849,7 +849,7 @@ Any field not cleanly recoverable is marked `low_confidence`.
 Reconstruction is **never trusted silently**; this is what neutralizes detection's one real risk (recovery logic coupled to generated template text). Before any mutation:
 
 - **Interactive** — the reconstructed selection and any `unrecognized`/`low_confidence` items are shown, and the user confirms or corrects. On a **clean** git tree the applied change is fully reviewable/revertible via `git diff`, so it is written straight away (no confirm prompt — good agent DevX); the prompt appears only when `--force` is overriding a **dirty** tree, where the change cannot be cleanly separated from existing edits.
-- **Non-interactive / `--format json`** — no prompts. The reconstruction must be fully recognized: **any `unrecognized` dir is a hard error** (`project_unrecognized`, exit 2). The tool never guesses in automation.
+- **Non-interactive / `--json`** — no prompts. The reconstruction must be fully recognized: **any `unrecognized` dir is a hard error** (`project_unrecognized`, exit 2). The tool never guesses in automation.
 
 ### 15.4 Validate the mutated selection
 
@@ -890,7 +890,7 @@ Pure logic over `S_old`, `S_new`, and the registry (`scaffold::update`, beside t
 - **Git safety net (required).** The update refuses to run on a **dirty** working tree so every create/overwrite/delete is reviewable and revertible via `git diff` / `git restore` (`worktree_dirty`, exit 1). Overridable with `--force`. A **non-git** project is treated like a dirty tree: refuse unless `--force`. New projects are git-initialized with an initial commit at scaffold time so the net works immediately.
 - **No merge engine.** Managed/shared files are overwritten outright; the user reconciles any hand-edits through git. There is no three-way merge and no `.new` shadow files.
 - **Write ordering.** `apply_update` (1) `rm -rf`s the `Remove`/`Replace` dirs first — so a `Replace` clears the old tool's files before the new ones are written into the same path; then (2) writes the created/replaced/re-rendered component files; then (3) overwrites only the shared files whose bytes changed. There is nothing else to persist (no manifest). **Kept components are never in the plan**, so user work in an unchanged slot is untouched wherever a crash lands; a crash mid-rewrite of a *changed* slot is covered by the git safety net, and re-running is idempotent.
-- **`--dry-run`.** Prints the change set (CREATE / REMOVE / REPLACE / RE-RENDER / shared-file overwrites) and writes nothing — the auditable plan for humans and agents. `--format json` emits the same as structured data. Each change row names the tool that moved (e.g. `replace Aiken → Scalus`, `add Kupo`, infra `+Dolos`/`-Kupo`).
+- **`--dry-run`.** Prints the change set (CREATE / REMOVE / REPLACE / RE-RENDER / shared-file overwrites) and writes nothing — the auditable plan for humans and agents. `--json` emits the same as structured data. Each change row names the tool that moved (e.g. `replace Aiken → Scalus`, `add Kupo`, infra `+Dolos`/`-Kupo`).
 
 ### 15.7 CLI surface
 
@@ -902,7 +902,7 @@ cardano-init remove --infra kupo       # drop one infra provider
 ```
 
 - `add`/`remove` reuse `oneshot`'s per-role flag parsing and validation verbatim. `add` takes the same role flags as init (`--on-chain`, `--off-chain`, `--fullstack`, `--infra` (repeatable), `--devnet`, `--formal-methods`); `remove` takes bare role flags plus `--infra <id>`.
-- Global flags honored: `--dry-run`, `--ignore-warning`, `--allow-experimental`, `--format`, plus `--force`.
+- Global flags honored: `--dry-run`, `--ignore-warning`, `--allow-experimental`, `--json`, plus `--force`.
 - Deliberately **not** a `swap` verb: an `add --off-chain X` onto an occupied off-chain slot *is* the swap (REPLACE), reported as such in the diff so it is never silent.
 - An interactive `edit` (re-open the selector seeded from the detected stack) was considered and **dropped** as low-value — `add`/`remove` (with `--dry-run`) already cover editing the stack.
 
