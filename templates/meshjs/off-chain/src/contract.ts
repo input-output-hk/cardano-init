@@ -10,9 +10,6 @@ import {
 } from "@meshsdk/common";
 import {
   Asset,
-  DEFAULT_V1_COST_MODEL_LIST,
-  DEFAULT_V2_COST_MODEL_LIST,
-  DEFAULT_V3_COST_MODEL_LIST,
   deserializeDatum,
   IEvaluator,
   IFetcher,
@@ -180,24 +177,17 @@ export class GiftCardContract {
   }
 
   /** A fresh transaction builder. One builder builds one transaction. */
-  private newTxBuilder(): MeshTxBuilder {
+  private async newTxBuilder(): Promise<MeshTxBuilder> {
+    // The script-integrity hash must use this chain's current cost models.
+    // Fetch explicitly so a provider failure cannot silently fall back to
+    // SDK constants that may disagree with the active protocol parameters.
+    const costModels = await this.fetcher.fetchCostModels();
     const builder = new MeshTxBuilder({
       fetcher: this.fetcher,
       submitter: this.submitter,
       evaluator: this.evaluator,
     });
-    // Pin the Plutus cost models the script-data hash is computed from. These
-    // are the current protocol-era constants (identical to what every Cardano
-    // network uses), so tx building is deterministic and doesn't depend on the
-    // provider implementing `fetchCostModels` — MeshJS's YaciProvider does not,
-    // and without this the builder logs an alarming-looking (but harmless)
-    // fallback. To instead use a provider's network-fetched cost models, drop
-    // this call (BlockfrostProvider supports it; YaciProvider does not yet).
-    builder.setNetwork([
-      DEFAULT_V1_COST_MODEL_LIST,
-      DEFAULT_V2_COST_MODEL_LIST,
-      DEFAULT_V3_COST_MODEL_LIST,
-    ]);
+    builder.setCostModels(costModels);
     return builder;
   }
 
@@ -285,7 +275,8 @@ export class GiftCardContract {
       firstUtxo.input,
     );
 
-    const tx = await this.newTxBuilder()
+    const builder = await this.newTxBuilder();
+    const tx = await builder
       .txIn(
         firstUtxo.input.txHash,
         firstUtxo.input.outputIndex,
@@ -334,7 +325,8 @@ export class GiftCardContract {
     const policyId = resolveScriptHash(giftCardScript, LANGUAGE_VERSION);
     const redeemScript = this.redeemCbor(tokenNameHex, policyId);
 
-    const tx = await this.newTxBuilder()
+    const builder = await this.newTxBuilder();
+    const tx = await builder
       .spendingPlutusScript(LANGUAGE_VERSION)
       .txIn(
         giftCardUtxo.input.txHash,
