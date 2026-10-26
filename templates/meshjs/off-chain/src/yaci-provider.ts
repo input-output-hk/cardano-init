@@ -14,17 +14,17 @@ const tags = {
 } as const;
 
 /**
- * Mesh's YaciProvider requires HTTP 202 for evaluation, but Yaci Store 2.0.7
+ * Mesh's YaciProvider requires HTTP 202 for evaluation/submission, but Yaci Store 2.0.7
  * returns HTTP 200 to match Blockfrost. Keep both versions working until Mesh
  * accepts both statuses upstream. Also supplies the chain's cost models, which
  * Mesh's YaciProvider currently leaves unimplemented.
  */
 export class YaciProvider extends MeshYaciProvider {
-  private readonly evaluationUrl: string;
+  private readonly apiUrl: string;
 
   constructor(url: string, adminUrl?: string) {
     super(url, adminUrl);
-    this.evaluationUrl = `${url.replace(/\/+$/, "")}/utils/txs/evaluate`;
+    this.apiUrl = url.replace(/\/+$/, "");
   }
 
   override async fetchCostModels(epoch?: number): Promise<number[][]> {
@@ -44,18 +44,36 @@ export class YaciProvider extends MeshYaciProvider {
     });
   }
 
-  override async evaluateTx(txHex: string): Promise<Evaluation> {
-    const response = await fetch(this.evaluationUrl, {
+  private async postTx(
+    endpoint: string,
+    txHex: string,
+    contentType: string,
+  ): Promise<string> {
+    const response = await fetch(`${this.apiUrl}/${endpoint}`, {
       method: "POST",
-      headers: { "Content-Type": "application/cbor" },
+      headers: { "Content-Type": contentType },
       body: txHex,
       signal: AbortSignal.timeout(30_000),
     });
     const body = await response.text();
     if (response.status !== 200 && response.status !== 202) {
-      throw new Error(`Yaci evaluation failed (HTTP ${response.status}): ${body}`);
+      throw new Error(`Yaci ${endpoint} failed (HTTP ${response.status}): ${body}`);
     }
+    return body;
+  }
 
+  override async submitTx(txHex: string): Promise<string> {
+    const body = await this.postTx("tx/submit", txHex, "text/plain");
+    // Store returns a JSON string; older installations may return plain text.
+    const hash: unknown = body.trim().startsWith('"') ? JSON.parse(body) : body.trim();
+    if (typeof hash !== "string" || !/^[0-9a-fA-F]{64}$/.test(hash)) {
+      throw new Error(`Yaci returned an invalid transaction hash: ${body}`);
+    }
+    return hash;
+  }
+
+  override async evaluateTx(txHex: string): Promise<Evaluation> {
+    const body = await this.postTx("utils/txs/evaluate", txHex, "application/cbor");
     const data = JSON.parse(body);
     const result = data?.result?.EvaluationResult;
     if (!result || typeof result !== "object" || Array.isArray(result)) {

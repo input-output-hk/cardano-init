@@ -1206,17 +1206,17 @@ const tags = {
 } as const;
 
 /**
- * Mesh's YaciProvider requires HTTP 202 for evaluation, but Yaci Store 2.0.7
+ * Mesh's YaciProvider requires HTTP 202 for evaluation/submission, but Yaci Store 2.0.7
  * returns HTTP 200 to match Blockfrost. Keep both versions working until Mesh
  * accepts both statuses upstream. Also supplies the chain's cost models, which
  * Mesh's YaciProvider currently leaves unimplemented.
  */
 export class YaciProvider extends MeshYaciProvider {
-  private readonly evaluationUrl: string;
+  private readonly apiUrl: string;
 
   constructor(url: string, adminUrl?: string) {
     super(url, adminUrl);
-    this.evaluationUrl = `${url.replace(/\/+$/, "")}/utils/txs/evaluate`;
+    this.apiUrl = url.replace(/\/+$/, "");
   }
 
   override async fetchCostModels(epoch?: number): Promise<number[][]> {
@@ -1236,18 +1236,36 @@ export class YaciProvider extends MeshYaciProvider {
     });
   }
 
-  override async evaluateTx(txHex: string): Promise<Evaluation> {
-    const response = await fetch(this.evaluationUrl, {
+  private async postTx(
+    endpoint: string,
+    txHex: string,
+    contentType: string,
+  ): Promise<string> {
+    const response = await fetch(`${this.apiUrl}/${endpoint}`, {
       method: "POST",
-      headers: { "Content-Type": "application/cbor" },
+      headers: { "Content-Type": contentType },
       body: txHex,
       signal: AbortSignal.timeout(30_000),
     });
     const body = await response.text();
     if (response.status !== 200 && response.status !== 202) {
-      throw new Error(`Yaci evaluation failed (HTTP ${response.status}): ${body}`);
+      throw new Error(`Yaci ${endpoint} failed (HTTP ${response.status}): ${body}`);
     }
+    return body;
+  }
 
+  override async submitTx(txHex: string): Promise<string> {
+    const body = await this.postTx("tx/submit", txHex, "text/plain");
+    // Store returns a JSON string; older installations may return plain text.
+    const hash: unknown = body.trim().startsWith('"') ? JSON.parse(body) : body.trim();
+    if (typeof hash !== "string" || !/^[0-9a-fA-F]{64}$/.test(hash)) {
+      throw new Error(`Yaci returned an invalid transaction hash: ${body}`);
+    }
+    return hash;
+  }
+
+  override async evaluateTx(txHex: string): Promise<Evaluation> {
+    const body = await this.postTx("utils/txs/evaluate", txHex, "application/cbor");
     const data = JSON.parse(body);
     const result = data?.result?.EvaluationResult;
     if (!result || typeof result !== "object" || Array.isArray(result)) {
@@ -1378,12 +1396,42 @@ describe("Yaci provider compatibility", () => {
     });
   });
 
+  it.each([200, 202])("accepts a submitted transaction hash with HTTP %i", async (code) => {
+    status = code;
+    body = "65d9e40ff443d23d6d5d23c49ad8a041a27f6cc3c74bfbc5cb7f79923942d694";
+    const provider = createProvider({ kind: "yaci", url: baseUrl });
+    await expect(provider.submitTx("84a700")).resolves.toBe(body);
+    expect(request).toEqual({
+      method: "POST",
+      url: "/api/v1/tx/submit",
+      type: "text/plain",
+      body: "84a700",
+    });
+  });
+
+  it("rejects a successful response without a valid transaction hash", async () => {
+    body = { error: "submission failed" };
+    const provider = createProvider({ kind: "yaci", url: baseUrl });
+    await expect(provider.submitTx("84a700")).rejects.toThrow(
+      "Yaci returned an invalid transaction hash",
+    );
+  });
+
+  it("preserves submission failures", async () => {
+    status = 400;
+    body = { error: "transaction rejected" };
+    const provider = createProvider({ kind: "yaci", url: baseUrl });
+    await expect(provider.submitTx("84a700")).rejects.toThrow(
+      'Yaci tx/submit failed (HTTP 400): {"error":"transaction rejected"}',
+    );
+  });
+
   it.each([400, 500])("preserves evaluation errors with HTTP %i", async (code) => {
     status = code;
     body = { error: "script validation failed" };
     const provider = createProvider({ kind: "yaci", url: baseUrl });
     await expect(provider.evaluateTx("84a700")).rejects.toThrow(
-      `Yaci evaluation failed (HTTP ${code}): {"error":"script validation failed"}`,
+      `Yaci utils/txs/evaluate failed (HTTP ${code}): {"error":"script validation failed"}`,
     );
   });
 
