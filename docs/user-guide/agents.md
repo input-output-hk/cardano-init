@@ -2,8 +2,8 @@
 
 `cardano-init` can be run completely by an LLM agent.
 
-- **JSON output.** Every command accepts `--format json` and prints one JSON object. Errors carry a stable `code` and a `context` that says how to fix them. `cardano-init list --format json` returns every role and tool.
-- **No prompts.** One-shot mode (`--name …`) never prompts, so an agent can create a project in one call. `--format json` also turns prompts off: if required input is missing, the command returns an error.
+- **JSON output.** Every command accepts `--json` and prints one JSON object. Errors carry a stable `code` and a `context` that says how to fix them. `cardano-init list --json` returns every role and tool.
+- **No prompts.** One-shot mode (`--name …`) never prompts, so an agent can create a project in one call. `--json` also turns prompts off: if required input is missing, the command returns an error.
 
 ## Generated `AGENTS.md`
 
@@ -21,13 +21,13 @@ cardano-dev-skills is a Cardano Foundation skill set for agents. It teaches how 
 
 ```bash
 # 1. Discover what's available
-cardano-init list --format json
+cardano-init list --json
 
 # 2. Scaffold in one call
-cardano-init --format json --name my-protocol --on-chain aiken --off-chain meshjs --devnet yaci
+cardano-init --json --name my-protocol --on-chain aiken --off-chain meshjs --devnet yaci
 
 # 3. Check toolchains from inside the project
-cd my-protocol && cardano-init doctor --format json
+cd my-protocol && cardano-init doctor --json
 
 # 4. Build and test
 just test
@@ -35,7 +35,7 @@ just test
 
 ## JSON envelope
 
-A `--format json` response has one of two shapes:
+A `--json` response has one of two shapes:
 
 ```json
 { "schema_version": 1, "ok": true,  "data":  { } }

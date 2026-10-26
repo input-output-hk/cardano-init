@@ -9,7 +9,7 @@ cardano-init remove [ROLE FLAGS]  # remove a role or infrastructure provider
 cardano-init help [COMMAND]       # print help
 ```
 
-Every command accepts the global `--format <human|json>` flag (default `human`). See [For coding agents](agents.md) for the JSON output.
+Every command accepts the global `--json` flag (default: human-readable output). See [For coding agents](agents.md) for the JSON output.
 
 ## Create a project
 
@@ -36,7 +36,7 @@ With `--name`, the command runs in **one-shot** mode and never prompts. Without 
 | `--allow-experimental` | `-e`, `--experimental` | Opt in to [experimental tools](how-it-works.md#experimental-tools). |
 | `--dry-run` | `--dryrun` | Show what would be generated without writing to disk. |
 | `--ignore-warning` | `--ignore-warnings` | Scaffold a combination the [compatibility check](how-it-works.md#compatibility-checks) flags as incompatible. |
-| `--format <FORMAT>` | | `human` (default) or `json`. |
+| `--json` | | Print machine-readable JSON instead of human-readable text. |
 | `--help` / `--version` | `-h` / `-V` | Print help / version. |
 
 Short flags and aliases behave exactly like the long flag. Errors and JSON output always use the long name. If the project directory already exists and is not empty, the command stops with `dir_exists`.
@@ -48,7 +48,7 @@ List the available roles and tools, including each tool's language, status, docu
 ```bash
 cardano-init list                 # detailed, grouped by role
 cardano-init list --table         # compact matrix of tools by role
-cardano-init list --format json   # machine-readable catalog
+cardano-init list --json   # machine-readable catalog
 ```
 
 | Flag | Description |
@@ -62,7 +62,7 @@ Run `doctor` inside a generated project. It finds the project's components, chec
 ```bash
 cd my-protocol
 cardano-init doctor
-cardano-init doctor --format json
+cardano-init doctor --json
 ```
 
 ## `add`
@@ -126,4 +126,4 @@ Plus the [shared update flags](#shared-update-flags).
 | `1` | Runtime error: the target directory exists, a dirty git tree, I/O or rendering failures. |
 | `2` | Usage or validation error: unknown tool, tool in the wrong role, invalid project name, missing `--name`, incompatible tools, … |
 
-For the exact error, use `--format json` and read `error.code`. See [Error codes](agents.md#error-codes).
+For the exact error, use `--json` and read `error.code`. See [Error codes](agents.md#error-codes).

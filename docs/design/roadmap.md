@@ -39,7 +39,7 @@ Deliverables below are tracked as checklists (`[ ]` = not yet done).
 
 **Feature surface:**
 - [x] Interactive CLI and one-shot CLI (polish; deterministic output).
-- [x] `list` subcommand + global `--format human|json` presenter + machine-readable error codes (agent surface, PRD FR-13/14/15).
+- [x] `list` subcommand + global `--json` presenter + machine-readable error codes (agent surface, PRD FR-13/14/15).
 - [x] **`cardano-init doctor`** standalone command + check-and-advise during scaffolding (deps/installer graph, `registry/deps.toml`). *(Pulled earlier than the docs' original deferral.)*
 - [x] `--dry-run`, optional Nix flake.
 - [x] Determinism canonicalization (planner) + snapshot tests + contract-compliance tests per template.

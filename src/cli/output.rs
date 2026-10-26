@@ -1,8 +1,8 @@
 use serde_json::json;
 
+use super::CliError;
 use super::theme;
 use super::version_check::{self, UpdateNotice};
-use super::{CliError, Format};
 use crate::doctor::Report;
 use crate::doctor::catalog::DepCatalog;
 use crate::doctor::installers::Installer;
@@ -135,34 +135,29 @@ fn print_rule(label: &str) {
     );
 }
 
-/// Render any error in the requested format (always to stderr).
+/// Render any error (always to stderr).
 ///
-/// In `json`, an error envelope `{ ok: false, error: { code, message, context } }`.
-/// In `human`, a red ` ERR (<code>) ` pill, the explanation, and — when the
+/// With `--json`, an error envelope `{ ok: false, error: { code, message, context } }`.
+/// Otherwise, a red ` ERR (<code>) ` pill, the explanation, and — when the
 /// error carries one — a framed `help` panel with the remedy. An interactive
 /// abort (exit code 0) is a user choice, not an error, so it stays silent.
-pub fn print_error(err: CliError, format: Format) {
-    match format {
-        Format::Json => {
-            let envelope = json!({
-                "schema_version": SCHEMA_VERSION,
-                "ok": false,
-                "error": {
-                    "code": err.code(),
-                    "message": err.to_string(),
-                    "context": err.context(),
-                },
-            });
-            eprintln!(
-                "{}",
-                serde_json::to_string(&envelope).expect("envelope serializes")
-            );
-        }
-        Format::Human => {
-            if err.exit_code() != 0 {
-                print_human_error(&err);
-            }
-        }
+pub fn print_error(err: CliError, json: bool) {
+    if json {
+        let envelope = json!({
+            "schema_version": SCHEMA_VERSION,
+            "ok": false,
+            "error": {
+                "code": err.code(),
+                "message": err.to_string(),
+                "context": err.context(),
+            },
+        });
+        eprintln!(
+            "{}",
+            serde_json::to_string(&envelope).expect("envelope serializes")
+        );
+    } else if err.exit_code() != 0 {
+        print_human_error(&err);
     }
 }
 
@@ -547,8 +542,8 @@ fn components_json(selection: &Selection, registry: &Registry) -> serde_json::Va
 
 /// Print the dry-run output: summary + nested file tree (human), or the planned
 /// file list (json).
-pub fn print_dry_run(selection: &Selection, registry: &Registry, plan: &FilePlan, format: Format) {
-    if format == Format::Json {
+pub fn print_dry_run(selection: &Selection, registry: &Registry, plan: &FilePlan, json: bool) {
+    if json {
         let files: Vec<&str> = plan
             .entries
             .iter()
@@ -661,9 +656,9 @@ pub fn print_success(
     registry: &Registry,
     report: &Report,
     git: crate::cli::git::InitOutcome,
-    format: Format,
+    json: bool,
 ) {
-    if format == Format::Json {
+    if json {
         emit_json_ok(json!({
             "project": selection.project_name,
             "network": selection.network.to_string(),
@@ -860,9 +855,9 @@ pub fn print_update_plan(
     new: &Selection,
     plan: &UpdatePlan,
     registry: &Registry,
-    format: Format,
+    json: bool,
 ) {
-    if format == Format::Json {
+    if json {
         emit_json_ok(json!({
             "project": new.project_name,
             "applied": false,
@@ -894,9 +889,9 @@ pub fn print_update_success(
     registry: &Registry,
     plan: &UpdatePlan,
     report: &Report,
-    format: Format,
+    json: bool,
 ) {
-    if format == Format::Json {
+    if json {
         emit_json_ok(json!({
             "project": selection.project_name,
             "applied": true,
@@ -1039,12 +1034,12 @@ pub fn print_doctor(
     env: &Environment,
     tooling: &[String],
     registry: &Registry,
-    format: Format,
+    json: bool,
 ) {
     let installers = detected_installers(env);
     let project_detected = !(scan.components.is_empty() && scan.unrecognized.is_empty());
 
-    if format == Format::Json {
+    if json {
         emit_json_ok(json!({
             "all_required_present": report.all_required_present,
             "environment": { "os": env.os, "installers": installers, "tooling": tooling },
@@ -1212,7 +1207,7 @@ fn print_support_links(report: &Report) {
 }
 
 /// Print the registry (roles + tools) for `cardano-init list`: human-readable
-/// by default, or the TECH_SPEC §8 JSON payload with `--format json`.
+/// by default, or the TECH_SPEC §8 JSON payload with `--json`.
 /// Per-role columns for the `list --table` matrix: one entry per role in
 /// `Role::ALL` order, each carrying the role's tool names (name-sorted, with
 /// experimental tools tagged). Pure so it can be asserted on directly.
@@ -1282,10 +1277,10 @@ fn print_list_table(registry: &Registry) {
     println!();
 }
 
-pub fn print_list(registry: &Registry, catalog: &DepCatalog, format: Format, table: bool) {
+pub fn print_list(registry: &Registry, catalog: &DepCatalog, json: bool, table: bool) {
     use crate::registry::view;
 
-    if format == Format::Json {
+    if json {
         #[derive(serde::Serialize)]
         struct ListTool {
             #[serde(flatten)]

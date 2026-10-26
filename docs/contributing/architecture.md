@@ -281,21 +281,21 @@ Render processes each entry whose source is a `.jinja` template through MiniJinj
 
 - **One-shot** (`--name` + role flags): flags → `Selection` in `oneshot.rs`, non-interactive, deterministic. Primary path for agents and CI.
 - **Interactive** (no `--name`): guided `dialoguer` flow in `interactive.rs`.
-- **`list` subcommand**: capability discovery; lists roles/tools, human by default, `--format json` for agents (see §7.3).
+- **`list` subcommand**: capability discovery; lists roles/tools, human by default, `--json` for agents (see §7.3).
 
 A safety check refuses to overwrite an existing target directory.
 
-### 7.2 Output model: `--format` + presenter
+### 7.2 Output model: `--json` + presenter
 
 To serve both humans and agents without scattering format branches:
 
-- A global **`--format human|json`** flag (default `human`; `json` implies non-interactive: JSON mode never prompts).
+- A global **`--json`** flag (human-readable output by default; `--json` implies non-interactive: JSON mode never prompts).
 - **`output.rs` as a presenter**: the core returns *structured results* and *typed errors*; only the presenter knows about colors, tables, or JSON. Every command's JSON wraps in the §2.4 envelope via `output::emit_json_ok` / `print_error`. Adding a new output is a presenter change, nothing else.
 
 ### 7.3 Machine-readable errors & discovery (PRD FR-13/FR-15)
 
-- **Errors** carry a **stable string code** (e.g. `unknown_tool`, `tool_role_mismatch`, `name_required`, `dir_exists`) plus context (offending input + valid alternatives) and map to **meaningful exit codes**. In `--format json`, errors serialize to a stable shape on stderr; the core never falls back to interactive prompting in non-interactive mode. `CliError::code()`/`context()` carry the code + serializable context (§2.5).
-- **Discovery** is the **`list` subcommand** (`cardano-init list`) that emits the registry (roles, tools, the roles each fills, languages). Human by default (with **`--table`** for a compact tools-by-role matrix), **`--format json`** for agents (§8 schema). `list` renders from the shared model `registry::view` (`role_views()` / `tool_views()`); the human tool block reuses `cli::format_tool` (shared with `--help`).
+- **Errors** carry a **stable string code** (e.g. `unknown_tool`, `tool_role_mismatch`, `name_required`, `dir_exists`) plus context (offending input + valid alternatives) and map to **meaningful exit codes**. In `--json`, errors serialize to a stable shape on stderr; the core never falls back to interactive prompting in non-interactive mode. `CliError::code()`/`context()` carry the code + serializable context (§2.5).
+- **Discovery** is the **`list` subcommand** (`cardano-init list`) that emits the registry (roles, tools, the roles each fills, languages). Human by default (with **`--table`** for a compact tools-by-role matrix), **`--json`** for agents (§8 schema). `list` renders from the shared model `registry::view` (`role_views()` / `tool_views()`); the human tool block reuses `cli::format_tool` (shared with `--help`).
 
 ---
 
@@ -358,7 +358,7 @@ The chosen mechanism for template freshness without runtime template fetching (P
 - **Latency is hidden, not added.** In **interactive** mode the check fires async at startup and completes during tool selection: zero added latency. In **human one-shot** there's no think-time to hide it, so the result is joined with a **≤1s deadline** behind a spinner before writing (worst case +1s, once/day).
 - **Cached once/day** (small file in the OS cache dir): already-checked-today → zero network, zero latency.
 - **Install-aware**: the notice shows the update command for how the binary was installed (npm/npx, nix, cargo-dist installer, `cargo install`), falling back to the releases link (TECH_SPEC §10).
-- **Gated and fail-silent**: the network check runs only for a TTY with `human` format, and is off when `CI`/`CARDANO_INIT_NO_UPDATE_CHECK` is set. `--format json` never touches the network. Offline/timeout/parse error → no-op. Preserves offline operation and determinism (A-3).
+- **Gated and fail-silent**: the network check runs only for a TTY without `--json`, and is off when `CI`/`CARDANO_INIT_NO_UPDATE_CHECK` is set. `--json` never touches the network. Offline/timeout/parse error → no-op. Preserves offline operation and determinism (A-3).
 
 ---
 
