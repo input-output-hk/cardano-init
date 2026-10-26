@@ -93,12 +93,42 @@ describe("Yaci provider compatibility", () => {
     });
   });
 
+  it.each([200, 202])("accepts a submitted transaction hash with HTTP %i", async (code) => {
+    status = code;
+    body = "65d9e40ff443d23d6d5d23c49ad8a041a27f6cc3c74bfbc5cb7f79923942d694";
+    const provider = createProvider({ kind: "yaci", url: baseUrl });
+    await expect(provider.submitTx("84a700")).resolves.toBe(body);
+    expect(request).toEqual({
+      method: "POST",
+      url: "/api/v1/tx/submit",
+      type: "text/plain",
+      body: "84a700",
+    });
+  });
+
+  it("rejects a successful response without a valid transaction hash", async () => {
+    body = { error: "submission failed" };
+    const provider = createProvider({ kind: "yaci", url: baseUrl });
+    await expect(provider.submitTx("84a700")).rejects.toThrow(
+      "Yaci returned an invalid transaction hash",
+    );
+  });
+
+  it("preserves submission failures", async () => {
+    status = 400;
+    body = { error: "transaction rejected" };
+    const provider = createProvider({ kind: "yaci", url: baseUrl });
+    await expect(provider.submitTx("84a700")).rejects.toThrow(
+      'Yaci tx/submit failed (HTTP 400): {"error":"transaction rejected"}',
+    );
+  });
+
   it.each([400, 500])("preserves evaluation errors with HTTP %i", async (code) => {
     status = code;
     body = { error: "script validation failed" };
     const provider = createProvider({ kind: "yaci", url: baseUrl });
     await expect(provider.evaluateTx("84a700")).rejects.toThrow(
-      `Yaci evaluation failed (HTTP ${code}): {"error":"script validation failed"}`,
+      `Yaci utils/txs/evaluate failed (HTTP ${code}): {"error":"script validation failed"}`,
     );
   });
 
