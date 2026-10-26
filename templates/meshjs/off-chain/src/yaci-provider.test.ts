@@ -19,7 +19,7 @@ const evaluation = {
   },
 };
 
-describe("Yaci evaluation compatibility", () => {
+describe("Yaci provider compatibility", () => {
   let status: number;
   let body: unknown;
   let baseUrl: string;
@@ -52,6 +52,30 @@ describe("Yaci evaluation compatibility", () => {
       server.close((error) => (error ? reject(error) : resolve()));
       server.closeAllConnections();
     });
+  });
+
+  it.each([undefined, 0, 42])("fetches ordered cost models for epoch %s", async (epoch) => {
+    body = {
+      cost_models_raw: {
+        PlutusV3: [30, -31, 32],
+        PlutusV1: [10, 11],
+        PlutusV2: [20, 21],
+      },
+    };
+    const provider = createProvider({ kind: "yaci", url: `${baseUrl}/` });
+    await expect(provider.fetchCostModels(epoch)).resolves.toEqual([
+      [10, 11], [20, 21], [30, -31, 32],
+    ]);
+    expect(request.method).toBe("GET");
+    expect(request.url).toBe(`/api/v1/epochs/${epoch ?? "latest"}/parameters`);
+  });
+
+  it.each([undefined, [], [1, "2"]])("rejects missing or malformed cost models: %j", async (model) => {
+    body = { cost_models_raw: { PlutusV1: [1], PlutusV2: [2], PlutusV3: model } };
+    const provider = createProvider({ kind: "yaci", url: baseUrl });
+    await expect(provider.fetchCostModels()).rejects.toThrow(
+      "Yaci returned no valid cost model for PlutusV3",
+    );
   });
 
   it.each([200, 202])("accepts evaluation budgets with HTTP %i", async (code) => {

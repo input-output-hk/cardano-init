@@ -16,7 +16,8 @@ const tags = {
 /**
  * Mesh's YaciProvider requires HTTP 202 for evaluation, but Yaci Store 2.0.7
  * returns HTTP 200 to match Blockfrost. Keep both versions working until Mesh
- * accepts both statuses upstream. All other provider operations are inherited.
+ * accepts both statuses upstream. Also supplies the chain's cost models, which
+ * Mesh's YaciProvider currently leaves unimplemented.
  */
 export class YaciProvider extends MeshYaciProvider {
   private readonly evaluationUrl: string;
@@ -24,6 +25,23 @@ export class YaciProvider extends MeshYaciProvider {
   constructor(url: string, adminUrl?: string) {
     super(url, adminUrl);
     this.evaluationUrl = `${url.replace(/\/+$/, "")}/utils/txs/evaluate`;
+  }
+
+  override async fetchCostModels(epoch?: number): Promise<number[][]> {
+    const parameters = await this.get(`epochs/${epoch ?? "latest"}/parameters`);
+    // Preserve ledger language order and each model's parameter order. Named
+    // cost_models entries are not a substitute for the ordered raw arrays.
+    return ["PlutusV1", "PlutusV2", "PlutusV3"].map((language) => {
+      const model = parameters?.cost_models_raw?.[language];
+      if (
+        !Array.isArray(model) ||
+        model.length === 0 ||
+        !model.every((value: unknown) => Number.isSafeInteger(value))
+      ) {
+        throw new Error(`Yaci returned no valid cost model for ${language}`);
+      }
+      return model;
+    });
   }
 
   override async evaluateTx(txHex: string): Promise<Evaluation> {
