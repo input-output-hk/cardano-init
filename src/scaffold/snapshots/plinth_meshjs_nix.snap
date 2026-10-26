@@ -2367,6 +2367,7 @@ import { config as loadDotenv } from "dotenv";
 import { BlockfrostProvider, MeshWallet, YaciProvider } from "@meshsdk/core";
 
 import { GiftCardContract } from "./contract.js";
+import { YaciProvider as CompatibleYaciProvider } from "./yaci-provider.js";
 
 // Node-only helpers: reading configuration from the environment and wiring up a
 // provider + wallet. Importing this in a browser bundle would pull in `node:fs`
@@ -2460,8 +2461,8 @@ export function createProvider(config: ProviderConfig): ChainProvider {
   if (config.kind === "yaci") {
     // Two-arg form wires up the faucet/topup admin API when available.
     return config.adminUrl
-      ? new YaciProvider(config.url, config.adminUrl)
-      : new YaciProvider(config.url);
+      ? new CompatibleYaciProvider(config.url, config.adminUrl)
+      : new CompatibleYaciProvider(config.url);
   }
   return new BlockfrostProvider(config.projectId);
 }
@@ -2519,6 +2520,186 @@ export async function topupOnDevnet(
   }
   return false;
 }
+
+=== off-chain/src/yaci-provider.ts ===
+import { YaciProvider as MeshYaciProvider } from "@meshsdk/core";
+
+type Evaluation = Awaited<ReturnType<MeshYaciProvider["evaluateTx"]>>;
+
+const tags = {
+  spend: "SPEND",
+  mint: "MINT",
+  certificate: "CERT",
+  publish: "CERT",
+  withdrawal: "REWARD",
+  reward: "REWARD",
+  vote: "VOTE",
+  propose: "PROPOSE",
+} as const;
+
+/**
+ * Mesh's YaciProvider requires HTTP 202 for evaluation, but Yaci Store 2.0.7
+ * returns HTTP 200 to match Blockfrost. Keep both versions working until Mesh
+ * accepts both statuses upstream. All other provider operations are inherited.
+ */
+export class YaciProvider extends MeshYaciProvider {
+  private readonly evaluationUrl: string;
+
+  constructor(url: string, adminUrl?: string) {
+    super(url, adminUrl);
+    this.evaluationUrl = `${url.replace(/\/+$/, "")}/utils/txs/evaluate`;
+  }
+
+  override async evaluateTx(txHex: string): Promise<Evaluation> {
+    const response = await fetch(this.evaluationUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/cbor" },
+      body: txHex,
+      signal: AbortSignal.timeout(30_000),
+    });
+    const body = await response.text();
+    if (response.status !== 200 && response.status !== 202) {
+      throw new Error(`Yaci evaluation failed (HTTP ${response.status}): ${body}`);
+    }
+
+    const data = JSON.parse(body);
+    const result = data?.result?.EvaluationResult;
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      throw new Error(`Yaci returned no evaluation budgets: ${body}`);
+    }
+
+    return Object.entries(result).map(([key, value]) => {
+      const [purpose, index, extra] = key.split(":");
+      const tag = tags[purpose as keyof typeof tags];
+      const budget = value as { memory?: unknown; steps?: unknown } | null;
+      if (
+        !Object.hasOwn(tags, purpose) ||
+        !/^\d+$/.test(index ?? "") ||
+        !Number.isSafeInteger(Number(index)) ||
+        extra !== undefined ||
+        !budget ||
+        typeof budget.memory !== "number" ||
+        !Number.isSafeInteger(budget.memory) ||
+        budget.memory < 0 ||
+        typeof budget.steps !== "number" ||
+        !Number.isSafeInteger(budget.steps) ||
+        budget.steps < 0
+      ) {
+        throw new Error(`Yaci returned an invalid evaluation budget: ${key}`);
+      }
+      return {
+        tag,
+        index: Number(index),
+        budget: { mem: budget.memory, steps: budget.steps },
+      };
+    });
+  }
+}
+
+=== off-chain/src/yaci-provider.test.ts ===
+import { once } from "node:events";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+import { createProvider } from "./node.js";
+
+const evaluation = {
+  type: "jsonwsp/response",
+  version: "1.0",
+  servicename: "ogmios",
+  methodname: "EvaluateTx",
+  result: {
+    EvaluationResult: {
+      "mint:0": { memory: 34914, steps: 11964079 },
+      "spend:1": { memory: 42000, steps: 13000000 },
+    },
+  },
+};
+
+describe("Yaci evaluation compatibility", () => {
+  let status: number;
+  let body: unknown;
+  let baseUrl: string;
+  let request: { method?: string; url?: string; type?: string; body: string };
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    request = {
+      method: req.method,
+      url: req.url,
+      type: req.headers["content-type"],
+      body: Buffer.concat(chunks).toString(),
+    };
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  });
+
+  beforeAll(async () => {
+    await once(server.listen(0, "127.0.0.1"), "listening");
+    baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v1`;
+  });
+
+  beforeEach(() => {
+    status = 200;
+    body = evaluation;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+      server.closeAllConnections();
+    });
+  });
+
+  it.each([200, 202])("accepts evaluation budgets with HTTP %i", async (code) => {
+    status = code;
+    const provider = createProvider({ kind: "yaci", url: `${baseUrl}/` });
+    await expect(provider.evaluateTx("84a700")).resolves.toEqual([
+      { tag: "MINT", index: 0, budget: { mem: 34914, steps: 11964079 } },
+      { tag: "SPEND", index: 1, budget: { mem: 42000, steps: 13000000 } },
+    ]);
+    expect(request).toEqual({
+      method: "POST",
+      url: "/api/v1/utils/txs/evaluate",
+      type: "application/cbor",
+      body: "84a700",
+    });
+  });
+
+  it.each([400, 500])("preserves evaluation errors with HTTP %i", async (code) => {
+    status = code;
+    body = { error: "script validation failed" };
+    const provider = createProvider({ kind: "yaci", url: baseUrl });
+    await expect(provider.evaluateTx("84a700")).rejects.toThrow(
+      `Yaci evaluation failed (HTTP ${code}): {"error":"script validation failed"}`,
+    );
+  });
+
+  it.each([200, 202])("rejects missing budgets even with HTTP %i", async (code) => {
+    status = code;
+    body = { result: { EvaluationFailure: { "mint:0": "validator failed" } } };
+    const provider = createProvider({ kind: "yaci", url: baseUrl });
+    await expect(provider.evaluateTx("84a700")).rejects.toThrow(
+      "Yaci returned no evaluation budgets",
+    );
+  });
+
+  it.each([
+    { "unknown:0": { memory: 1, steps: 2 } },
+    { "mint:invalid": { memory: 1, steps: 2 } },
+    { "mint:0": { memory: -1, steps: 2 } },
+    { "mint:0": { memory: "34914", steps: 2 } },
+    { "mint:0": null },
+  ])("rejects malformed budgets: %j", async (result) => {
+    body = { result: { EvaluationResult: result } };
+    const provider = createProvider({ kind: "yaci", url: baseUrl });
+    await expect(provider.evaluateTx("84a700")).rejects.toThrow(
+      "Yaci returned an invalid evaluation budget",
+    );
+  });
+});
 
 === off-chain/src/index.ts ===
 // Library entry point. Re-exports the framework-agnostic core so the package
@@ -2715,10 +2896,11 @@ describe("GiftCard off-chain", () => {
 import { existsSync } from "node:fs";
 
 import { config as loadDotenv } from "dotenv";
-import { MeshWallet, YaciProvider } from "@meshsdk/core";
+import { MeshWallet } from "@meshsdk/core";
 import { describe, expect, it } from "vitest";
 
 import { GiftCardContract, hasBundledBlueprint } from "./contract.js";
+import { YaciProvider } from "./yaci-provider.js";
 
 // End-to-end integration test: a full mint→lock→redeem round-trip against a
 // real local devnet (Yaci DevKit). It is gated so it runs ONLY when a devnet is

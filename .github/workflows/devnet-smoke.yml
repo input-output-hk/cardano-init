@@ -72,15 +72,23 @@ jobs:
           version: v1.1.21
 
       - name: Install yaci-devkit
-        run: npm install -g @bloxbean/yaci-devkit
+        id: yaci
+        run: |
+          npm install -g @bloxbean/yaci-devkit
+          npm list -g @bloxbean/yaci-devkit
+          devkit_version=$(npm list -g @bloxbean/yaci-devkit --json | node -pe 'JSON.parse(require("fs").readFileSync(0, "utf8")).dependencies["@bloxbean/yaci-devkit"].version')
+          echo "version=$devkit_version" >> "$GITHUB_OUTPUT"
 
-      # The first `yaci-devkit up` downloads a cardano-node into ~/.yaci-cli;
-      # cache it so subsequent runs skip the (large) download.
-      - name: Cache yaci-cli node download
+      # Cache downloads only, never local-clusters, generated configuration or
+      # PID files. A new DevKit release needs its matching component binaries;
+      # restoring the old unversioned cache can break submit-api at startup.
+      - name: Cache yaci-cli downloads
         uses: actions/cache@v4
         with:
-          path: ~/.yaci-cli
-          key: yaci-cli-${{ runner.os }}
+          path: |
+            ~/.yaci-cli/cardano-node
+            ~/.yaci-cli/components
+          key: yaci-downloads-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.yaci.outputs.version }}
 
       - name: Scaffold a fullstack project in isolation
         run: cargo run --quiet -- --name devnet-smoke --on-chain aiken --off-chain meshjs --devnet yaci
@@ -97,7 +105,20 @@ jobs:
           CARDANO_INIT_REQUIRE_DEVNET: "1"
         run: |
           just build
+          npm --prefix off-chain ls @meshsdk/core @meshsdk/provider @meshsdk/transaction
           just test
+
+      - name: Preserve devnet diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devnet-diagnostics
+          include-hidden-files: true
+          path: |
+            devnet-smoke/devnet/.yaci-devnet.log
+            devnet-smoke/off-chain/package-lock.json
+          if-no-files-found: ignore
+          retention-days: 14
 
       # Set only when a step failed or the job timed out. A lost runner runs no
       # steps, so it leaves this unset and doesn't file an issue.

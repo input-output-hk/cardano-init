@@ -4,6 +4,7 @@ import { config as loadDotenv } from "dotenv";
 import { BlockfrostProvider, MeshWallet, YaciProvider } from "@meshsdk/core";
 
 import { GiftCardContract } from "./contract.js";
+import { YaciProvider as CompatibleYaciProvider } from "./yaci-provider.js";
 
 // Node-only helpers: reading configuration from the environment and wiring up a
 // provider + wallet. Importing this in a browser bundle would pull in `node:fs`
@@ -97,8 +98,8 @@ export function createProvider(config: ProviderConfig): ChainProvider {
   if (config.kind === "yaci") {
     // Two-arg form wires up the faucet/topup admin API when available.
     return config.adminUrl
-      ? new YaciProvider(config.url, config.adminUrl)
-      : new YaciProvider(config.url);
+      ? new CompatibleYaciProvider(config.url, config.adminUrl)
+      : new CompatibleYaciProvider(config.url);
   }
   return new BlockfrostProvider(config.projectId);
 }

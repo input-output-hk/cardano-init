@@ -14,7 +14,7 @@
 #
 # Invoked via `sh scripts/devnet-test.sh` (no exec bit; see the interface
 # contract). Yaci DevKit supports Linux x64 and macOS arm64 (not Windows).
-set -u
+set -eu
 
 API_URL="http://localhost:8080/api/v1/"
 LOG=".yaci-devnet.log"
@@ -34,6 +34,10 @@ fi
 DEVNET_PID=""
 teardown() {
   status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "Recent devnet log:"
+    tail -n 80 "$LOG" 2>/dev/null || true
+  fi
   echo "Tearing down the ephemeral devnet ..."
   # The npm yaci-devkit CLI has no `down`/`stop` command. killing the process tree.
   if [ -n "$DEVNET_PID" ]; then kill "$DEVNET_PID" >/dev/null 2>&1 || true; fi
@@ -59,7 +63,7 @@ const probe = async () => {
   setTimeout(probe, 3000);
 };
 probe();
-" || { echo "✗ Devnet did not become ready. Recent log:"; tail -n 30 "$LOG" 2>/dev/null || true; exit 1; }
+" || { echo "✗ Devnet did not become ready."; exit 1; }
 
 # Devnet is up. Point the test at it explicitly (overrides ../.env) and run the
 # standalone smoke test.

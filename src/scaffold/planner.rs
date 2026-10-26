@@ -600,12 +600,13 @@ mod tests {
         // base: 6 (Justfile, README, AGENTS.md, CLAUDE.md, .gitignore, .env)
         // blueprint/.gitkeep: 1
         // aiken on-chain: 4 (aiken.toml, Justfile, lib/helpers.ak, validators/giftcard.ak)
-        // meshjs off-chain: 11 (package.json, tsconfig.json, Justfile, .env.example,
+        // meshjs off-chain: 13 (package.json, tsconfig.json, Justfile, .env.example,
         //                       scripts/bundle-blueprint.mjs,
-        //                       src/{contract,node,index,cli,contract.test,contract.integration.test}.ts)
+        //                       src/{contract,node,index,cli,contract.test,contract.integration.test,
+        //                            yaci-provider,yaci-provider.test}.ts)
         // spec: 2 (spec/README.md, spec/giftcard.md)
-        // total: 24
-        assert_eq!(plan.entries.len(), 24);
+        // total: 26
+        assert_eq!(plan.entries.len(), 26);
     }
 
     #[test]
