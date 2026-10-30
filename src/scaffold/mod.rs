@@ -1,3 +1,7 @@
+//! The scaffolding pipeline: context -> plan -> render -> write.
+//!
+//! Everything except [`writer`] is pure: it reads only embedded assets.
+
 pub mod context;
 pub mod planner;
 pub mod renderer;
@@ -11,18 +15,24 @@ use rust_embed::RustEmbed;
 use crate::registry::loader::Registry;
 use crate::registry::types::Selection;
 
-// ---------------------------------------------------------------------------
-// Embedded template assets
-// ---------------------------------------------------------------------------
-
+/// The `templates/` tree, embedded at compile time.
 #[derive(RustEmbed)]
 #[folder = "templates/"]
 pub(crate) struct TemplateAssets;
 
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
+impl TemplateAssets {
+    /// The embedded asset at `key`.
+    ///
+    /// # Errors
+    /// [`ScaffoldError::AssetNotFound`] if no such asset is embedded.
+    pub(crate) fn require(key: &str) -> Result<rust_embed::EmbeddedFile, ScaffoldError> {
+        Self::get(key).ok_or_else(|| ScaffoldError::AssetNotFound {
+            path: key.to_string(),
+        })
+    }
+}
 
+/// Errors from any phase of the scaffolding pipeline.
 #[derive(Debug, thiserror::Error)]
 pub enum ScaffoldError {
     #[error("template asset not found: '{path}'")]
@@ -66,11 +76,10 @@ pub enum ScaffoldError {
     },
 }
 
-// ---------------------------------------------------------------------------
-// Orchestrator
-// ---------------------------------------------------------------------------
-
-/// Run the full scaffolding pipeline: context -> plan -> render -> write.
+/// Generate the project for `selection` under `root`.
+///
+/// # Errors
+/// Any [`ScaffoldError`] from the context, plan, render, or write phase.
 pub fn scaffold(
     selection: &Selection,
     registry: &Registry,
@@ -79,11 +88,13 @@ pub fn scaffold(
     let ctx = context::build_context(selection, registry)?;
     let plan = planner::plan(selection, registry)?;
     let files = renderer::render(&plan, &ctx)?;
-    writer::write(&files, root)?;
-    Ok(())
+    writer::write(&files, root)
 }
 
-/// Plan-only mode: returns the file plan without writing anything.
+/// Plan the project for `selection` without rendering or writing anything.
+///
+/// # Errors
+/// Any [`ScaffoldError`] from [`planner::plan`].
 pub fn dry_run(
     selection: &Selection,
     registry: &Registry,
@@ -91,18 +102,29 @@ pub fn dry_run(
     planner::plan(selection, registry)
 }
 
-// ---------------------------------------------------------------------------
-// Integration tests
-// ---------------------------------------------------------------------------
+/// Fixtures shared by the scaffold test modules.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::registry::loader::Registry;
+    use crate::registry::types::{Role, RoleAssignment};
+
+    pub(crate) fn registry() -> Registry {
+        Registry::load().expect("registry should load")
+    }
+
+    pub(crate) fn a(role: Role, tool: &str) -> RoleAssignment {
+        RoleAssignment {
+            role,
+            tool_id: tool.into(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::{a, registry};
     use super::*;
     use crate::registry::types::{Network, Role, RoleAssignment};
-
-    fn registry() -> Registry {
-        Registry::load().expect("registry should load")
-    }
 
     fn selection(assignments: Vec<RoleAssignment>) -> Selection {
         Selection {
@@ -117,10 +139,7 @@ mod tests {
     #[test]
     fn scaffold_aiken_only() {
         let dir = tempfile::tempdir().unwrap();
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
+        let sel = selection(vec![a(Role::OnChain, "aiken")]);
 
         scaffold(&sel, &registry(), dir.path()).unwrap();
 
@@ -165,16 +184,7 @@ mod tests {
     #[test]
     fn scaffold_aiken_and_meshjs() {
         let dir = tempfile::tempdir().unwrap();
-        let sel = selection(vec![
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "aiken".into(),
-            },
-            RoleAssignment {
-                role: Role::OffChain,
-                tool_id: "meshjs".into(),
-            },
-        ]);
+        let sel = selection(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
 
         scaffold(&sel, &registry(), dir.path()).unwrap();
 
@@ -195,10 +205,7 @@ mod tests {
 
     #[test]
     fn dry_run_returns_plan_without_writing() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
+        let sel = selection(vec![a(Role::OnChain, "aiken")]);
 
         let plan = dry_run(&sel, &registry()).unwrap();
 

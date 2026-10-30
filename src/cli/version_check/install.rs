@@ -15,6 +15,7 @@ use serde::de::IgnoredAny;
 
 const INSTALLER_BASE: &str = "https://github.com/input-output-hk/cardano-init/releases/latest/download/cardano-init-installer";
 
+/// How this binary was installed, which decides its update command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallMethod {
     /// A one-off `npx cardano-init` run.
@@ -142,9 +143,10 @@ fn from_receipt(exe: &Path, host: &impl Host) -> Option<InstallMethod> {
         .join("cardano-init-receipt.json");
     let receipt: Receipt = serde_json::from_str(&host.read(&path)?).ok()?;
     exe.starts_with(receipt.install_prefix)
-        .then_some(match host.is_windows() {
-            true => InstallMethod::PowershellInstaller,
-            false => InstallMethod::ShellInstaller,
+        .then_some(if host.is_windows() {
+            InstallMethod::PowershellInstaller
+        } else {
+            InstallMethod::ShellInstaller
         })
 }
 

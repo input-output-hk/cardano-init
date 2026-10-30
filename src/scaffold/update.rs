@@ -1,24 +1,18 @@
-//! In-place project updates: mutate a reconstructed `Selection` and compute the
-//! change set that turns the old project into the new one.
+//! In-place project updates: apply [`Mutation`]s to a `Selection` and diff the
+//! old and new selections into an [`UpdatePlan`] (tech spec §16).
 //!
-//! This module is **pure** (no I/O): it diffs two selections at the
-//! *component-directory* level and re-renders the shared top-level layer, all
-//! from embedded assets. The disk side effects live in
-//! [`super::writer::apply_update`]. See `docs/design/tech-spec.md` §16.
-//!
-//! The load-bearing property is that each component is **standalone** (interface
-//! contract): a slot whose tool is unchanged is not in the change set at all, so
-//! the user's code in it is provably untouched.
+//! Pure: the diff works at component-directory granularity and only renders from
+//! embedded assets; [`super::writer::apply_update`] performs the I/O. Because
+//! components are standalone, a directory whose tool is unchanged never appears
+//! in the plan, so the user's code there is never touched.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use crate::contract;
-use crate::registry::loader::Registry;
-use crate::registry::types::{Role, RoleAssignment, Selection};
-
 use super::renderer::RenderedFile;
 use super::{ScaffoldError, context, planner, renderer};
+use crate::registry::loader::Registry;
+use crate::registry::types::{Role, RoleAssignment, Selection};
 
 // ---------------------------------------------------------------------------
 // Mutations
@@ -27,10 +21,9 @@ use super::{ScaffoldError, context, planner, renderer};
 /// A single edit to a project's `Selection`.
 #[derive(Debug, Clone)]
 pub enum Mutation {
-    /// Assign a tool to a role. For a single-tool role this **replaces** whatever
-    /// currently fills it; for infrastructure it **appends** the provider
-    /// (deduped keep-first). `--fullstack X` is expressed as two `Add`s (on-chain
-    /// + off-chain, same tool), which the slot logic re-collapses to `protocol/`.
+    /// Assign a tool to a role: replaces the current tool of a single-tool role,
+    /// or appends an infrastructure provider (ignored if already present). A
+    /// fullstack tool is two `Add`s (on-chain and off-chain, same tool).
     Add(RoleAssignment),
     /// Remove a role entirely (all infrastructure providers, if Infrastructure).
     Remove(Role),
@@ -38,8 +31,7 @@ pub enum Mutation {
     RemoveInfra(String),
 }
 
-/// Apply one mutation to `old`, returning the new selection (pure; the input is
-/// left untouched).
+/// The selection that results from applying `mutation` to `old`.
 pub fn apply(old: &Selection, mutation: &Mutation) -> Selection {
     let mut assignments = old.assignments.clone();
     match mutation {
@@ -52,13 +44,12 @@ pub fn apply(old: &Selection, mutation: &Mutation) -> Selection {
             }
         }
         Mutation::Add(new_asg) => {
-            // Single-tool role: replace whatever is there.
             assignments.retain(|a| a.role != new_asg.role);
             assignments.push(new_asg.clone());
         }
         Mutation::Remove(role) => assignments.retain(|a| a.role != *role),
         Mutation::RemoveInfra(tool_id) => {
-            assignments.retain(|a| !(a.role == Role::Infrastructure && a.tool_id == *tool_id))
+            assignments.retain(|a| !(a.role == Role::Infrastructure && a.tool_id == *tool_id));
         }
     }
     Selection {
@@ -70,8 +61,7 @@ pub fn apply(old: &Selection, mutation: &Mutation) -> Selection {
     }
 }
 
-/// Fold a sequence of mutations left-to-right (e.g. a one-shot `add` carrying
-/// several role flags).
+/// Apply `mutations` left to right.
 pub fn apply_all(old: &Selection, mutations: &[Mutation]) -> Selection {
     mutations.iter().fold(old.clone(), |acc, m| apply(&acc, m))
 }
@@ -111,77 +101,44 @@ impl SlotOp {
 pub struct UpdatePlan {
     /// Per-component-directory operations.
     pub slot_ops: Vec<SlotOp>,
-    /// Rendered files for directories being created/replaced/re-rendered.
+    /// Files for directories being created, replaced, or re-rendered.
     pub creates: Vec<RenderedFile>,
-    /// Re-rendered shared top-level files (content-diffed at write time).
+    /// The re-rendered shared top-level layer (content-diffed at write time).
     pub shared_files: Vec<RenderedFile>,
-    /// Shared files to delete (e.g. `blueprint/.gitkeep` when the predicate
-    /// flips, or the nix files when `--nix` is turned off).
+    /// Shared files that no longer apply to the new selection.
     pub shared_removals: Vec<PathBuf>,
 }
 
-/// One occupied component directory and the tool(s) in it.
+/// The tool(s) occupying one component directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SlotTool {
     Single(String),
     Infra(BTreeSet<String>),
 }
 
-/// Map a selection to its occupied component directories, mirroring the planner's
-/// dir logic (fullstack collapse → `protocol/`, infra aggregate → one `infra/`).
+/// The selection's occupied component directories, laid out as the planner
+/// lays them out (fullstack pair in `protocol/`, all providers in `infra/`).
 fn slots(sel: &Selection, registry: &Registry) -> BTreeMap<String, SlotTool> {
-    let fullstack = planner::fullstack_tool_id(sel, registry);
+    let fullstack_id = planner::fullstack_tool_id(sel, registry);
     let mut map: BTreeMap<String, SlotTool> = BTreeMap::new();
     for asg in &sel.assignments {
-        match asg.role {
-            Role::Infrastructure => {
-                let entry = map
-                    .entry(contract::DIR_INFRA.to_string())
-                    .or_insert_with(|| SlotTool::Infra(BTreeSet::new()));
-                if let SlotTool::Infra(set) = entry {
-                    set.insert(asg.tool_id.clone());
-                }
+        let dir = planner::component_dir(asg, fullstack_id.as_deref()).to_string();
+        if asg.role == Role::Infrastructure {
+            let slot = map
+                .entry(dir)
+                .or_insert_with(|| SlotTool::Infra(BTreeSet::new()));
+            if let SlotTool::Infra(providers) = slot {
+                providers.insert(asg.tool_id.clone());
             }
-            Role::OnChain | Role::OffChain
-                if fullstack.as_deref() == Some(asg.tool_id.as_str()) =>
-            {
-                map.insert(
-                    contract::DIR_PROTOCOL.to_string(),
-                    SlotTool::Single(asg.tool_id.clone()),
-                );
-            }
-            Role::OnChain => {
-                map.insert(
-                    contract::DIR_ON_CHAIN.to_string(),
-                    SlotTool::Single(asg.tool_id.clone()),
-                );
-            }
-            Role::OffChain => {
-                map.insert(
-                    contract::DIR_OFF_CHAIN.to_string(),
-                    SlotTool::Single(asg.tool_id.clone()),
-                );
-            }
-            Role::Devnet => {
-                map.insert(
-                    contract::DIR_DEVNET.to_string(),
-                    SlotTool::Single(asg.tool_id.clone()),
-                );
-            }
-            Role::FormalMethods => {
-                map.insert(
-                    contract::DIR_FORMAL_METHODS.to_string(),
-                    SlotTool::Single(asg.tool_id.clone()),
-                );
-            }
+        } else {
+            map.insert(dir, SlotTool::Single(asg.tool_id.clone()));
         }
     }
     map
 }
 
-/// The tool id(s) occupying each component directory in `sel`, keyed by dir and
-/// sorted within each slot. Public so the CLI can name *which tool* changed in a
-/// slot op, not merely which directory moved.
+/// The tool id(s) occupying each component directory in `sel`, sorted within
+/// each directory.
 pub fn slot_tools(sel: &Selection, registry: &Registry) -> BTreeMap<String, Vec<String>> {
     slots(sel, registry)
         .into_iter()
@@ -195,8 +152,10 @@ pub fn slot_tools(sel: &Selection, registry: &Registry) -> BTreeMap<String, Vec<
         .collect()
 }
 
-/// Compute the change set between two selections. Pure: renders only from
-/// embedded assets, touches no disk.
+/// Compute the change set that turns the project for `old` into the one for `new`.
+///
+/// # Errors
+/// Any [`ScaffoldError`] from planning, context building, or rendering `new`.
 pub fn plan_update(
     old: &Selection,
     new: &Selection,
@@ -205,7 +164,6 @@ pub fn plan_update(
     let old_slots = slots(old, registry);
     let new_slots = slots(new, registry);
 
-    // Per-directory ops (canonical order via BTreeSet of keys).
     let dirs: BTreeSet<&String> = old_slots.keys().chain(new_slots.keys()).collect();
     let mut slot_ops = Vec::new();
     for dir in dirs {
@@ -215,15 +173,14 @@ pub fn plan_update(
             (Some(_), None) => slot_ops.push(SlotOp::Remove(path)),
             (Some(o), Some(n)) if o == n => {} // KEEP — untouched
             (Some(SlotTool::Infra(_)), Some(SlotTool::Infra(_))) => {
-                slot_ops.push(SlotOp::RerenderInfra(path))
+                slot_ops.push(SlotOp::RerenderInfra(path));
             }
             (Some(_), Some(_)) => slot_ops.push(SlotOp::Replace(path)),
-            // `dir` comes from the union of both keysets, so this is unreachable.
+            // `dirs` is the union of both key sets.
             (None, None) => {}
         }
     }
 
-    // Render the new project once; partition into shared layer vs component files.
     let plan = planner::plan(new, registry)?;
     let ctx = context::build_context(new, registry)?;
     let files = renderer::render(&plan, &ctx)?;
@@ -239,25 +196,23 @@ pub fn plan_update(
     for file in files {
         if is_shared_layer(&file.dest) {
             shared_files.push(file);
-        } else if let Some(top) = top_dir(&file.dest)
-            && write_dirs.contains(&top)
-        {
+        } else if top_dir(&file.dest).is_some_and(|top| write_dirs.contains(&top)) {
             creates.push(file);
-            // A file under a KEEP directory falls through here — the user's copy
-            // is left untouched.
         }
+        // Anything else belongs to a kept component or `spec/`: left untouched.
     }
 
-    // Shared removals: the blueprint marker when the predicate flips off, and the
-    // nix files when --nix is turned off (the latter can't happen via role
-    // mutations today, but the diff stays honest).
     let mut shared_removals = Vec::new();
     if planner::blueprint_dir_present(old) && !planner::blueprint_dir_present(new) {
-        shared_removals.push(PathBuf::from("blueprint/.gitkeep"));
+        shared_removals.push(PathBuf::from(planner::BLUEPRINT_MARKER));
     }
+    // Not reachable through role mutations today, but keeps the diff honest.
     if old.nix && !new.nix {
-        shared_removals.push(PathBuf::from("flake.nix"));
-        shared_removals.push(PathBuf::from(".envrc"));
+        shared_removals.extend(
+            planner::NIX_FILES
+                .iter()
+                .map(|(dest, _)| PathBuf::from(dest)),
+        );
     }
 
     Ok(UpdatePlan {
@@ -268,53 +223,23 @@ pub fn plan_update(
     })
 }
 
-/// Whether `dest` is a shared top-level file (re-rendered from the whole
-/// selection) rather than a component file.
 fn is_shared_layer(dest: &Path) -> bool {
-    matches!(
-        dest.to_str(),
-        Some(
-            "Justfile"
-                | "README.md"
-                | "AGENTS.md"
-                | "CLAUDE.md"
-                | ".gitignore"
-                | ".env"
-                | "flake.nix"
-                | ".envrc"
-                | "blueprint/.gitkeep"
-        )
-    )
+    planner::shared_layer_dests().any(|shared| dest == Path::new(shared))
 }
 
-/// The top-level directory of a nested path (e.g. `on-chain/aiken.toml` →
-/// `on-chain`). Returns `None` for a root-level file.
+/// The top-level directory of a nested path (`on-chain/aiken.toml` ->
+/// `on-chain`); `None` for a root-level file.
 fn top_dir(dest: &Path) -> Option<PathBuf> {
     let mut components = dest.components();
     let first = components.next()?;
-    // Only a file *inside* a directory has a further component.
     components.next().map(|_| PathBuf::from(first.as_os_str()))
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::{a, registry};
     use super::*;
     use crate::registry::types::Network;
-
-    fn registry() -> Registry {
-        Registry::load().expect("registry loads")
-    }
-
-    fn a(role: Role, tool: &str) -> RoleAssignment {
-        RoleAssignment {
-            role,
-            tool_id: tool.into(),
-        }
-    }
 
     fn sel(assignments: Vec<RoleAssignment>) -> Selection {
         Selection {

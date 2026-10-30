@@ -1,25 +1,12 @@
 //! Off-chain ↔ provider compatibility, decided purely from registry `[compat]`
-//! data — no per-tool special-casing.
+//! data.
 //!
-//! An off-chain tool reaches a local chain over one or more "seams" (wire
-//! protocols): Tx3 speaks TRP, Evolution speaks Blockfrost/Kupmios, Mesh speaks
-//! Blockfrost/UTxORPC/Ogmios. A **provider** — the selected devnet and/or the
-//! selected infra tools — exposes some set of seams (Yaci serves Blockfrost,
-//! Dolos serves UTxORPC, Kupo serves Kupo, …). The off-chain tool is satisfied
-//! when at least one selected provider serves a seam it consumes; if the
-//! providers between them serve none of them, the pairing can't work.
-//!
-//! Two special cases:
-//!   - A tool that bundles its own devnet (`self_contained_devnet`, e.g. Tx3)
-//!     needs no devnet role at all, so pairing it with one is redundant.
-//!   - Providers (and off-chain tools) that declare no seams impose no
-//!     constraint — supplementary infra (a bare node, a submit API) and
-//!     not-yet-annotated tools never fabricate a conflict.
-//!
-//! This module is pure logic over registry data (no CLI dependency), matching
-//! the `registry`/`scaffold` purity invariant. The CLI turns an
-//! [`Incompatibility`] into a stop-generation error (or, with `--ignore-warning`,
-//! a warning) and drives interactive filtering.
+//! An off-chain tool consumes one or more seams (wire protocols); providers —
+//! the selected devnet and infra tools — serve seams. The selection is
+//! compatible when some selected provider serves a seam the off-chain tool
+//! consumes. Tools or providers that declare no seams impose no constraint, and
+//! a tool that bundles its own devnet (`self_contained_devnet`) is incompatible
+//! with any separate devnet.
 
 use std::collections::HashSet;
 
@@ -33,35 +20,32 @@ pub struct ProviderRef {
     pub name: String,
 }
 
-/// A detected incompatibility between the selected off-chain tool and the
-/// selected providers (devnet + infra).
+/// An incompatibility between the selected off-chain tool and the selected
+/// providers.
 #[derive(Debug, Clone)]
 pub struct Incompatibility {
     pub off_chain_id: String,
     pub off_chain_name: String,
     /// Human-readable explanation of why the pairing can't work.
     pub reason: String,
-    /// Whether the off-chain tool bundles its own devnet (shapes the remedy).
+    /// Whether the off-chain tool bundles its own devnet.
     pub self_hosted: bool,
     /// The selected providers that can't serve the off-chain tool.
     pub providers: Vec<ProviderRef>,
-    /// Provider tool ids (devnet/infra) in the registry that *would* serve the
-    /// off-chain tool. Empty when it self-hosts (then no provider is needed).
+    /// Registry provider ids that would serve the off-chain tool (empty when it
+    /// self-hosts).
     pub compatible_providers: Vec<String>,
-    /// Off-chain tool ids that *would* work with the selected providers.
+    /// Off-chain tool ids that would work with the selected providers.
     pub compatible_off_chain: Vec<String>,
 }
 
-/// Check a full selection for an off-chain ↔ provider incompatibility. Returns
-/// `None` when the selection is coherent (including when it has no off-chain
-/// tool, or no provider that declares a seam).
+/// Check a selection for an off-chain ↔ provider incompatibility. Returns
+/// `None` when the selection is coherent.
 pub fn check(assignments: &[RoleAssignment], registry: &Registry) -> Option<Incompatibility> {
     let off_chain = assignment_tool(assignments, Role::OffChain, registry)?;
     let devnet = assignment_tool(assignments, Role::Devnet, registry);
 
-    // A self-hosting off-chain tool + a separate devnet: the devnet is redundant
-    // (and can't be its provider). Reported against the devnet specifically.
-    // (`devnet` is `Option<&ToolDef>`, which is `Copy`, so it stays usable below.)
+    // A self-hosting tool makes any separate devnet redundant.
     if let Some(d) = devnet.filter(|_| off_chain.compat.self_contained_devnet) {
         return Some(Incompatibility {
             off_chain_id: off_chain.id.clone(),
@@ -77,8 +61,6 @@ pub fn check(assignments: &[RoleAssignment], registry: &Registry) -> Option<Inco
         });
     }
 
-    // Providers = the devnet (if any) + every selected infra tool, keeping only
-    // those that actually declare a served seam.
     let providers: Vec<&ToolDef> = devnet
         .into_iter()
         .chain(
@@ -90,19 +72,15 @@ pub fn check(assignments: &[RoleAssignment], registry: &Registry) -> Option<Inco
         .filter(|p| !p.compat.serves.is_empty())
         .collect();
 
-    // Permissive when the off-chain tool declares no seams, or nothing selected
-    // declares a provider seam (supplementary infra / no devnet — the tool falls
-    // back to a public provider per the interface contract).
+    // With nothing to match against, the off-chain tool falls back to a public
+    // provider per the interface contract.
     if off_chain.compat.consumes.is_empty() || providers.is_empty() {
         return None;
     }
 
-    let served: HashSet<Seam> = providers
-        .iter()
-        .flat_map(|p| p.compat.serves.iter().copied())
-        .collect();
+    let served = served_seams(&providers);
     if off_chain.compat.consumes.iter().any(|s| served.contains(s)) {
-        return None; // at least one selected provider can feed the off-chain tool
+        return None;
     }
 
     Some(Incompatibility {
@@ -114,7 +92,7 @@ pub fn check(assignments: &[RoleAssignment], registry: &Registry) -> Option<Inco
             seam_list(&off_chain.compat.consumes),
         ),
         self_hosted: off_chain.compat.self_contained_devnet,
-        providers: providers.iter().map(|p| provider_ref(p)).collect(),
+        providers: providers.iter().copied().map(provider_ref).collect(),
         compatible_providers: compatible_providers_for(off_chain, registry),
         compatible_off_chain: off_chain_for(&providers, registry),
     })
@@ -138,8 +116,15 @@ fn provider_ref(tool: &ToolDef) -> ProviderRef {
     }
 }
 
-/// Devnet/infra tool ids in the registry whose served seams overlap the
-/// off-chain tool's consumed seams.
+fn served_seams(providers: &[&ToolDef]) -> HashSet<Seam> {
+    providers
+        .iter()
+        .flat_map(|p| p.compat.serves.iter().copied())
+        .collect()
+}
+
+/// Devnet/infra tool ids whose served seams overlap the off-chain tool's
+/// consumed seams.
 fn compatible_providers_for(off_chain: &ToolDef, registry: &Registry) -> Vec<String> {
     let mut ids: Vec<String> = registry
         .all_tools()
@@ -160,13 +145,9 @@ fn compatible_providers_for(off_chain: &ToolDef, registry: &Registry) -> Vec<Str
     ids
 }
 
-/// Off-chain tool ids whose consumed seams overlap the union of these providers'
-/// served seams.
+/// Off-chain tool ids that consume any seam these providers serve.
 fn off_chain_for(providers: &[&ToolDef], registry: &Registry) -> Vec<String> {
-    let served: HashSet<Seam> = providers
-        .iter()
-        .flat_map(|p| p.compat.serves.iter().copied())
-        .collect();
+    let served = served_seams(providers);
     let mut ids: Vec<String> = registry
         .tools_for_role(Role::OffChain)
         .iter()
@@ -180,14 +161,11 @@ fn off_chain_for(providers: &[&ToolDef], registry: &Registry) -> Vec<String> {
 fn seam_list(seams: &[Seam]) -> String {
     seams
         .iter()
-        .map(|s| s.label())
+        .copied()
+        .map(Seam::label)
         .collect::<Vec<_>>()
         .join(" or ")
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

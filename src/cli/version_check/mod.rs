@@ -1,25 +1,19 @@
-//! Version-update check (TECH_SPEC §10): compare this binary's version with the
-//! latest GitHub release and, when it is newer, show a notice **before
-//! generation** with the update command for however this binary was installed
-//! (falling back to the release link). GitHub is asked at most once a day; the
-//! answer is cached in between.
+//! Version-update check (tech spec §10): when the latest GitHub release is newer
+//! than this binary, show a notice before generation with the update command
+//! for this install method. GitHub is asked at most once a day (cached).
 //!
-//! Informational, never a gate: it never alters generated output, never blocks
-//! beyond a ≤1s deadline, and every failure (offline, timeout, parse) is a
-//! silent no-op. It runs only for human, attended output; `--json` and
-//! non-TTY runs never touch the network.
+//! Informational only: it never blocks beyond a 1s deadline, every failure is a
+//! silent no-op, and `--json`/non-TTY runs never touch the network.
 //!
-//! [`start`] (called from `run()` for the generating commands) answers from a
-//! fresh cache, or fires the request on a background thread so it overlaps
-//! interactive selection; [`announce`]
-//! joins it right before the write phase. Not started (tests, `list`,
-//! `doctor`) → no-op.
+//! [`start`] fires the lookup early (on a background thread, overlapping
+//! interactive selection); [`announce`] joins it right before writing. Without
+//! a prior `start` (tests, `list`, `doctor`), `announce` is a no-op.
 
 mod cache;
 mod install;
 
-use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use super::output;
@@ -39,6 +33,7 @@ const DEADLINE: Duration = Duration::from_secs(1);
 
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
+/// A newer release is available.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateNotice {
     pub current: String,
@@ -54,8 +49,8 @@ impl UpdateNotice {
     }
 }
 
-/// An in-flight check: the result channel plus when it started (so the
-/// deadline is measured from process start, absorbing interactive think-time).
+/// An in-flight check. The deadline runs from `started`, so interactive
+/// think-time counts towards it.
 struct Pending {
     rx: Receiver<Option<String>>,
     started: Instant,
@@ -89,7 +84,7 @@ pub fn start(json: bool) {
             });
         }
     }
-    *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(Pending {
+    *PENDING.lock().unwrap_or_else(PoisonError::into_inner) = Some(Pending {
         rx,
         started: Instant::now(),
     });
@@ -99,7 +94,11 @@ pub fn start(json: bool) {
 /// pending request within the remaining deadline (behind a spinner only when it
 /// isn't already done); a timeout or failure prints nothing.
 pub fn announce(json: bool) {
-    let Some(pending) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+    let Some(pending) = PENDING
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
+    else {
         return;
     };
     let latest = match pending.rx.try_recv() {

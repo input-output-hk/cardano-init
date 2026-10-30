@@ -1,7 +1,7 @@
-//! The once-a-day update-check cache: a tiny JSON file under the OS cache dir
-//! holding when we last asked GitHub and what the latest version was. A fresh
-//! entry means zero network and zero latency (and keeps us well under GitHub's
-//! unauthenticated rate limit). Read/write failures are ignored.
+//! The once-a-day update-check cache: a small JSON file under the OS cache dir
+//! recording when GitHub was last asked and its answer. Keeps the check off the
+//! network (and under GitHub's unauthenticated rate limit). Failures are
+//! ignored.
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -56,8 +56,7 @@ pub fn write(latest: &str) {
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// `<OS cache dir>/cardano-init/update-check`: `~/Library/Caches` on macOS,

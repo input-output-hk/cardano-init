@@ -9,10 +9,8 @@ fn main() {
     std::process::exit(cli::run());
 }
 
-/// Restore the default SIGPIPE disposition (terminate the process) instead of
-/// Rust's default of ignoring it. Without this, writing to a closed pipe — e.g.
-/// piping output into `head`/`less` and quitting early — surfaces as an EPIPE
-/// panic ("failed printing to stdout: Broken pipe") rather than a clean exit.
+/// Restore the default SIGPIPE disposition so piping into `head`/`less` exits
+/// cleanly instead of panicking on EPIPE (Rust ignores SIGPIPE by default).
 #[cfg(unix)]
 fn reset_sigpipe() {
     // SAFETY: resetting a signal to SIG_DFL is async-signal-safe and this runs

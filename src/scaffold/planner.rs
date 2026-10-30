@@ -1,11 +1,14 @@
-use std::path::PathBuf;
+//! Planning phase: decide every file the generated project contains. Reads only
+//! embedded assets; nothing is rendered or written here.
+
+use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 
 use super::{ScaffoldError, TemplateAssets};
 use crate::contract;
 use crate::registry::loader::Registry;
-use crate::registry::types::{Role, RoleAssignment, Selection};
+use crate::registry::types::{Role, RoleAssignment, Selection, ToolDef};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -14,24 +17,22 @@ use crate::registry::types::{Role, RoleAssignment, Selection};
 /// Where a file's content comes from in the embedded templates.
 #[derive(Debug, Clone)]
 pub enum TemplateSource {
-    /// From `templates/_base/<path>`
+    /// `templates/_base/<path>`.
     Base(String),
-    /// From `templates/<tool>/<role>/<path>`
+    /// `templates/<path>`, inside a tool's component template.
     Role(String),
-    /// From `templates/_nix/<path>`
+    /// `templates/<path>`, inside an optional layer (`_spec/`, `_nix/`).
     Optional(String),
-    /// Inline content (e.g., empty `.gitkeep` files)
+    /// Literal content (e.g. an empty `.gitkeep`).
     Inline(Vec<u8>),
 }
 
 impl TemplateSource {
-    /// The asset key used to look up this source in `TemplateAssets`.
-    /// Returns `None` for `Inline` sources.
+    /// The `TemplateAssets` key for this source; `None` for `Inline`.
     pub fn asset_key(&self) -> Option<String> {
         match self {
             TemplateSource::Base(path) => Some(format!("_base/{path}")),
-            TemplateSource::Role(path) => Some(path.clone()),
-            TemplateSource::Optional(path) => Some(path.clone()),
+            TemplateSource::Role(path) | TemplateSource::Optional(path) => Some(path.clone()),
             TemplateSource::Inline(_) => None,
         }
     }
@@ -42,16 +43,65 @@ impl TemplateSource {
 pub struct FileEntry {
     /// Destination path relative to the project root.
     pub dest: PathBuf,
-    /// Where the content comes from.
     pub source: TemplateSource,
-    /// Whether to render through MiniJinja.
+    /// Whether to render through `MiniJinja` (otherwise copied verbatim).
     pub render: bool,
 }
 
-/// The complete list of files to generate.
+impl FileEntry {
+    /// An entry backed by an embedded asset: `.jinja` sources are rendered,
+    /// anything else is copied verbatim.
+    fn asset(dest: impl Into<PathBuf>, source: TemplateSource) -> Self {
+        let render = matches!(
+            &source,
+            TemplateSource::Base(path) | TemplateSource::Role(path) | TemplateSource::Optional(path)
+                if path.ends_with(".jinja")
+        );
+        Self {
+            dest: dest.into(),
+            source,
+            render,
+        }
+    }
+}
+
+/// The complete, ordered list of files to generate.
 #[derive(Debug)]
 pub struct FilePlan {
     pub entries: Vec<FileEntry>,
+}
+
+/// Top-level files every project gets, as `(dest, source under _base/)`.
+const BASE_FILES: &[(&str, &str)] = &[
+    ("Justfile", "Justfile.jinja"),
+    ("README.md", "README.md.jinja"),
+    // `CLAUDE.md` only imports `AGENTS.md`: Claude Code does not read AGENTS.md
+    // natively.
+    ("AGENTS.md", "AGENTS.md.jinja"),
+    ("CLAUDE.md", "CLAUDE.md"),
+    (".gitignore", "gitignore"),
+    (".env", "env.jinja"),
+];
+
+/// Files emitted under `--nix`, as `(dest, asset key)`.
+pub(crate) const NIX_FILES: &[(&str, &str)] = &[
+    ("flake.nix", "_nix/flake.nix.jinja"),
+    (".envrc", "_nix/envrc.jinja"),
+];
+
+/// Empty marker that keeps `blueprint/` in the tree until a build writes the
+/// blueprint into it.
+pub(crate) const BLUEPRINT_MARKER: &str = "blueprint/.gitkeep";
+
+/// Destinations of the shared top-level layer: files derived from the whole
+/// selection rather than owned by one component. `spec/` is excluded: once
+/// generated it belongs to the user.
+pub(crate) fn shared_layer_dests() -> impl Iterator<Item = &'static str> {
+    BASE_FILES
+        .iter()
+        .chain(NIX_FILES)
+        .map(|(dest, _)| *dest)
+        .chain([BLUEPRINT_MARKER])
 }
 
 // ---------------------------------------------------------------------------
@@ -60,15 +110,14 @@ pub struct FilePlan {
 
 #[derive(Deserialize)]
 struct ManifestToml {
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "parsed only so a manifest lacking it is rejected")]
     manifest: ManifestMeta,
-    #[serde(rename = "files")]
     files: Vec<ManifestFile>,
 }
 
 #[derive(Deserialize)]
 struct ManifestMeta {
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "parsed only so a manifest lacking it is rejected")]
     summary: String,
 }
 
@@ -76,24 +125,20 @@ struct ManifestMeta {
 struct ManifestFile {
     source: String,
     dest: String,
-    /// Optional emission guard. When present, the file is emitted only if the
-    /// named condition holds for the current selection (e.g. `when = "nix"`
-    /// emits only under `--nix`). Absent ⇒ always emitted.
+    /// Emission guard; absent means always emitted.
     #[serde(default)]
     when: Option<FileCondition>,
 }
 
-/// A condition gating whether a manifest file is emitted. Deserialized from the
-/// kebab-case `when` field in `manifest.toml`.
+/// A condition gating whether a manifest file is emitted (kebab-case `when`).
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum FileCondition {
-    /// Emit only when the project is generated with Nix support (`--nix`).
+    /// Emit only under `--nix`.
     Nix,
 }
 
 impl FileCondition {
-    /// Whether this condition holds for the given selection.
     fn holds(&self, selection: &Selection) -> bool {
         match self {
             FileCondition::Nix => selection.nix,
@@ -101,42 +146,41 @@ impl FileCondition {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Path safety
-// ---------------------------------------------------------------------------
-
-/// Reject a manifest `dest` that could escape the project root (§4.4).
+/// Load and parse `<template>/manifest.toml` from the embedded assets.
 ///
-/// A `dest` must be relative, non-empty, and contain no `..` component and no
-/// leading `/`. Manifests are first-party today, but the check is cheap
-/// insurance and required if templates ever become third-party.
+/// # Errors
+/// [`ScaffoldError::AssetNotFound`] if the manifest is missing,
+/// [`ScaffoldError::ManifestParse`] if it is malformed.
+fn read_manifest(template: &str) -> Result<ManifestToml, ScaffoldError> {
+    let key = format!("{template}/manifest.toml");
+    let asset = TemplateAssets::require(&key)?;
+    // Embedded first-party asset: invalid UTF-8 is an authoring bug.
+    let text = std::str::from_utf8(&asset.data).expect("manifest.toml must be valid UTF-8");
+    toml::from_str(text).map_err(|source| ScaffoldError::ManifestParse { path: key, source })
+}
+
+/// Reject a manifest `dest` that could escape the project root (§4.4): it must
+/// be non-empty and relative, with no `..` component.
 fn validate_dest(dest: &str) -> Result<(), ScaffoldError> {
-    use std::path::Component;
-
-    let unsafe_path = || ScaffoldError::UnsafePath {
-        path: dest.to_string(),
-    };
-
-    if dest.is_empty() {
-        return Err(unsafe_path());
+    let is_safe = !dest.is_empty()
+        && Path::new(dest)
+            .components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+    if is_safe {
+        Ok(())
+    } else {
+        Err(ScaffoldError::UnsafePath {
+            path: dest.to_string(),
+        })
     }
-    let path = std::path::Path::new(dest);
-    for component in path.components() {
-        match component {
-            Component::Normal(_) | Component::CurDir => {}
-            // RootDir / Prefix (absolute or `C:\`), ParentDir (`..`) → reject.
-            _ => return Err(unsafe_path()),
-        }
-    }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
-// Planning
+// Selection queries shared with the context builder and `update`
 // ---------------------------------------------------------------------------
 
-/// Whether `spec/giftcard.md` ships: the example describes the gift-card
-/// protocol, which only on-chain/off-chain (incl. fullstack) components implement.
+/// Whether `spec/giftcard.md` ships: it describes the gift-card protocol, which
+/// only on-chain/off-chain (incl. fullstack) components implement.
 pub(crate) fn spec_example_present(selection: &Selection) -> bool {
     selection
         .assignments
@@ -144,9 +188,8 @@ pub(crate) fn spec_example_present(selection: &Selection) -> bool {
         .any(|a| matches!(a.role, Role::OnChain | Role::OffChain))
 }
 
-/// Whether the `blueprint/` directory is scaffolded: true when any
-/// non-infrastructure role is present (equivalently, unless the project is
-/// infrastructure-only). See TECH_SPEC §6.2. Mirrors `TemplateContext::has_blueprint`.
+/// Whether `blueprint/` is scaffolded: any non-infrastructure role is present
+/// (tech spec §6.2).
 pub(crate) fn blueprint_dir_present(selection: &Selection) -> bool {
     selection
         .assignments
@@ -154,249 +197,224 @@ pub(crate) fn blueprint_dir_present(selection: &Selection) -> bool {
         .any(|a| a.role != Role::Infrastructure)
 }
 
-/// The tool id that fills **both** on-chain and off-chain as a single fullstack
-/// component, if any. Returns `Some(tool_id)` only when one tool is assigned to
-/// both `Role::OnChain` and `Role::OffChain` **and** declares a `[fullstack]`
-/// template; in that case the two assignments collapse into one `protocol/`
-/// component (TECH_SPEC §3.4, §6.1). Same tool for both roles with no
-/// `[fullstack]` template returns `None` (falls back to two folders).
-///
-/// Shared by the context builder and the planner so both agree on the collapse.
+/// The tool that fills both on-chain and off-chain as one fused `protocol/`
+/// component, if any (tech spec §3.4, §6.1). Requires the same tool on both
+/// roles **and** a `[fullstack]` template; otherwise the roles stay separate.
 pub(crate) fn fullstack_tool_id(selection: &Selection, registry: &Registry) -> Option<String> {
-    let on_chain = selection
-        .assignments
-        .iter()
-        .find(|a| a.role == Role::OnChain)?;
-    let off_chain = selection
-        .assignments
-        .iter()
-        .find(|a| a.role == Role::OffChain)?;
-    if on_chain.tool_id != off_chain.tool_id {
+    let tool_for_role = |role| {
+        selection
+            .assignments
+            .iter()
+            .find(|a| a.role == role)
+            .map(|a| a.tool_id.as_str())
+    };
+    let tool_id = tool_for_role(Role::OnChain)?;
+    if tool_for_role(Role::OffChain)? != tool_id {
         return None;
     }
-    let tool = registry.get(&on_chain.tool_id)?;
-    tool.fullstack.as_ref().map(|_| on_chain.tool_id.clone())
+    registry
+        .get(tool_id)?
+        .fullstack
+        .as_ref()
+        .map(|_| tool_id.to_string())
 }
 
-/// Build a `FilePlan` from a `Selection` and the tool `Registry`.
-///
-/// This determines every file that will be written during scaffolding.
-/// No I/O is performed — only embedded assets are read.
-pub fn plan(selection: &Selection, registry: &Registry) -> Result<FilePlan, ScaffoldError> {
-    let mut entries = vec![
-        // --- Base layer ---
-        FileEntry {
-            dest: PathBuf::from("Justfile"),
-            source: TemplateSource::Base("Justfile.jinja".into()),
-            render: true,
-        },
-        FileEntry {
-            dest: PathBuf::from("README.md"),
-            source: TemplateSource::Base("README.md.jinja".into()),
-            render: true,
-        },
-        // Agent-context files. `AGENTS.md` is the canonical, cross-agent
-        // (Codex/Cursor/…) brief tailored to the selected stack; `CLAUDE.md`
-        // is a one-line `@AGENTS.md` import so Claude Code — which does not read
-        // AGENTS.md natively — picks it up too. See TECH_SPEC §6.1.
-        FileEntry {
-            dest: PathBuf::from("AGENTS.md"),
-            source: TemplateSource::Base("AGENTS.md.jinja".into()),
-            render: true,
-        },
-        FileEntry {
-            dest: PathBuf::from("CLAUDE.md"),
-            source: TemplateSource::Base("CLAUDE.md".into()),
-            render: false,
-        },
-        FileEntry {
-            dest: PathBuf::from(".gitignore"),
-            source: TemplateSource::Base("gitignore".into()),
-            render: false,
-        },
-        FileEntry {
-            dest: PathBuf::from(".env"),
-            source: TemplateSource::Base("env.jinja".into()),
-            render: true,
-        },
-    ];
+/// Whether `assignment` is one half of the fused fullstack pair.
+pub(crate) fn is_fullstack_member(assignment: &RoleAssignment, fullstack_id: Option<&str>) -> bool {
+    fullstack_id == Some(assignment.tool_id.as_str())
+        && matches!(assignment.role, Role::OnChain | Role::OffChain)
+}
 
-    // Blueprint directory: present for every project that has any
-    // blueprint-producing-or-consuming role — i.e. any role except
-    // infrastructure (equivalently: present unless the project is
-    // infrastructure-only). See TECH_SPEC §6.2.
+/// The component directory `assignment` emits into: `protocol/` for the
+/// fullstack pair, otherwise the role's own directory.
+pub(crate) fn component_dir(
+    assignment: &RoleAssignment,
+    fullstack_id: Option<&str>,
+) -> &'static str {
+    if is_fullstack_member(assignment, fullstack_id) {
+        contract::DIR_PROTOCOL
+    } else {
+        assignment.role.dir()
+    }
+}
+
+/// Position of `role` in `Role::ALL`, the canonical role order.
+fn role_rank(role: Role) -> usize {
+    Role::ALL
+        .iter()
+        .position(|r| *r == role)
+        .expect("Role::ALL lists every role")
+}
+
+/// The selection's assignments in canonical order (`Role::ALL`, then tool id),
+/// so every order-sensitive output is independent of how the selection was
+/// built (determinism, §11).
+pub(crate) fn canonical_assignments(selection: &Selection) -> Vec<&RoleAssignment> {
+    let mut ordered: Vec<&RoleAssignment> = selection.assignments.iter().collect();
+    ordered.sort_by(|a, b| (role_rank(a.role), &a.tool_id).cmp(&(role_rank(b.role), &b.tool_id)));
+    ordered
+}
+
+/// Look up the registry tool for `assignment`.
+///
+/// # Errors
+/// [`ScaffoldError::ToolNotFound`] if the registry has no such tool.
+pub(crate) fn tool_for<'r>(
+    registry: &'r Registry,
+    assignment: &RoleAssignment,
+) -> Result<&'r ToolDef, ScaffoldError> {
+    registry
+        .get(&assignment.tool_id)
+        .ok_or_else(|| ScaffoldError::ToolNotFound {
+            tool_id: assignment.tool_id.clone(),
+        })
+}
+
+/// The error for a tool assigned to a role it does not declare.
+pub(crate) fn role_mismatch(assignment: &RoleAssignment) -> ScaffoldError {
+    ScaffoldError::RoleMismatch {
+        tool_id: assignment.tool_id.clone(),
+        role: assignment.role.to_string(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Planning
+// ---------------------------------------------------------------------------
+
+/// Build the [`FilePlan`]: base layer, blueprint marker, one layer per
+/// component (canonical order), then the optional `spec/` and Nix layers.
+///
+/// # Errors
+/// Fails on an unknown tool or role, mismatched infrastructure templates, or a
+/// missing/malformed/unsafe template manifest.
+pub fn plan(selection: &Selection, registry: &Registry) -> Result<FilePlan, ScaffoldError> {
+    let mut entries: Vec<FileEntry> = BASE_FILES
+        .iter()
+        .map(|(dest, source)| FileEntry::asset(*dest, TemplateSource::Base((*source).to_string())))
+        .collect();
+
     if blueprint_dir_present(selection) {
         entries.push(FileEntry {
-            dest: PathBuf::from("blueprint/.gitkeep"),
+            dest: PathBuf::from(BLUEPRINT_MARKER),
             source: TemplateSource::Inline(Vec::new()),
             render: false,
         });
     }
 
-    // --- Role layers ---
-    // Emit in canonical order regardless of flag/selection order (determinism, §11):
-    // roles in `Role::ALL` order, and within Infrastructure (the only multi-tool
-    // role) tools sorted by `tool_id`.
-    let mut ordered: Vec<&RoleAssignment> = selection.assignments.iter().collect();
-    ordered.sort_by(|a, b| {
-        let ai = Role::ALL.iter().position(|r| *r == a.role).unwrap();
-        let bi = Role::ALL.iter().position(|r| *r == b.role).unwrap();
-        ai.cmp(&bi).then_with(|| a.tool_id.cmp(&b.tool_id))
-    });
-
-    // Fullstack collapse: when one tool fills both on-chain and off-chain and
-    // declares a `[fullstack]` template, the two assignments emit a single
-    // `protocol/` component (TECH_SPEC §6.1), emitted once on the on-chain
-    // assignment (which sorts first) with the off-chain assignment skipped.
-    let fullstack_id = fullstack_tool_id(selection, registry);
-
-    // Infrastructure aggregates into a single component: all selected infra tools
-    // share one driver template (`_infra/cardano-up`) emitted once at `infra/`,
-    // rendered over the full set via `TemplateContext.infra_tools`. The shared
-    // template's manifest is read on the first infra assignment; the rest are
-    // skipped (they are contiguous after the canonical sort). See TECH_SPEC §6.1.
-    let mut infra_template: Option<String> = None;
-
-    for assignment in ordered {
-        let tool =
-            registry
-                .get(&assignment.tool_id)
-                .ok_or_else(|| ScaffoldError::ToolNotFound {
-                    tool_id: assignment.tool_id.clone(),
-                })?;
-
-        let is_fullstack_member = fullstack_id.as_deref() == Some(assignment.tool_id.as_str())
-            && matches!(assignment.role, Role::OnChain | Role::OffChain);
-
-        // Resolve (template path, destination dir) for this assignment. Fullstack
-        // and Infrastructure aggregate; every other role is one-tool-one-dir.
-        let (template_path, dest_prefix): (String, PathBuf) =
-            if is_fullstack_member {
-                // Emit the aggregated protocol/ component once (on the on-chain
-                // assignment); skip the off-chain half.
-                if assignment.role == Role::OffChain {
-                    continue;
-                }
-                let fs = tool
-                    .fullstack
-                    .as_ref()
-                    .expect("fullstack_tool_id guarantees a [fullstack] template");
-                (fs.template.clone(), PathBuf::from(contract::DIR_PROTOCOL))
-            } else if assignment.role == Role::Infrastructure {
-                let role_config = tool.roles.get(&assignment.role).ok_or_else(|| {
-                    ScaffoldError::RoleMismatch {
-                        tool_id: assignment.tool_id.clone(),
-                        role: assignment.role.to_string(),
-                    }
-                })?;
-                let template_path = role_config.template.clone();
-                // All infra tools must resolve to the same shared driver template.
-                match &infra_template {
-                    Some(first) => {
-                        if *first != template_path {
-                            return Err(ScaffoldError::InfraTemplateMismatch {
-                                tool_id: assignment.tool_id.clone(),
-                                template: template_path,
-                                expected: first.clone(),
-                            });
-                        }
-                        // Already emitted the aggregated component; skip duplicates.
-                        continue;
-                    }
-                    None => {
-                        infra_template = Some(template_path.clone());
-                        (template_path, PathBuf::from(assignment.role.dir()))
-                    }
-                }
-            } else {
-                let role_config = tool.roles.get(&assignment.role).ok_or_else(|| {
-                    ScaffoldError::RoleMismatch {
-                        tool_id: assignment.tool_id.clone(),
-                        role: assignment.role.to_string(),
-                    }
-                })?;
-                (
-                    role_config.template.clone(),
-                    PathBuf::from(assignment.role.dir()),
-                )
-            };
-
-        // Read the manifest
-        let manifest_key = format!("{template_path}/manifest.toml");
-        let manifest_data =
-            TemplateAssets::get(&manifest_key).ok_or_else(|| ScaffoldError::AssetNotFound {
-                path: manifest_key.clone(),
-            })?;
-        let manifest_text =
-            std::str::from_utf8(&manifest_data.data).expect("manifest.toml must be valid UTF-8");
-        let manifest: ManifestToml =
-            toml::from_str(manifest_text).map_err(|e| ScaffoldError::ManifestParse {
-                path: manifest_key,
-                source: e,
-            })?;
-
-        for file in &manifest.files {
-            // Honor an optional emission guard (e.g. `when = "nix"`).
-            if let Some(cond) = &file.when
-                && !cond.holds(selection)
-            {
-                continue;
-            }
-            validate_dest(&file.dest)?;
-            entries.push(FileEntry {
-                dest: dest_prefix.join(&file.dest),
-                source: TemplateSource::Role(format!("{}/{}", template_path, file.source)),
-                render: file.source.ends_with(".jinja"),
-            });
-        }
+    for (template, dir) in components(selection, registry)? {
+        entries.extend(component_entries(template, dir, selection)?);
     }
 
-    // --- Optional layers ---
-    // Protocol specification (plain text, non-executable). The worked example
-    // describes the gift-card protocol every on-/off-chain template implements,
-    // so it ships only when one of those roles is present.
-    if selection.spec {
-        entries.push(FileEntry {
-            dest: PathBuf::from("spec/README.md"),
-            source: TemplateSource::Optional("_spec/README.md.jinja".into()),
-            render: true,
-        });
-        if spec_example_present(selection) {
-            entries.push(FileEntry {
-                dest: PathBuf::from("spec/giftcard.md"),
-                source: TemplateSource::Optional("_spec/giftcard.md.jinja".into()),
-                render: true,
-            });
-        }
-    }
-    if selection.nix {
-        entries.push(FileEntry {
-            dest: PathBuf::from("flake.nix"),
-            source: TemplateSource::Optional("_nix/flake.nix.jinja".into()),
-            render: true,
-        });
-        entries.push(FileEntry {
-            dest: PathBuf::from(".envrc"),
-            source: TemplateSource::Optional("_nix/envrc.jinja".into()),
-            render: true,
-        });
-    }
+    entries.extend(optional_entries(selection));
 
     Ok(FilePlan { entries })
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+/// Resolve the selection into its components as `(template path, dest dir)`, in
+/// canonical order. The fullstack pair fuses into one `protocol/` component, and
+/// all infrastructure tools share a single `infra/` driver template.
+fn components<'r>(
+    selection: &Selection,
+    registry: &'r Registry,
+) -> Result<Vec<(&'r str, &'static str)>, ScaffoldError> {
+    let fullstack_id = fullstack_tool_id(selection, registry);
+    let mut infra_template: Option<&str> = None;
+    let mut components = Vec::new();
+
+    for assignment in canonical_assignments(selection) {
+        let tool = tool_for(registry, assignment)?;
+
+        if is_fullstack_member(assignment, fullstack_id.as_deref()) {
+            // Emit the pair once, on the on-chain half (which sorts first).
+            if assignment.role == Role::OnChain {
+                let fullstack = tool
+                    .fullstack
+                    .as_ref()
+                    .expect("fullstack_tool_id guarantees a [fullstack] template");
+                components.push((fullstack.template.as_str(), contract::DIR_PROTOCOL));
+            }
+            continue;
+        }
+
+        let template = tool
+            .roles
+            .get(&assignment.role)
+            .ok_or_else(|| role_mismatch(assignment))?
+            .template
+            .as_str();
+
+        if assignment.role == Role::Infrastructure {
+            match infra_template {
+                Some(expected) if expected != template => {
+                    return Err(ScaffoldError::InfraTemplateMismatch {
+                        tool_id: assignment.tool_id.clone(),
+                        template: template.to_string(),
+                        expected: expected.to_string(),
+                    });
+                }
+                // The aggregated component is already planned.
+                Some(_) => continue,
+                None => infra_template = Some(template),
+            }
+        }
+
+        components.push((template, assignment.role.dir()));
+    }
+
+    Ok(components)
+}
+
+/// The files `template`'s manifest emits under `dir`, honoring `when` guards.
+fn component_entries(
+    template: &str,
+    dir: &str,
+    selection: &Selection,
+) -> Result<Vec<FileEntry>, ScaffoldError> {
+    read_manifest(template)?
+        .files
+        .iter()
+        .filter(|file| file.when.as_ref().is_none_or(|cond| cond.holds(selection)))
+        .map(|file| {
+            validate_dest(&file.dest)?;
+            Ok(FileEntry::asset(
+                Path::new(dir).join(&file.dest),
+                TemplateSource::Role(format!("{template}/{}", file.source)),
+            ))
+        })
+        .collect()
+}
+
+/// The optional layers: the `spec/` folder and the Nix flake.
+fn optional_entries(selection: &Selection) -> Vec<FileEntry> {
+    let mut entries = Vec::new();
+    if selection.spec {
+        entries.push(FileEntry::asset(
+            "spec/README.md",
+            TemplateSource::Optional("_spec/README.md.jinja".into()),
+        ));
+        if spec_example_present(selection) {
+            entries.push(FileEntry::asset(
+                "spec/giftcard.md",
+                TemplateSource::Optional("_spec/giftcard.md.jinja".into()),
+            ));
+        }
+    }
+    if selection.nix {
+        entries.extend(NIX_FILES.iter().map(|(dest, source)| {
+            FileEntry::asset(*dest, TemplateSource::Optional((*source).to_string()))
+        }));
+    }
+    entries
+}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::registry::types::{Network, RoleAssignment};
+    use std::collections::BTreeMap;
 
-    fn registry() -> Registry {
-        Registry::load().expect("registry should load")
-    }
+    use super::super::test_support::{a, registry};
+    use super::*;
+    use crate::registry::types::Network;
 
     fn selection(assignments: Vec<RoleAssignment>) -> Selection {
         Selection {
@@ -408,212 +426,138 @@ mod tests {
         }
     }
 
-    #[test]
-    fn base_files_always_present() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
-        let plan = plan(&sel, &registry()).unwrap();
-
-        let dests: Vec<&str> = plan
+    fn plan_dests(sel: &Selection) -> Vec<String> {
+        plan(sel, &registry())
+            .unwrap()
             .entries
             .iter()
-            .map(|e| e.dest.to_str().unwrap())
-            .collect();
-        assert!(dests.contains(&"Justfile"));
-        assert!(dests.contains(&"README.md"));
-        assert!(dests.contains(&"AGENTS.md"));
-        assert!(dests.contains(&"CLAUDE.md"));
-        assert!(dests.contains(&".gitignore"));
-        assert!(dests.contains(&".env"));
+            .map(|e| e.dest.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn assert_plan_contains(sel: &Selection, expected: &[&str]) {
+        let dests = plan_dests(sel);
+        for want in expected {
+            assert!(dests.iter().any(|d| d == want), "plan is missing '{want}'");
+        }
+    }
+
+    #[test]
+    fn base_files_always_present() {
+        assert_plan_contains(
+            &selection(vec![a(Role::OnChain, "aiken")]),
+            &[
+                "Justfile",
+                "README.md",
+                "AGENTS.md",
+                "CLAUDE.md",
+                ".gitignore",
+                ".env",
+            ],
+        );
     }
 
     #[test]
     fn blueprint_gitkeep_when_on_chain() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
-        let plan = plan(&sel, &registry()).unwrap();
-
-        let dests: Vec<&str> = plan
-            .entries
-            .iter()
-            .map(|e| e.dest.to_str().unwrap())
-            .collect();
-        assert!(dests.contains(&"blueprint/.gitkeep"));
+        assert_plan_contains(
+            &selection(vec![a(Role::OnChain, "aiken")]),
+            &["blueprint/.gitkeep"],
+        );
     }
 
     #[test]
     fn blueprint_present_for_non_onchain_role() {
         // Off-chain-only still gets the blueprint dir: it's a consuming role
         // and a user may drop in an externally-built plutus.json.
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OffChain,
-            tool_id: "meshjs".into(),
-        }]);
-        let plan = plan(&sel, &registry()).unwrap();
-
-        let dests: Vec<&str> = plan
-            .entries
-            .iter()
-            .map(|e| e.dest.to_str().unwrap())
-            .collect();
-        assert!(dests.contains(&"blueprint/.gitkeep"));
+        assert_plan_contains(
+            &selection(vec![a(Role::OffChain, "meshjs")]),
+            &["blueprint/.gitkeep"],
+        );
     }
 
     #[test]
     fn no_blueprint_for_infra_only() {
-        // Infrastructure-only → no blueprint dir. Exercised through the predicate
-        // because the registry currently ships no infrastructure tool to plan
-        // end-to-end (Yaci fills the devnet role, not infra).
-        let infra_only = selection(vec![RoleAssignment {
-            role: Role::Infrastructure,
-            tool_id: "some-infra".into(),
-        }]);
+        let infra_only = selection(vec![a(Role::Infrastructure, "some-infra")]);
         assert!(!blueprint_dir_present(&infra_only));
 
-        // Any non-infra role flips it on.
-        let devnet_only = selection(vec![RoleAssignment {
-            role: Role::Devnet,
-            tool_id: "yaci".into(),
-        }]);
+        let devnet_only = selection(vec![a(Role::Devnet, "yaci")]);
         assert!(blueprint_dir_present(&devnet_only));
     }
 
     #[test]
     fn yaci_devnet_entries() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::Devnet,
-            tool_id: "yaci".into(),
-        }]);
-        let plan = plan(&sel, &registry()).unwrap();
-
-        let dests: Vec<&str> = plan
-            .entries
-            .iter()
-            .map(|e| e.dest.to_str().unwrap())
-            .collect();
-        // Devnet role lives under devnet/, and still gets the blueprint dir.
-        assert!(dests.contains(&"blueprint/.gitkeep"));
-        assert!(dests.contains(&"devnet/Justfile"));
-        assert!(dests.contains(&"devnet/integration.test.mjs"));
-        assert!(dests.contains(&"devnet/scripts/devnet-test.sh"));
-        assert!(dests.contains(&"devnet/scripts/set-env.mjs"));
+        assert_plan_contains(
+            &selection(vec![a(Role::Devnet, "yaci")]),
+            &[
+                "blueprint/.gitkeep",
+                "devnet/Justfile",
+                "devnet/integration.test.mjs",
+                "devnet/scripts/devnet-test.sh",
+                "devnet/scripts/set-env.mjs",
+            ],
+        );
     }
 
     #[test]
     fn aiken_on_chain_entries() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
-        let plan = plan(&sel, &registry()).unwrap();
-
-        let dests: Vec<&str> = plan
-            .entries
-            .iter()
-            .map(|e| e.dest.to_str().unwrap())
-            .collect();
-        assert!(dests.contains(&"on-chain/aiken.toml"));
-        assert!(dests.contains(&"on-chain/Justfile"));
-        assert!(dests.contains(&"on-chain/lib/helpers.ak"));
-        assert!(dests.contains(&"on-chain/validators/giftcard.ak"));
+        assert_plan_contains(
+            &selection(vec![a(Role::OnChain, "aiken")]),
+            &[
+                "on-chain/aiken.toml",
+                "on-chain/Justfile",
+                "on-chain/lib/helpers.ak",
+                "on-chain/validators/giftcard.ak",
+            ],
+        );
     }
 
     #[test]
     fn meshjs_off_chain_entries() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OffChain,
-            tool_id: "meshjs".into(),
-        }]);
-        let plan = plan(&sel, &registry()).unwrap();
-
-        let dests: Vec<&str> = plan
-            .entries
-            .iter()
-            .map(|e| e.dest.to_str().unwrap())
-            .collect();
-        assert!(dests.contains(&"off-chain/package.json"));
-        assert!(dests.contains(&"off-chain/Justfile"));
-        assert!(dests.contains(&"off-chain/src/index.ts"));
+        assert_plan_contains(
+            &selection(vec![a(Role::OffChain, "meshjs")]),
+            &[
+                "off-chain/package.json",
+                "off-chain/Justfile",
+                "off-chain/src/index.ts",
+            ],
+        );
     }
 
     #[test]
     fn plan_order_is_canonical_regardless_of_input_order() {
-        let forward = selection(vec![
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "aiken".into(),
-            },
-            RoleAssignment {
-                role: Role::OffChain,
-                tool_id: "meshjs".into(),
-            },
-        ]);
-        let reversed = selection(vec![
-            RoleAssignment {
-                role: Role::OffChain,
-                tool_id: "meshjs".into(),
-            },
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "aiken".into(),
-            },
-        ]);
+        let forward = selection(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
+        let reversed = selection(vec![a(Role::OffChain, "meshjs"), a(Role::OnChain, "aiken")]);
 
-        let dests = |s| {
-            plan(s, &registry())
-                .unwrap()
-                .entries
-                .iter()
-                .map(|e| e.dest.to_string_lossy().into_owned())
-                .collect::<Vec<_>>()
-        };
-        let fwd = dests(&forward);
-        assert_eq!(fwd, dests(&reversed), "flag order must not affect plan");
+        let fwd = plan_dests(&forward);
+        assert_eq!(
+            fwd,
+            plan_dests(&reversed),
+            "flag order must not affect plan"
+        );
 
-        // On-chain layer precedes off-chain layer (Role::ALL order).
         let oc = fwd.iter().position(|d| d.starts_with("on-chain/")).unwrap();
         let off = fwd
             .iter()
             .position(|d| d.starts_with("off-chain/"))
             .unwrap();
-        assert!(oc < off);
+        assert!(
+            oc < off,
+            "on-chain layer must precede off-chain (Role::ALL order)"
+        );
     }
 
     #[test]
     fn combined_selection_entry_count() {
-        let sel = selection(vec![
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "aiken".into(),
-            },
-            RoleAssignment {
-                role: Role::OffChain,
-                tool_id: "meshjs".into(),
-            },
-        ]);
+        let sel = selection(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
         let plan = plan(&sel, &registry()).unwrap();
 
-        // base: 6 (Justfile, README, AGENTS.md, CLAUDE.md, .gitignore, .env)
-        // blueprint/.gitkeep: 1
-        // aiken on-chain: 4 (aiken.toml, Justfile, lib/helpers.ak, validators/giftcard.ak)
-        // meshjs off-chain: 11 (package.json, tsconfig.json, Justfile, .env.example,
-        //                       scripts/bundle-blueprint.mjs,
-        //                       src/{contract,node,index,cli,contract.test,contract.integration.test}.ts)
-        // spec: 2 (spec/README.md, spec/giftcard.md)
-        // total: 24
+        // base 6 + blueprint marker 1 + aiken 4 + meshjs 11 + spec 2
         assert_eq!(plan.entries.len(), 24);
     }
 
     #[test]
     fn unknown_tool_errors() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "nonexistent".into(),
-        }]);
+        let sel = selection(vec![a(Role::OnChain, "nonexistent")]);
         assert!(matches!(
             plan(&sel, &registry()),
             Err(ScaffoldError::ToolNotFound { .. })
@@ -622,113 +566,69 @@ mod tests {
 
     #[test]
     fn fullstack_collapses_into_single_protocol_component() {
-        // Scalus fills both on-chain and off-chain and declares a [fullstack]
-        // template, so the two assignments emit ONE protocol/ component — no
-        // on-chain/ or off-chain/ directories.
         let sel = selection(vec![
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "scalus".into(),
-            },
-            RoleAssignment {
-                role: Role::OffChain,
-                tool_id: "scalus".into(),
-            },
+            a(Role::OnChain, "scalus"),
+            a(Role::OffChain, "scalus"),
         ]);
-        let plan = plan(&sel, &registry()).unwrap();
-        let dests: Vec<String> = plan
-            .entries
-            .iter()
-            .map(|e| e.dest.to_string_lossy().into_owned())
-            .collect();
+        let dests = plan_dests(&sel);
 
-        assert!(dests.contains(&"protocol/Justfile".to_string()));
-        assert!(dests.contains(&"protocol/src/main/scala/app/GiftCard.scala".to_string()));
-        assert!(dests.contains(&"protocol/src/main/scala/app/Main.scala".to_string()));
-        // The protocol Justfile is emitted exactly once (not once per role).
+        assert_plan_contains(
+            &sel,
+            &[
+                "protocol/Justfile",
+                "protocol/src/main/scala/app/GiftCard.scala",
+                "protocol/src/main/scala/app/Main.scala",
+                "blueprint/.gitkeep",
+            ],
+        );
         assert_eq!(
             dests.iter().filter(|d| *d == "protocol/Justfile").count(),
-            1
+            1,
+            "protocol component must be emitted once, not once per role"
         );
-        // No separate role directories.
         assert!(!dests.iter().any(|d| d.starts_with("on-chain/")));
         assert!(!dests.iter().any(|d| d.starts_with("off-chain/")));
-        // Blueprint dir is still present (protocol is a producer/consumer).
-        assert!(dests.contains(&"blueprint/.gitkeep".to_string()));
     }
 
     #[test]
     fn fullstack_tool_id_detects_the_pair() {
         let reg = registry();
-        // Same tool on both roles + [fullstack] template → collapse.
         let both = selection(vec![
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "scalus".into(),
-            },
-            RoleAssignment {
-                role: Role::OffChain,
-                tool_id: "scalus".into(),
-            },
+            a(Role::OnChain, "scalus"),
+            a(Role::OffChain, "scalus"),
         ]);
         assert_eq!(fullstack_tool_id(&both, &reg).as_deref(), Some("scalus"));
 
-        // Different tools per role → no collapse.
-        let mixed = selection(vec![
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "aiken".into(),
-            },
-            RoleAssignment {
-                role: Role::OffChain,
-                tool_id: "meshjs".into(),
-            },
-        ]);
+        let mixed = selection(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
         assert_eq!(fullstack_tool_id(&mixed, &reg), None);
 
-        // Only one role → no collapse.
-        let single = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "scalus".into(),
-        }]);
+        let single = selection(vec![a(Role::OnChain, "scalus")]);
         assert_eq!(fullstack_tool_id(&single, &reg), None);
     }
 
     #[test]
     fn infra_aggregates_into_single_component() {
-        // Multiple --infra providers emit ONE aggregated infra/ component (the
-        // shared cardano-up driver), not per-tool infra/<tool>/ subdirs.
         let sel = selection(vec![
-            RoleAssignment {
-                role: Role::Infrastructure,
-                tool_id: "kupo".into(),
-            },
-            RoleAssignment {
-                role: Role::Infrastructure,
-                tool_id: "ogmios".into(),
-            },
+            a(Role::Infrastructure, "kupo"),
+            a(Role::Infrastructure, "ogmios"),
         ]);
-        let plan = plan(&sel, &registry()).unwrap();
+        let dests = plan_dests(&sel);
 
-        let dests: Vec<String> = plan
-            .entries
-            .iter()
-            .map(|e| e.dest.to_string_lossy().into_owned())
-            .collect();
-
-        // Single aggregated component at infra/, emitted once.
-        assert!(dests.contains(&"infra/Justfile".to_string()));
-        assert!(dests.contains(&"infra/README.md".to_string()));
-        assert!(dests.contains(&"infra/scripts/write-env.sh".to_string()));
+        assert_plan_contains(
+            &sel,
+            &[
+                "infra/Justfile",
+                "infra/README.md",
+                "infra/scripts/write-env.sh",
+            ],
+        );
         assert_eq!(
             dests.iter().filter(|d| *d == "infra/Justfile").count(),
             1,
             "infra driver must be emitted exactly once"
         );
-        // No per-tool subdirs.
         assert!(!dests.iter().any(|d| d.starts_with("infra/kupo/")));
         assert!(!dests.iter().any(|d| d.starts_with("infra/ogmios/")));
-        // Infra-only project: no blueprint dir.
         assert!(!dests.iter().any(|d| d.starts_with("blueprint/")));
     }
 
@@ -749,103 +649,62 @@ mod tests {
         assert!(validate_dest("sub/../../../etc").is_err());
     }
 
-    fn plan_dests(sel: &Selection) -> Vec<String> {
-        plan(sel, &registry())
-            .unwrap()
-            .entries
-            .iter()
-            .map(|e| e.dest.to_str().unwrap().to_string())
-            .collect()
-    }
-
     #[test]
     fn spec_true_includes_spec_files() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
-        let dests = plan_dests(&sel);
-        assert!(dests.contains(&"spec/README.md".to_string()));
-        assert!(dests.contains(&"spec/giftcard.md".to_string()));
+        assert_plan_contains(
+            &selection(vec![a(Role::OnChain, "aiken")]),
+            &["spec/README.md", "spec/giftcard.md"],
+        );
     }
 
     #[test]
     fn spec_false_excludes_spec_files() {
-        let mut sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
+        let mut sel = selection(vec![a(Role::OnChain, "aiken")]);
         sel.spec = false;
         assert!(!plan_dests(&sel).iter().any(|d| d.starts_with("spec/")));
     }
 
     #[test]
     fn spec_example_only_with_protocol_roles() {
-        // Infra/devnet-only projects have no gift-card code to describe: the
-        // folder (README) ships, the worked example doesn't.
-        let sel = selection(vec![RoleAssignment {
-            role: Role::Devnet,
-            tool_id: "yaci".into(),
-        }]);
-        let dests = plan_dests(&sel);
-        assert!(dests.contains(&"spec/README.md".to_string()));
-        assert!(!dests.contains(&"spec/giftcard.md".to_string()));
+        // Devnet-only projects have no gift-card code to describe.
+        let sel = selection(vec![a(Role::Devnet, "yaci")]);
+        assert_plan_contains(&sel, &["spec/README.md"]);
+        assert!(!plan_dests(&sel).iter().any(|d| d == "spec/giftcard.md"));
     }
 
     #[test]
     fn nix_true_includes_flake() {
-        let mut sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
+        let mut sel = selection(vec![a(Role::OnChain, "aiken")]);
         sel.nix = true;
-        let plan = plan(&sel, &registry()).unwrap();
-
-        let dests: Vec<&str> = plan
-            .entries
-            .iter()
-            .map(|e| e.dest.to_str().unwrap())
-            .collect();
-        assert!(dests.contains(&"flake.nix"));
+        assert_plan_contains(&sel, &["flake.nix", ".envrc"]);
     }
 
-    /// Guard against the "registered but missing template" class of bug:
-    /// every tool's every role template must resolve to a real manifest, and
-    /// every file the manifest lists must exist as an embedded asset.
+    #[test]
+    fn nix_false_excludes_flake() {
+        let sel = selection(vec![a(Role::OnChain, "aiken")]);
+        assert!(!plan_dests(&sel).iter().any(|d| d == "flake.nix"));
+    }
+
+    /// Every tool's role and fullstack templates resolve to a manifest whose
+    /// listed sources all exist as embedded assets.
     #[test]
     fn every_registered_template_resolves() {
         let reg = registry();
         for tool in reg.all_tools() {
-            // Check each role template plus the optional fullstack template.
             let templates = tool
                 .roles
-                .iter()
-                .map(|(role, cfg)| (role.to_string(), &cfg.template))
-                .chain(
-                    tool.fullstack
-                        .iter()
-                        .map(|cfg| ("fullstack".to_string(), &cfg.template)),
-                );
-            for (role, template) in templates {
-                let manifest_key = format!("{template}/manifest.toml");
-                let data = TemplateAssets::get(&manifest_key).unwrap_or_else(|| {
-                    panic!(
-                        "tool '{}' role '{}' points at missing manifest '{}'",
-                        tool.id, role, manifest_key
-                    )
-                });
-                let text = std::str::from_utf8(&data.data).expect("manifest must be UTF-8");
-                let manifest: ManifestToml = toml::from_str(text)
-                    .unwrap_or_else(|e| panic!("manifest '{manifest_key}' failed to parse: {e}"));
-
+                .values()
+                .chain(&tool.fullstack)
+                .map(|cfg| &cfg.template);
+            for template in templates {
+                let manifest =
+                    read_manifest(template).unwrap_or_else(|e| panic!("tool '{}': {e}", tool.id));
                 for file in &manifest.files {
-                    let source_key = format!("{}/{}", template, file.source);
+                    let source_key = format!("{template}/{}", file.source);
                     assert!(
                         TemplateAssets::get(&source_key).is_some(),
-                        "tool '{}' manifest '{}' references missing source '{}'",
+                        "tool '{}' template '{template}' references missing source '{source_key}'",
                         tool.id,
-                        manifest_key,
-                        source_key
                     );
                 }
             }
@@ -879,9 +738,9 @@ mod tests {
     /// (indentation stripped). Jinja control lines interleaved in a recipe
     /// (e.g. the infra driver's `{%- for … %}`) are skipped; a blank line or
     /// the next column-0 line ends a recipe.
-    fn justfile_targets(text: &str) -> std::collections::BTreeMap<String, Vec<String>> {
+    fn justfile_targets(text: &str) -> BTreeMap<String, Vec<String>> {
         let lines: Vec<&str> = text.lines().collect();
-        let mut targets = std::collections::BTreeMap::new();
+        let mut targets = BTreeMap::new();
         for (i, line) in lines.iter().enumerate() {
             let Some(name) = justfile_target_name(line) else {
                 continue;
@@ -892,11 +751,9 @@ mod tests {
                     break; // blank line terminates the recipe
                 }
                 if l.starts_with(char::is_whitespace) {
-                    body.push(l.trim().to_string()); // a command line
-                } else if l.trim_start().starts_with("{%") || l.trim_start().starts_with("{#") {
-                    continue; // Jinja control line inside the recipe — not a command
-                } else {
-                    break; // next column-0 line
+                    body.push(l.trim().to_string());
+                } else if !(l.starts_with("{%") || l.starts_with("{#")) {
+                    break; // next column-0 line; Jinja control lines are skipped
                 }
             }
             targets.insert(name, body);
@@ -921,47 +778,26 @@ mod tests {
         })
     }
 
-    /// Contract-compliance test (issue #10): every component template must
-    /// honor the interface contract (§7) — expose `build`/`test`/`clean`
-    /// Justfile targets, and provide `dev` only for a genuine watch/daemon/
-    /// devnet mode (no no-op `dev`). Runs across every distinct template
-    /// referenced by the registry.
-    ///
-    /// This checks the statically-verifiable contract. That each component
-    /// *actually builds* standalone is the job of `just build`/`just test`
-    /// (the smoke matrix), deliberately not duplicated in a heuristic here
-    /// (cf. the doctor scope note, TECH_SPEC §9).
+    /// Interface contract (§7), statically checked across every distinct
+    /// component template: the Justfile exposes `build`/`test`/`clean`, and
+    /// `dev` only for a genuine watch/daemon/devnet mode. Whether components
+    /// actually build is left to the smoke matrix.
     #[test]
     fn every_template_satisfies_interface_contract() {
-        use std::collections::BTreeMap;
-
         let reg = registry();
 
-        // Every distinct component template (role + fullstack), deduped by
-        // path — the infra driver template is shared across all infra tools.
-        // Value = an owning tool id, for clearer failure messages.
-        let mut templates: BTreeMap<String, String> = BTreeMap::new();
+        // Distinct templates (the infra driver is shared), each mapped to an
+        // owning tool id for failure messages.
+        let mut templates: BTreeMap<&str, &str> = BTreeMap::new();
         for tool in reg.all_tools() {
-            for cfg in tool.roles.values() {
-                templates
-                    .entry(cfg.template.clone())
-                    .or_insert_with(|| tool.id.clone());
-            }
-            if let Some(cfg) = &tool.fullstack {
-                templates
-                    .entry(cfg.template.clone())
-                    .or_insert_with(|| tool.id.clone());
+            for cfg in tool.roles.values().chain(&tool.fullstack) {
+                templates.entry(&cfg.template).or_insert(&tool.id);
             }
         }
 
         for (template, owner) in &templates {
-            // Locate the Justfile the manifest emits (dest == "Justfile").
-            let manifest_key = format!("{template}/manifest.toml");
-            let data = TemplateAssets::get(&manifest_key)
-                .unwrap_or_else(|| panic!("template '{template}' ({owner}) missing manifest"));
-            let text = std::str::from_utf8(&data.data).expect("manifest must be UTF-8");
-            let manifest: ManifestToml = toml::from_str(text)
-                .unwrap_or_else(|e| panic!("manifest '{manifest_key}' failed to parse: {e}"));
+            let manifest = read_manifest(template)
+                .unwrap_or_else(|e| panic!("template '{template}' ({owner}): {e}"));
 
             let justfile = manifest
                 .files
@@ -1008,21 +844,5 @@ mod tests {
             "expected to check every component template; only found {}",
             templates.len()
         );
-    }
-
-    #[test]
-    fn nix_false_excludes_flake() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
-        let plan = plan(&sel, &registry()).unwrap();
-
-        let dests: Vec<&str> = plan
-            .entries
-            .iter()
-            .map(|e| e.dest.to_str().unwrap())
-            .collect();
-        assert!(!dests.contains(&"flake.nix"));
     }
 }
