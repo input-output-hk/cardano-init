@@ -1,16 +1,12 @@
-//! Serializable, presentation-agnostic views of the registry.
-//!
-//! These are the single source the `list` subcommand renders from
-//! (ARCHITECTURE §7.3) — pure data derived from the registry, with no knowledge
-//! of colors or tables. The JSON shape matches TECH_SPEC §8.
+//! Serializable, presentation-agnostic views of the registry, rendered by the
+//! `list` subcommand. The JSON shape is specified in tech-spec §8.
 
 use serde::Serialize;
 
 use super::loader::Registry;
 use super::types::{Link, Role};
 
-/// A role, as exposed to consumers (TECH_SPEC §8). `multiple` is `true` only for
-/// the role that may be filled by several tools at once (Infrastructure).
+/// A role, as exposed to consumers.
 #[derive(Debug, Clone, Serialize)]
 pub struct RoleView {
     pub id: &'static str,
@@ -19,8 +15,8 @@ pub struct RoleView {
     pub multiple: bool,
 }
 
-/// A tool, as exposed to consumers. Field set is intentionally user-facing —
-/// no `system_deps`/`detect` (those are the doctor's concern, TECH_SPEC §8).
+/// A tool, as exposed to consumers. Doctor-only fields (`system_deps`,
+/// `detect`) are deliberately omitted.
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolView {
     pub id: String,
@@ -30,14 +26,10 @@ pub struct ToolView {
     pub community: Vec<Link>,
     pub languages: Vec<String>,
     pub roles: Vec<String>,
-    /// `true` when the tool declares a `[fullstack]` template, i.e. it can fill
-    /// on-chain + off-chain as one `protocol/` component (`--fullstack <tool>`).
-    /// A capability, not a role — never appears in `roles`.
+    /// The tool declares a `[fullstack]` template. A capability, not a role, so
+    /// it never appears in `roles`.
     pub fullstack: bool,
-    /// `true` when the tool is **experimental**: it generates but is not yet
-    /// build-green. Additive field (no `schema_version` bump); lets agents
-    /// filter or warn before selecting it (selecting one needs
-    /// `--allow-experimental`).
+    /// Selecting the tool requires `--allow-experimental`.
     pub experimental: bool,
 }
 
@@ -154,8 +146,6 @@ mod tests {
     #[test]
     fn tool_views_surface_experimental_flag() {
         let views = tool_views(&registry());
-        // Experimental status is carried through to the discovery surface so
-        // `list` can flag not-yet-build-green tools.
         let blaster = views.iter().find(|t| t.id == "blaster").unwrap();
         assert!(blaster.experimental);
         let aiken = views.iter().find(|t| t.id == "aiken").unwrap();

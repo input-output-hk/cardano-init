@@ -1,13 +1,9 @@
-//! The dependency doctor (TECH_SPEC §9, ARCHITECTURE §8).
+//! The dependency doctor (tech-spec §9).
 //!
 //! Checks which required dependencies are present and, for missing ones,
-//! produces an OS-aware, ordered install plan via a pure, recursive,
-//! cycle-guarded resolver.
-//!
-//! Boundary: `mod.rs` (resolver), `installers.rs` (closed installer vocab), and
-//! `catalog.rs` (recipe data) are **pure** and unit-tested with synthetic
-//! `Environment`s; only `probe.rs` touches the system. `doctor` depends on
-//! `registry`/`contract`, never on `cli`.
+//! produces an OS-aware, ordered install plan. The resolver here, `installers`
+//! and `catalog` are pure; only `probe` touches the system. Nothing here
+//! depends on `cli`.
 
 pub mod catalog;
 pub mod installers;
@@ -17,23 +13,17 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
-use catalog::{DepCatalog, DepRecipe, SupportLink};
+use catalog::{DepCatalog, DepRecipe, InstallMethod, SupportLink};
 use installers::Installer;
 use probe::Environment;
 
-/// The base dependency every project needs (universal task runner). Owned by no
-/// tool; has a `registry/deps.toml` entry like any dep (TECH_SPEC §9.1).
+/// The task runner every project needs. Owned by no tool.
 pub const BASE_DEP: &str = "just";
 
-/// Synthetic component id the project scan reports for the aggregated `infra/`
-/// component (which has no per-tool subdirs to identify). It represents the
-/// cardano-up driver; its required deps are the union of all infra tools'
-/// `system_deps` (TECH_SPEC §9.6).
+/// Component id the project scan reports for the aggregated `infra/`
+/// component; its required deps are the union of all infra tools'
+/// `system_deps`.
 pub const INFRA_DRIVER_ID: &str = "cardano-up";
-
-// ---------------------------------------------------------------------------
-// Report types (serialize to the §9.4 JSON `data` payload)
-// ---------------------------------------------------------------------------
 
 /// One step of an install plan.
 #[derive(Debug, Clone, Serialize)]
@@ -42,10 +32,17 @@ pub struct Step {
     pub command: String,
 }
 
-/// An alternative install method for a missing dep — a recipe method other than
-/// the one the recommended `plan` uses, so the user can choose. `available` is
-/// whether its installer is present on this host right now (an unavailable one
-/// needs its installer installed first).
+impl Step {
+    fn new(method: &InstallMethod) -> Self {
+        Step {
+            installer: method.installer,
+            command: method.installer.command(&method.arg),
+        }
+    }
+}
+
+/// A recipe method other than the one the recommended plan uses.
+/// `available` is whether its installer is present on this host.
 #[derive(Debug, Clone, Serialize)]
 pub struct AltMethod {
     pub installer: Installer,
@@ -62,13 +59,10 @@ pub struct DepStatus {
     /// Ordered install steps for this host. Empty when present or unresolved.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub plan: Vec<Step>,
-    /// Other recipe methods beyond `plan` (available ones first, then those
-    /// needing an installer this host lacks). Lets the user pick a different
-    /// installer. Empty when present, or when the recipe offers no other method.
+    /// Other recipe methods beyond `plan`, available ones first.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub alternatives: Vec<AltMethod>,
-    /// Docs URL — the universal fallback so advice is never empty (FR-20).
-    /// Omitted only when the dep is already present.
+    /// Docs URL, the fallback so advice is never empty. `None` when present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -89,15 +83,6 @@ impl Report {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Resolver (pure, recursive)
-// ---------------------------------------------------------------------------
-
-enum Resolved {
-    Plan(Vec<Step>),
-    Unresolved,
-}
-
 fn dep_present(recipe: &DepRecipe, env: &Environment) -> bool {
     recipe
         .binaries
@@ -105,133 +90,102 @@ fn dep_present(recipe: &DepRecipe, env: &Environment) -> bool {
         .any(|b| env.present_binaries.contains(b))
 }
 
-/// Resolve a single dep to an ordered install plan for this host, or
-/// `Unresolved`. Recursive over installer `bootstrap` edges; `seen` guards
-/// against cycles (TECH_SPEC §9.4).
+/// Resolve a dep to an ordered install plan for this host (empty when already
+/// present), or `None` when no plan exists. Recurses over installer
+/// `bootstrap` edges; `seen` guards against cycles.
 fn resolve(
     dep_id: &str,
     env: &Environment,
     catalog: &DepCatalog,
     seen: &HashSet<String>,
-) -> Resolved {
+) -> Option<Vec<Step>> {
     if seen.contains(dep_id) {
-        return Resolved::Unresolved; // cycle guard
+        return None;
     }
-    let Some(recipe) = catalog.get(dep_id) else {
-        return Resolved::Unresolved;
-    };
+    let recipe = catalog.get(dep_id)?;
     if dep_present(recipe, env) {
-        return Resolved::Plan(Vec::new()); // already present
+        return Some(Vec::new());
     }
 
-    // Pass 1 (preferred): the first method whose installer is usable right now
-    // yields a one-step plan. This is why `aiken` resolves directly via `nix`
-    // when present, without bootstrapping `aikup` (TECH_SPEC §9.4).
-    for method in &recipe.install {
-        if env.installers.contains(&method.installer) {
-            return Resolved::Plan(vec![Step {
-                installer: method.installer,
-                command: method.installer.command(&method.arg),
-            }]);
-        }
+    // Prefer any method whose installer is usable right now, so e.g. `aiken`
+    // resolves directly via `nix` without bootstrapping `aikup`.
+    if let Some(method) = recipe
+        .install
+        .iter()
+        .find(|m| env.installers.contains(&m.installer))
+    {
+        return Some(vec![Step::new(method)]);
     }
 
-    // Pass 2: no installer is directly available — bootstrap one, in recipe
-    // order (empty `bootstrap` ⇒ terminal, skipped). Prepend the bootstrap
-    // steps, then this method's step.
-    for method in &recipe.install {
-        for bdep in method.installer.bootstrap() {
-            let mut next = seen.clone();
-            next.insert(dep_id.to_string());
-            if let Resolved::Plan(mut steps) = resolve(bdep, env, catalog, &next) {
-                steps.push(Step {
-                    installer: method.installer,
-                    command: method.installer.command(&method.arg),
-                });
-                return Resolved::Plan(steps);
-            }
-        }
-    }
-    Resolved::Unresolved
+    // Otherwise bootstrap an installer, in recipe order.
+    let mut seen = seen.clone();
+    seen.insert(dep_id.to_string());
+    recipe.install.iter().find_map(|method| {
+        method.installer.bootstrap().iter().find_map(|bdep| {
+            let mut steps = resolve(bdep, env, catalog, &seen)?;
+            steps.push(Step::new(method));
+            Some(steps)
+        })
+    })
 }
 
-/// The recipe methods to offer as alternatives to the recommended `plan`: every
-/// method whose installer differs from the one `plan` settles on, ordered
-/// available-first (each keeping the recipe's preference order within its
-/// group). When `plan` is empty (unresolved), every method is offered — all
-/// flagged unavailable, since a present installer would have produced a plan.
+/// Every recipe method whose installer differs from `chosen`, available ones
+/// first, each group in recipe preference order.
 fn alt_methods(recipe: &DepRecipe, chosen: Option<Installer>, env: &Environment) -> Vec<AltMethod> {
-    let (mut available, mut needs_installer) = (Vec::new(), Vec::new());
-    for method in &recipe.install {
-        if Some(method.installer) == chosen {
-            continue;
-        }
-        let alt = AltMethod {
+    let (available, needs_installer): (Vec<_>, Vec<_>) = recipe
+        .install
+        .iter()
+        .filter(|method| Some(method.installer) != chosen)
+        .map(|method| AltMethod {
             installer: method.installer,
             command: method.installer.command(&method.arg),
             available: env.installers.contains(&method.installer),
-        };
-        if alt.available {
-            available.push(alt);
-        } else {
-            needs_installer.push(alt);
-        }
-    }
+        })
+        .partition(|alt| alt.available);
     available.into_iter().chain(needs_installer).collect()
 }
 
-/// Resolve all required dependencies into a `Report`. Dependencies are
-/// deduplicated and reported in a stable (sorted) order.
+fn dep_status(id: String, catalog: &DepCatalog, env: &Environment) -> DepStatus {
+    let recipe = catalog.get(&id);
+    let present = recipe.is_some_and(|r| dep_present(r, env));
+    let mut status = DepStatus {
+        id,
+        required: true,
+        present,
+        plan: Vec::new(),
+        alternatives: Vec::new(),
+        docs: None,
+        support: recipe.map_or_else(Vec::new, |r| r.support.clone()),
+    };
+    if let Some(recipe) = recipe.filter(|_| !present) {
+        status.plan = resolve(&status.id, env, catalog, &HashSet::new()).unwrap_or_default();
+        let chosen = status.plan.last().map(|s| s.installer);
+        status.alternatives = alt_methods(recipe, chosen, env);
+        status.docs = Some(recipe.docs.clone());
+    }
+    status
+}
+
+/// Resolve all required dependencies into a `Report`, deduplicated and sorted.
 pub fn resolve_all(required: &[String], catalog: &DepCatalog, env: &Environment) -> Report {
-    let mut ids: Vec<String> = required.to_vec();
+    let mut ids = required.to_vec();
     ids.sort();
     ids.dedup();
 
-    let mut deps = Vec::with_capacity(ids.len());
-    let mut all_required_present = true;
-
-    for id in ids {
-        let recipe = catalog.get(&id);
-        let present = recipe.map(|r| dep_present(r, env)).unwrap_or(false);
-        if !present {
-            all_required_present = false;
-        }
-
-        let (plan, alternatives, docs) = if present {
-            (Vec::new(), Vec::new(), None)
-        } else {
-            let docs = recipe.map(|r| r.docs.clone());
-            let plan = match resolve(&id, env, catalog, &HashSet::new()) {
-                Resolved::Plan(steps) => steps,
-                Resolved::Unresolved => Vec::new(),
-            };
-            // Everything the recipe offers beyond the recommended plan.
-            let chosen = plan.last().map(|s| s.installer);
-            let alternatives = recipe.map_or_else(Vec::new, |r| alt_methods(r, chosen, env));
-            (plan, alternatives, docs)
-        };
-
-        deps.push(DepStatus {
-            id,
-            required: true,
-            present,
-            plan,
-            alternatives,
-            docs,
-            support: recipe.map_or_else(Vec::new, |r| r.support.clone()),
-        });
-    }
-
+    let deps: Vec<DepStatus> = ids
+        .into_iter()
+        .map(|id| dep_status(id, catalog, env))
+        .collect();
     Report {
-        all_required_present,
+        all_required_present: deps.iter().all(|d| d.present),
         deps,
     }
 }
 
-/// The Cardano-relevant tooling installed on this host, independent of what the
-/// current project requires: the base dep plus every tool's `system_deps`,
-/// filtered to those present, sorted and deduplicated. Installer-provider-only
-/// deps (aikup, rustup, go, …) are excluded — they surface as installers.
+/// The Cardano tooling installed on this host regardless of what the project
+/// requires: the base dep plus every tool's `system_deps` that are present,
+/// sorted and deduplicated. Installer-only deps (aikup, rustup, go, ...) are
+/// excluded; they surface as installers.
 pub fn present_tooling(
     catalog: &DepCatalog,
     registry: &crate::registry::loader::Registry,
@@ -251,10 +205,6 @@ pub fn present_tooling(
     ids
 }
 
-// ---------------------------------------------------------------------------
-// Tests (synthetic Environment — no system access)
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,7 +214,7 @@ mod tests {
         Environment {
             os: Os::Linux,
             installers: installers.iter().copied().collect(),
-            present_binaries: present_bins.iter().map(|s| s.to_string()).collect(),
+            present_binaries: present_bins.iter().map(ToString::to_string).collect(),
         }
     }
 
@@ -421,8 +371,8 @@ mod tests {
 
     #[test]
     fn report_json_shape_matches_spec() {
-        // present dep → only {id, required, present}; missing+resolved →
-        // {id, required, present, plan, docs} (TECH_SPEC §9.4).
+        // Present dep → only {id, required, present}; missing and resolved →
+        // also {plan, docs} (tech-spec §9.4).
         let report = resolve_all(
             &["just".to_string(), "node".to_string()],
             &catalog(),
@@ -457,7 +407,7 @@ mod tests {
         assert!(tooling.is_empty());
     }
 
-    // ---- Referential integrity (TECH_SPEC §9.5) ----
+    // Referential integrity (tech-spec §9.5).
 
     #[test]
     fn every_system_dep_plus_base_has_a_recipe() {
@@ -486,9 +436,7 @@ mod tests {
             for bdep in installer.bootstrap() {
                 assert!(
                     cat.get(bdep).is_some(),
-                    "installer '{}' bootstraps via dep '{}' with no recipe",
-                    installer,
-                    bdep
+                    "installer '{installer}' bootstraps via dep '{bdep}' with no recipe"
                 );
             }
         }

@@ -1,11 +1,7 @@
-//! The closed `Installer` vocabulary (TECH_SPEC §9.2, ARCHITECTURE §8.1).
+//! The closed `Installer` vocabulary (tech-spec §9.2).
 //!
-//! Installers are **code**: detection binaries, the command template, and the
-//! `bootstrap` edges are logic over a closed set, so they earn compile-time
-//! safety. An installer is itself a kind of dependency — its `bootstrap` list
-//! names the dep ids that *provide* it. An **empty** `bootstrap` ⇒ terminal
-//! (we detect it, never auto-install it); a **non-empty** list ⇒ bootstrappable
-//! by installing any one of those deps in order.
+//! An installer is itself a kind of dependency: its `bootstrap` list names the
+//! dep ids that provide it. Empty means terminal (detected, never installed).
 
 use std::fmt;
 
@@ -50,31 +46,13 @@ impl Installer {
         Installer::PowerShell,
     ];
 
-    /// Parse the installer key used in `registry/deps.toml`. Unknown → `None`
-    /// (the caller turns this into a load error).
-    pub fn from_key(s: &str) -> Option<Self> {
-        Some(match s {
-            "brew" => Installer::Brew,
-            "apt" => Installer::Apt,
-            "dnf" => Installer::Dnf,
-            "pacman" => Installer::Pacman,
-            "winget" => Installer::Winget,
-            "nix" => Installer::Nix,
-            "go" => Installer::Go,
-            "cargo" => Installer::Cargo,
-            "npm" => Installer::Npm,
-            "aikup" => Installer::Aikup,
-            "cardano-up" => Installer::CardanoUp,
-            "tx3up" => Installer::Tx3up,
-            "curl" => Installer::Curl,
-            "powershell" => Installer::PowerShell,
-            _ => return None,
-        })
+    /// Parse an installer key as used in `registry/deps.toml`.
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|i| i.key() == key)
     }
 
-    /// The stable key for this installer (matches the `deps.toml` key and the
-    /// JSON `installer` field).
-    pub fn key(&self) -> &'static str {
+    /// The stable key: the `deps.toml` key and the JSON `installer` value.
+    pub fn key(self) -> &'static str {
         match self {
             Installer::Brew => "brew",
             Installer::Apt => "apt",
@@ -94,7 +72,7 @@ impl Installer {
     }
 
     /// Binaries whose presence on `PATH` means this installer is available.
-    pub fn detect(&self) -> &'static [&'static str] {
+    pub fn detect(self) -> &'static [&'static str] {
         match self {
             Installer::Brew => &["brew"],
             Installer::Apt => &["apt"],
@@ -114,7 +92,7 @@ impl Installer {
     }
 
     /// Dep ids that provide this installer. Empty ⇒ terminal (detect-only).
-    pub fn bootstrap(&self) -> &'static [&'static str] {
+    pub fn bootstrap(self) -> &'static [&'static str] {
         match self {
             Installer::Npm => &["node"],
             Installer::Cargo => &["rustup", "rust"],
@@ -122,8 +100,6 @@ impl Installer {
             Installer::Aikup => &["aikup"],
             Installer::CardanoUp => &["cardano-up"],
             Installer::Tx3up => &["tx3up"],
-            // System package managers, nix, and the download-and-run shells are
-            // terminal: we detect them, never install them.
             Installer::Brew
             | Installer::Apt
             | Installer::Dnf
@@ -135,9 +111,9 @@ impl Installer {
         }
     }
 
-    /// Render the install command for `arg` (a package name, installer-script
-    /// URL, or target, per the installer).
-    pub fn command(&self, arg: &str) -> String {
+    /// Render the install command for `arg`: a package name, installer-script
+    /// URL, or target, depending on the installer.
+    pub fn command(self, arg: &str) -> String {
         match self {
             Installer::Brew => format!("brew install {arg}"),
             Installer::Apt => format!("sudo apt install -y {arg}"),
@@ -148,15 +124,13 @@ impl Installer {
             Installer::Go => format!("go install {arg}"),
             Installer::Cargo => format!("cargo install {arg}"),
             Installer::Npm => format!("npm install -g {arg}"),
-            // An empty arg means "latest" — aikup installs the newest release
-            // when given no version, so avoid a stray trailing space.
-            Installer::Aikup if arg.is_empty() => "aikup install".to_string(),
+            // An empty arg installs the latest release / active channel; avoid a
+            // trailing space.
+            Installer::Aikup | Installer::Tx3up if arg.is_empty() => {
+                format!("{} install", self.key())
+            }
             Installer::Aikup => format!("aikup install {arg}"),
             Installer::CardanoUp => format!("cardano-up install {arg}"),
-            // An empty arg means "install the toolchain for the active channel"
-            // (trix/dolos/cshell/tx3c) — tx3up needs no target, so avoid a stray
-            // trailing space (matches the Aikup shape).
-            Installer::Tx3up if arg.is_empty() => "tx3up install".to_string(),
             Installer::Tx3up => format!("tx3up install {arg}"),
             Installer::Curl => format!("curl -sSfL {arg} | sh"),
             Installer::PowerShell => format!("powershell -c \"irm {arg} | iex\""),
@@ -170,8 +144,7 @@ impl fmt::Display for Installer {
     }
 }
 
-/// Serializes as the stable key string (e.g. `"npm"`), matching the JSON
-/// `installer` field in the doctor Report (§9.4).
+/// Serializes as the stable key, e.g. `"npm"`.
 impl Serialize for Installer {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.key())

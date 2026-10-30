@@ -1,14 +1,10 @@
-//! The single source of truth for the CLI's human-facing look: the status
-//! glyphs, the color palette, and the layout constants. Every `print_*` in
-//! `cli/` styles through these helpers instead of spelling
-//! out `console::style(...).cyan().bold()` at the call site, so the vocabulary
-//! ("success is green ✔, a path is cyan, a heading is bold + underlined") is
-//! defined once and can't drift between commands.
+//! The CLI's visual vocabulary: status glyphs, semantic text styles, badges and
+//! layout constants. Presenters style through these helpers, never through
+//! `console::style` directly, so commands can't drift apart.
 //!
-//! Coloring is delegated to `console`, which already disables ANSI when the
-//! stream isn't a TTY or `NO_COLOR`/`CLICOLOR`/`TERM=dumb` ask it to — so these
-//! helpers need no TTY logic of their own. Glyphs use [`console::Emoji`], which
-//! substitutes an ASCII fallback on terminals that can't render the unicode.
+//! `console` already drops ANSI off-TTY and under `NO_COLOR`/`CLICOLOR`/
+//! `TERM=dumb`, and [`console::Emoji`] falls back to ASCII where unicode can't
+//! render, so no TTY logic is needed here.
 
 use console::{Emoji, StyledObject, style};
 
@@ -34,8 +30,7 @@ pub fn ok() -> StyledObject<Emoji<'static, 'static>> {
 }
 
 /// Yellow ✘ — a needs-attention check (an absent required dependency). Yellow,
-/// not red: a missing dep is an actionable warning, and this keeps the mark in
-/// tone with the yellow `missing:` text and the ` DEPS MISSING ` badge.
+/// not red: a missing dep is an actionable warning, not a failure.
 pub fn caution() -> StyledObject<Emoji<'static, 'static>> {
     style(FAIL).yellow().bold()
 }
@@ -104,8 +99,8 @@ pub fn link<D>(val: D) -> StyledObject<D> {
 // Badges (filled pills — a single splash of background, used sparingly)
 // ---------------------------------------------------------------------------
 
-/// A success badge: `text` on a solid green fill (e.g. ` CREATED `). Under
-/// NO_COLOR / off-TTY the fill drops away and the padded label remains legible.
+/// A success badge: `text` on a solid green fill (e.g. ` CREATED `). Without
+/// color the padded label stays legible.
 pub fn badge_ok(text: &str) -> StyledObject<String> {
     style(format!(" {text} ")).black().on_green().bold()
 }
@@ -116,7 +111,6 @@ pub fn badge_warn(text: &str) -> StyledObject<String> {
 }
 
 /// An error badge: `text` on a solid red fill (e.g. ` ERR (unknown_tool) `).
-/// Black text, matching the other pills — readable on the red fill.
 pub fn badge_err(text: &str) -> StyledObject<String> {
     style(format!(" {text} ")).black().on_red().bold()
 }

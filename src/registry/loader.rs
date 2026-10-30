@@ -4,21 +4,13 @@ use rust_embed::RustEmbed;
 use serde::Deserialize;
 
 use super::types::{
-    CompatConfig, DetectSignature, EnvMapping, InfraConfig, Link, Role, RoleConfig, Seam, ToolDef,
+    CompatConfig, DetectSignature, InfraConfig, Link, Role, RoleConfig, Seam, ToolDef,
     UnknownRoleError, UnknownSeamError,
 };
-
-// ---------------------------------------------------------------------------
-// Embedded assets
-// ---------------------------------------------------------------------------
 
 #[derive(RustEmbed)]
 #[folder = "registry/"]
 struct RegistryAssets;
-
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, thiserror::Error)]
 pub enum RegistryError {
@@ -60,44 +52,16 @@ pub enum RegistryError {
     Empty,
 }
 
-// ---------------------------------------------------------------------------
-// TOML intermediate types (private)
-// ---------------------------------------------------------------------------
-
+/// On-disk shape of `registry/tools/<tool>.toml`.
 #[derive(Deserialize)]
 struct ToolFileToml {
     tool: ToolMetaToml,
     #[serde(default)]
-    roles: HashMap<String, RoleConfigToml>,
+    roles: HashMap<String, RoleConfig>,
+    infra: Option<InfraConfig>,
+    fullstack: Option<RoleConfig>,
     #[serde(default)]
-    infra: Option<InfraToml>,
-    #[serde(default)]
-    fullstack: Option<RoleConfigToml>,
-    #[serde(default)]
-    compat: Option<CompatToml>,
-}
-
-#[derive(Deserialize)]
-struct CompatToml {
-    #[serde(default)]
-    consumes: Vec<String>,
-    #[serde(default)]
-    serves: Vec<String>,
-    #[serde(default)]
-    self_contained_devnet: bool,
-}
-
-#[derive(Deserialize)]
-struct InfraToml {
-    cardano_up_package: String,
-    #[serde(default)]
-    env: Vec<EnvMappingToml>,
-}
-
-#[derive(Deserialize)]
-struct EnvMappingToml {
-    from: String,
-    to: String,
+    compat: CompatToml,
 }
 
 #[derive(Deserialize)]
@@ -121,9 +85,14 @@ struct ToolMetaToml {
     experimental: bool,
 }
 
-#[derive(Deserialize)]
-struct RoleConfigToml {
-    template: String,
+#[derive(Deserialize, Default)]
+struct CompatToml {
+    #[serde(default)]
+    consumes: Vec<String>,
+    #[serde(default)]
+    serves: Vec<String>,
+    #[serde(default)]
+    self_contained_devnet: bool,
 }
 
 /// A `detect` entry is either a bare path (existence check) or a table with an
@@ -139,9 +108,9 @@ enum DetectToml {
     },
 }
 
-impl DetectToml {
-    fn into_signature(self) -> DetectSignature {
-        match self {
+impl From<DetectToml> for DetectSignature {
+    fn from(raw: DetectToml) -> Self {
+        match raw {
             DetectToml::Simple(file) => DetectSignature {
                 file,
                 contains: None,
@@ -151,48 +120,27 @@ impl DetectToml {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Conversion
-// ---------------------------------------------------------------------------
+fn parse_tool_file(file_name: &str) -> Result<ToolDef, RegistryError> {
+    let asset = RegistryAssets::get(file_name).expect("asset listed by iter() must exist");
+    let text = std::str::from_utf8(&asset.data).expect("tool TOML files must be valid UTF-8");
+    let raw = toml::from_str(text).map_err(|source| RegistryError::Parse {
+        file: file_name.to_string(),
+        source,
+    })?;
+    to_tool_def(file_name, raw)
+}
 
+/// Convert and validate a parsed tool file.
 fn to_tool_def(file_name: &str, raw: ToolFileToml) -> Result<ToolDef, RegistryError> {
-    let mut roles = HashMap::new();
-    for (role_str, cfg) in raw.roles {
-        let role = Role::from_kebab(&role_str).map_err(|e| RegistryError::UnknownRole {
-            file: file_name.to_string(),
-            role: role_str,
-            source: e,
-        })?;
-        roles.insert(
-            role,
-            RoleConfig {
-                template: cfg.template,
-            },
-        );
-    }
+    let roles = parse_roles(file_name, raw.roles)?;
 
-    // A tool that fills the infrastructure role must declare [infra] (its
-    // cardano-up package + env mappings). The driver template aggregates these.
     if roles.contains_key(&Role::Infrastructure) && raw.infra.is_none() {
         return Err(RegistryError::InfraConfigMissing {
             file: file_name.to_string(),
         });
     }
 
-    let infra = raw.infra.map(|i| InfraConfig {
-        cardano_up_package: i.cardano_up_package,
-        env: i
-            .env
-            .into_iter()
-            .map(|m| EnvMapping {
-                from: m.from,
-                to: m.to,
-            })
-            .collect(),
-    });
-
-    // A [fullstack] template collapses on-chain + off-chain into one `protocol/`
-    // component, so the tool must be able to fill both roles.
+    // `[fullstack]` fuses on-chain + off-chain, so the tool must fill both.
     if raw.fullstack.is_some()
         && !(roles.contains_key(&Role::OnChain) && roles.contains_key(&Role::OffChain))
     {
@@ -201,60 +149,72 @@ fn to_tool_def(file_name: &str, raw: ToolFileToml) -> Result<ToolDef, RegistryEr
         });
     }
 
-    let fullstack = raw.fullstack.map(|f| RoleConfig {
-        template: f.template,
-    });
-
-    let compat = match raw.compat {
-        Some(c) => CompatConfig {
-            consumes: parse_seams(file_name, &c.consumes)?,
-            serves: parse_seams(file_name, &c.serves)?,
-            self_contained_devnet: c.self_contained_devnet,
-        },
-        None => CompatConfig::default(),
+    let compat = CompatConfig {
+        consumes: parse_seams(file_name, &raw.compat.consumes)?,
+        serves: parse_seams(file_name, &raw.compat.serves)?,
+        self_contained_devnet: raw.compat.self_contained_devnet,
     };
 
+    let ToolMetaToml {
+        id,
+        name,
+        description,
+        website,
+        community,
+        languages,
+        system_deps,
+        nix_packages,
+        nix_self_contained,
+        detect,
+        experimental,
+    } = raw.tool;
+
     Ok(ToolDef {
-        id: raw.tool.id,
-        name: raw.tool.name,
-        description: raw.tool.description,
-        website: raw.tool.website,
-        community: raw.tool.community,
-        languages: raw.tool.languages,
-        system_deps: raw.tool.system_deps,
-        nix_packages: raw.tool.nix_packages,
-        nix_self_contained: raw.tool.nix_self_contained,
-        detect: raw
-            .tool
-            .detect
-            .into_iter()
-            .map(DetectToml::into_signature)
-            .collect(),
+        id,
+        name,
+        description,
+        website,
+        community,
+        languages,
+        system_deps,
+        nix_packages,
+        nix_self_contained,
+        detect: detect.into_iter().map(DetectSignature::from).collect(),
         roles,
-        infra,
-        fullstack,
-        experimental: raw.tool.experimental,
+        infra: raw.infra,
+        experimental,
+        fullstack: raw.fullstack,
         compat,
     })
 }
 
-/// Parse a list of kebab-case seam strings, surfacing an unknown value as a
-/// registry load error (like an unknown role) rather than silently dropping it.
-fn parse_seams(file_name: &str, raw: &[String]) -> Result<Vec<Seam>, RegistryError> {
-    raw.iter()
-        .map(|s| {
-            Seam::from_kebab(s).map_err(|e| RegistryError::UnknownSeam {
+fn parse_roles(
+    file_name: &str,
+    raw: HashMap<String, RoleConfig>,
+) -> Result<HashMap<Role, RoleConfig>, RegistryError> {
+    raw.into_iter()
+        .map(|(role, cfg)| match Role::from_kebab(&role) {
+            Ok(parsed) => Ok((parsed, cfg)),
+            Err(source) => Err(RegistryError::UnknownRole {
                 file: file_name.to_string(),
-                seam: s.clone(),
-                source: e,
-            })
+                role,
+                source,
+            }),
         })
         .collect()
 }
 
-// ---------------------------------------------------------------------------
-// Registry
-// ---------------------------------------------------------------------------
+fn parse_seams(file_name: &str, raw: &[String]) -> Result<Vec<Seam>, RegistryError> {
+    raw.iter()
+        .map(|s| {
+            Seam::from_kebab(s).map_err(|source| RegistryError::UnknownSeam {
+                file: file_name.to_string(),
+                seam: s.clone(),
+                source,
+            })
+        })
+        .collect()
+}
 
 /// Immutable registry of all tool definitions, loaded from embedded TOML files.
 pub struct Registry {
@@ -265,50 +225,40 @@ pub struct Registry {
 
 impl Registry {
     /// Load all tool definitions from the embedded `registry/tools/` directory.
+    ///
+    /// Fails on malformed TOML, unknown roles/seams, inconsistent tables,
+    /// duplicate ids, or an empty registry.
     pub fn load() -> Result<Self, RegistryError> {
-        let mut tools = Vec::new();
-        let mut by_id = HashMap::new();
-        let mut by_role: HashMap<Role, Vec<usize>> = HashMap::new();
+        let mut registry = Registry {
+            tools: Vec::new(),
+            by_id: HashMap::new(),
+            by_role: HashMap::new(),
+        };
 
-        for file_name in RegistryAssets::iter() {
-            if !file_name.starts_with("tools/") || !file_name.ends_with(".toml") {
-                continue;
-            }
-
-            let data = RegistryAssets::get(&file_name).expect("asset listed by iter() must exist");
-            let text =
-                std::str::from_utf8(&data.data).expect("tool TOML files must be valid UTF-8");
-
-            let raw: ToolFileToml = toml::from_str(text).map_err(|e| RegistryError::Parse {
-                file: file_name.to_string(),
-                source: e,
-            })?;
-
-            let tool = to_tool_def(&file_name, raw)?;
-            let idx = tools.len();
-
-            if by_id.contains_key(&tool.id) {
-                return Err(RegistryError::DuplicateId {
-                    id: tool.id.clone(),
-                });
-            }
-
-            by_id.insert(tool.id.clone(), idx);
-            for role in tool.roles.keys() {
-                by_role.entry(*role).or_default().push(idx);
-            }
-            tools.push(tool);
+        let tool_files = RegistryAssets::iter()
+            .filter(|name| name.starts_with("tools/") && name.ends_with(".toml"));
+        for file_name in tool_files {
+            registry.insert(parse_tool_file(&file_name)?)?;
         }
 
-        if tools.is_empty() {
+        if registry.tools.is_empty() {
             return Err(RegistryError::Empty);
         }
+        Ok(registry)
+    }
 
-        Ok(Registry {
-            tools,
-            by_id,
-            by_role,
-        })
+    fn insert(&mut self, tool: ToolDef) -> Result<(), RegistryError> {
+        if self.by_id.contains_key(&tool.id) {
+            return Err(RegistryError::DuplicateId { id: tool.id });
+        }
+
+        let idx = self.tools.len();
+        self.by_id.insert(tool.id.clone(), idx);
+        for &role in tool.roles.keys() {
+            self.by_role.entry(role).or_default().push(idx);
+        }
+        self.tools.push(tool);
+        Ok(())
     }
 
     /// Look up a tool by its id.
@@ -330,16 +280,39 @@ impl Registry {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn registry() -> Registry {
         Registry::load().expect("registry should load successfully")
+    }
+
+    fn sorted_ids_for_role(reg: &Registry, role: Role) -> Vec<&str> {
+        let mut ids: Vec<&str> = reg
+            .tools_for_role(role)
+            .iter()
+            .map(|t| t.id.as_str())
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// Parse a demo tool file: a fixed `[tool]` header followed by `tables`.
+    fn demo_tool(tables: &str) -> Result<ToolDef, RegistryError> {
+        let toml = format!(
+            r#"
+            [tool]
+            id = "demo"
+            name = "Demo"
+            description = "d"
+            website = "https://x"
+            languages = ["scala"]
+            {tables}
+            "#
+        );
+        let raw: ToolFileToml = toml::from_str(&toml).unwrap();
+        to_tool_def("demo.toml", raw)
     }
 
     #[test]
@@ -369,45 +342,30 @@ mod tests {
 
     #[test]
     fn tools_for_role_on_chain() {
-        let reg = registry();
-        let on_chain = reg.tools_for_role(Role::OnChain);
-        let mut ids: Vec<&str> = on_chain.iter().map(|t| t.id.as_str()).collect();
-        ids.sort();
-        assert_eq!(ids, vec!["aiken", "plinth", "scalus"]);
+        assert_eq!(
+            sorted_ids_for_role(&registry(), Role::OnChain),
+            vec!["aiken", "plinth", "scalus"]
+        );
     }
 
     #[test]
     fn tools_for_role_off_chain() {
-        let reg = registry();
-        let off_chain = reg.tools_for_role(Role::OffChain);
-        let mut ids: Vec<&str> = off_chain.iter().map(|t| t.id.as_str()).collect();
-        ids.sort();
-        assert_eq!(ids, vec!["evolution", "meshjs", "scalus", "tx3"]);
+        assert_eq!(
+            sorted_ids_for_role(&registry(), Role::OffChain),
+            vec!["evolution", "meshjs", "scalus", "tx3"]
+        );
     }
 
     #[test]
     fn tools_for_role_devnet() {
-        let reg = registry();
-        let devnet = reg.tools_for_role(Role::Devnet);
-        let mut ids: Vec<&str> = devnet.iter().map(|t| t.id.as_str()).collect();
-        ids.sort();
         // Yaci DevKit is a local devnet, so it fills the devnet role (not infra).
-        assert_eq!(ids, vec!["yaci"]);
+        assert_eq!(sorted_ids_for_role(&registry(), Role::Devnet), vec!["yaci"]);
     }
 
     #[test]
     fn infrastructure_tools_present() {
-        // Infra is filled by cardano-up-backed providers. Each shares the single
-        // driver template and declares an [infra] config.
-        let reg = registry();
-        let mut ids: Vec<&str> = reg
-            .tools_for_role(Role::Infrastructure)
-            .iter()
-            .map(|t| t.id.as_str())
-            .collect();
-        ids.sort();
         assert_eq!(
-            ids,
+            sorted_ids_for_role(&registry(), Role::Infrastructure),
             vec![
                 "cardano-node",
                 "cardano-node-api",
@@ -462,19 +420,11 @@ mod tests {
 
     #[test]
     fn experimental_defaults_false_when_flag_absent() {
-        let toml = r#"
-            [tool]
-            id = "demo"
-            name = "Demo"
-            description = "d"
-            website = "https://x"
-            languages = ["scala"]
-
+        let tables = r#"
             [roles.on-chain]
             template = "demo/on-chain"
         "#;
-        let raw: ToolFileToml = toml::from_str(toml).unwrap();
-        let def = to_tool_def("demo.toml", raw).unwrap();
+        let def = demo_tool(tables).unwrap();
         assert!(!def.experimental);
     }
 
@@ -502,14 +452,7 @@ mod tests {
 
     #[test]
     fn fullstack_with_both_roles_loads() {
-        let toml = r#"
-            [tool]
-            id = "demo"
-            name = "Demo"
-            description = "d"
-            website = "https://x"
-            languages = ["scala"]
-
+        let tables = r#"
             [roles.on-chain]
             template = "demo/on-chain"
             [roles.off-chain]
@@ -517,30 +460,21 @@ mod tests {
             [fullstack]
             template = "demo/fullstack"
         "#;
-        let raw: ToolFileToml = toml::from_str(toml).unwrap();
-        let def = to_tool_def("demo.toml", raw).expect("valid fullstack tool");
+        let def = demo_tool(tables).expect("valid fullstack tool");
         assert_eq!(def.fullstack.unwrap().template, "demo/fullstack");
     }
 
     #[test]
     fn fullstack_without_both_roles_is_rejected() {
         // [fullstack] but only on-chain declared → error (must fill both roles).
-        let toml = r#"
-            [tool]
-            id = "demo"
-            name = "Demo"
-            description = "d"
-            website = "https://x"
-            languages = ["scala"]
-
+        let tables = r#"
             [roles.on-chain]
             template = "demo/on-chain"
             [fullstack]
             template = "demo/fullstack"
         "#;
-        let raw: ToolFileToml = toml::from_str(toml).unwrap();
         assert!(matches!(
-            to_tool_def("demo.toml", raw),
+            demo_tool(tables),
             Err(RegistryError::FullstackRolesMissing { .. })
         ));
     }
@@ -565,10 +499,8 @@ mod tests {
                     link.name
                 );
             }
-            // Infrastructure providers (e.g. kupo, ogmios) are not authored in a
-            // user-facing language — they're cardano-up packages — so `languages`
-            // may legitimately be empty for an infra-only tool. Every other tool
-            // must declare at least one language.
+            // Infra providers are cardano-up packages, not authored in a
+            // language, so only they may leave `languages` empty.
             if !tool.roles.contains_key(&Role::Infrastructure) {
                 assert!(!tool.languages.is_empty(), "languages should not be empty");
             }

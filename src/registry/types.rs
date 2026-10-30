@@ -5,10 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::contract;
 
-// ---------------------------------------------------------------------------
-// Role
-// ---------------------------------------------------------------------------
-
 /// The functional roles a tool can fill within a Cardano protocol project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
@@ -42,7 +38,7 @@ impl Role {
     }
 
     /// The kebab-case string used in TOML registry files.
-    pub fn as_kebab(&self) -> &'static str {
+    pub fn as_kebab(self) -> &'static str {
         match self {
             Role::OnChain => "on-chain",
             Role::OffChain => "off-chain",
@@ -52,14 +48,14 @@ impl Role {
         }
     }
 
-    /// Whether this role may be filled by multiple tools at once. Only
-    /// Infrastructure is multi-tool; every other role takes at most one tool.
-    pub fn multiple(&self) -> bool {
+    /// Whether this role may be filled by several tools at once (only
+    /// Infrastructure).
+    pub fn multiple(self) -> bool {
         matches!(self, Role::Infrastructure)
     }
 
-    /// The directory name for this role, as defined by the interface contract.
-    pub fn dir(&self) -> &'static str {
+    /// The directory this role's component is emitted into.
+    pub fn dir(self) -> &'static str {
         match self {
             Role::OnChain => contract::DIR_ON_CHAIN,
             Role::OffChain => contract::DIR_OFF_CHAIN,
@@ -73,45 +69,32 @@ impl Role {
 /// Human-readable display: "On-chain", "Off-chain", etc.
 impl fmt::Display for Role {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Role::OnChain => write!(f, "On-chain"),
-            Role::OffChain => write!(f, "Off-chain"),
-            Role::Infrastructure => write!(f, "Infrastructure"),
-            Role::Devnet => write!(f, "Devnet"),
-            Role::FormalMethods => write!(f, "Formal methods"),
-        }
+        f.write_str(match self {
+            Role::OnChain => "On-chain",
+            Role::OffChain => "Off-chain",
+            Role::Infrastructure => "Infrastructure",
+            Role::Devnet => "Devnet",
+            Role::FormalMethods => "Formal methods",
+        })
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("unknown role: '{0}'")]
 pub struct UnknownRoleError(pub String);
 
-impl fmt::Display for UnknownRoleError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "unknown role: '{}'", self.0)
-    }
-}
-
-impl std::error::Error for UnknownRoleError {}
-
-// ---------------------------------------------------------------------------
-// Seam / compatibility
-// ---------------------------------------------------------------------------
-
-/// A connection "seam": the wire protocol an off-chain tool speaks to reach a
-/// chain endpoint, and that a devnet (or infra) tool exposes. Whether a given
-/// off-chain tool can use a given devnet is decided purely by whether their
-/// declared seams overlap — see [`crate::registry::compat`].
+/// A connection seam: a wire protocol an off-chain tool speaks to reach a chain
+/// endpoint, and that a devnet or infra tool serves. See
+/// [`crate::registry::compat`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Seam {
     /// Blockfrost-compatible REST (Yaci Store, Blockfrost, …).
     Blockfrost,
     /// Tx3 Transaction Resolve Protocol (JSON-RPC), served by Dolos/Demeter.
     Trp,
-    /// UTxORPC (u5c) gRPC.
+    /// `UTxORPC` (u5c) gRPC.
     U5c,
-    /// Ogmios JSON-RPC (half of a Kupmios provider; also a standalone provider
-    /// for tools that speak it directly).
+    /// Ogmios JSON-RPC (half of a Kupmios provider, or standalone).
     Ogmios,
     /// Kupo HTTP (the other half of a Kupmios provider).
     Kupo,
@@ -131,7 +114,7 @@ impl Seam {
     }
 
     /// Human-readable label used in compatibility messages.
-    pub fn label(&self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Seam::Blockfrost => "Blockfrost",
             Seam::Trp => "TRP",
@@ -144,29 +127,20 @@ impl Seam {
 
 impl fmt::Display for Seam {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.label())
+        f.write_str(self.label())
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("unknown seam: '{0}'")]
 pub struct UnknownSeamError(pub String);
 
-impl fmt::Display for UnknownSeamError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "unknown seam: '{}'", self.0)
-    }
-}
-
-impl std::error::Error for UnknownSeamError {}
-
-/// Devnet-compatibility metadata for a tool, from its optional `[compat]` table.
+/// Devnet-compatibility metadata from a tool's optional `[compat]` table.
 ///
-/// Off-chain tools declare the seam(s) they `consumes`; devnet/infra tools
-/// declare the seam(s) they `serves`. A `self_contained_devnet` tool (e.g. Tx3,
-/// which bundles its own Dolos) needs no devnet role at all — pairing it with
-/// one is reported as incompatible. Every field defaults empty/false, so a tool
-/// without a `[compat]` table imposes no constraints. See
-/// [`crate::registry::compat`].
+/// Off-chain tools declare the seams they `consumes`; devnet/infra tools the
+/// seams they `serves`. A `self_contained_devnet` tool (e.g. Tx3) bundles its
+/// own devnet, so pairing it with a devnet role is incompatible. The default
+/// (no `[compat]` table) imposes no constraints.
 #[derive(Debug, Clone, Default)]
 pub struct CompatConfig {
     pub consumes: Vec<Seam>,
@@ -174,47 +148,37 @@ pub struct CompatConfig {
     pub self_contained_devnet: bool,
 }
 
-// ---------------------------------------------------------------------------
-// ToolDef / RoleConfig
-// ---------------------------------------------------------------------------
-
 /// Per-role configuration for a tool.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct RoleConfig {
     /// Path under `templates/` for this tool-role combination.
     pub template: String,
 }
 
-/// A single `cardano-up context env` output → contract `.env` key mapping,
-/// declared by an infrastructure tool (`[[infra.env]]`). `from` is the
-/// `cardano-up` output var name (e.g. `KUPO_URL`); `to` is the `.env` key the
-/// generated infra component writes (e.g. `INDEXER_URL`). See TECH_SPEC §3.2.
-#[derive(Debug, Clone, Serialize)]
+/// Maps a `cardano-up context env` output var (`from`, e.g. `KUPO_URL`) to the
+/// contract `.env` key the infra component writes (`to`, e.g. `INDEXER_URL`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvMapping {
     pub from: String,
     pub to: String,
 }
 
-/// Infrastructure-specific config for a tool that fills the infrastructure role.
-/// Infra tools are thin data: a `cardano-up` package id plus the env mappings
-/// that translate its outputs into the `.env` contract keys. All infra tools
-/// share a single driver template and aggregate into one `infra/` component.
-#[derive(Debug, Clone)]
+/// Config for a tool that fills the infrastructure role. All infra tools share
+/// one driver template and aggregate into a single `infra/` component.
+#[derive(Debug, Clone, Deserialize)]
 pub struct InfraConfig {
     /// The package id passed to `cardano-up install`.
     pub cardano_up_package: String,
-    /// `cardano-up` output → `.env` contract key mappings.
+    #[serde(default)]
     pub env: Vec<EnvMapping>,
 }
 
-/// A signature that identifies a tool's generated output inside a role
-/// directory (used by `doctor` to recognize the tool in a scanned project).
+/// Identifies a tool's generated output inside a role directory, so `doctor`
+/// can recognize the tool in a scanned project.
 ///
-/// A signature matches when `file` (relative to the role dir) exists and, if
-/// `contains` is set, the file's text contains that substring. The substring
-/// form disambiguates generic filenames (e.g. a `package.json` is only MeshJS
-/// if it references `@meshsdk`), so foreign projects fall into the
-/// "unrecognized" bucket instead of being mislabeled (TECH_SPEC §9.6).
+/// Matches when `file` (relative to the role dir) exists and, if `contains` is
+/// set, its text contains that substring — which keeps generic filenames such
+/// as `package.json` from mislabeling foreign projects.
 #[derive(Debug, Clone)]
 pub struct DetectSignature {
     pub file: String,
@@ -236,55 +200,27 @@ pub struct ToolDef {
     pub website: String,
     pub community: Vec<Link>,
     pub languages: Vec<String>,
-    /// Dependency ids this tool requires; each must have a `registry/deps.toml`
-    /// entry. Consumed by the dependency doctor (TECH_SPEC §9.1).
+    /// Dependency ids this tool requires; each has a `registry/deps.toml` entry.
     pub system_deps: Vec<String>,
     pub nix_packages: Vec<String>,
-    /// When `true`, this tool ships its own component-local Nix flake (emitted
-    /// under `--nix` via a manifest `when = "nix"` guard). Its `nix_packages`
-    /// are *not* folded into the top-level shell as bare nixpkgs attrs — a plain
-    /// `mkShell` cannot build such a tool (e.g. Plinth needs haskell.nix + CHaP).
-    /// Instead the top-level flake references the component as a `path:` input
-    /// and pulls its dev shell in via `inputsFrom`, so the toolchain composes
-    /// into the root shell. Defaults to `false`.
+    /// The tool ships its own component-local Nix flake. Its `nix_packages` are
+    /// then not added to the top-level shell as nixpkgs attrs (a plain `mkShell`
+    /// can't build e.g. Plinth); the root flake pulls in the component's shell
+    /// via `inputsFrom` instead.
     pub nix_self_contained: bool,
-    /// Signatures that identify this tool's generated output. Used by `doctor`
-    /// to recognize the tool in a scanned project. Only tools that declare a
-    /// role are candidates for that role's directory, which resolves
-    /// on-chain/off-chain ambiguity.
+    /// Signatures `doctor` uses to recognize this tool in a scanned project.
     pub detect: Vec<DetectSignature>,
     pub roles: HashMap<Role, RoleConfig>,
-    /// Infrastructure config. Required when the tool fills the infrastructure
-    /// role (validated at load), `None` otherwise.
+    /// Required when the tool fills the infrastructure role (validated at load).
     pub infra: Option<InfraConfig>,
-    /// Whether this tool is **experimental** — not production-ready, for either
-    /// (or both) of two reasons:
-    ///   1. the *upstream tool itself* is experimental — pre-release, unstable,
-    ///      a work in progress (e.g. Blaster);
-    ///   2. its *cardano-init integration* is not yet build-green — a placeholder
-    ///      template, excluded from the build-green guarantees / smoke matrix.
-    ///
-    /// It still generates (so the role is present and demoable), but selecting it
-    /// requires explicit opt-in (`--allow-experimental`, or the interactive
-    /// confirm) and is surfaced as "experimental" across every presenter, so it
-    /// is never scaffolded unknowingly. Per-tool, not per-role: a future
-    /// production-ready formal-methods tool would set this `false` even though
-    /// today's Blaster is `true` (ROADMAP Phase 0 formal-methods deliverable).
+    /// Not production-ready (the upstream tool or its template). It still
+    /// generates, but selecting it requires explicit opt-in.
     pub experimental: bool,
-    /// Unified on-chain + off-chain template. When present (and the tool fills
-    /// both roles), assigning this tool to both collapses into a single
-    /// `protocol/` component built from this template instead of two folders.
-    /// `Some` requires both `Role::OnChain` and `Role::OffChain` (validated at
-    /// load); `protocol` is a fused component, not a `Role`.
+    /// Fused on-chain + off-chain template, emitted as one `protocol/`
+    /// component. `Some` implies the tool fills both roles (validated at load).
     pub fullstack: Option<RoleConfig>,
-    /// Devnet-compatibility metadata (from `[compat]`). Drives the off-chain ↔
-    /// devnet compatibility gate; defaults empty (no constraints).
     pub compat: CompatConfig,
 }
-
-// ---------------------------------------------------------------------------
-// Selection / RoleAssignment / Network
-// ---------------------------------------------------------------------------
 
 /// One tool assigned to one role.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,10 +230,8 @@ pub struct RoleAssignment {
 }
 
 /// Target Cardano network. The scaffolder always emits [`Network::Preview`];
-/// `Preprod`/`Mainnet` are the other valid `CARDANO_NETWORK` values a generated
-/// `.env` can be switched to at runtime (hence never constructed here).
+/// the other variants are the values a generated `.env` can be switched to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum Network {
     Preview,
     Preprod,
@@ -306,11 +240,11 @@ pub enum Network {
 
 impl fmt::Display for Network {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Network::Preview => write!(f, "preview"),
-            Network::Preprod => write!(f, "preprod"),
-            Network::Mainnet => write!(f, "mainnet"),
-        }
+        f.write_str(match self {
+            Network::Preview => "preview",
+            Network::Preprod => "preprod",
+            Network::Mainnet => "mainnet",
+        })
     }
 }
 
@@ -334,14 +268,9 @@ pub struct Selection {
     pub assignments: Vec<RoleAssignment>,
     pub network: Network,
     pub nix: bool,
-    /// Generate the `spec/` protocol-specification folder (default on;
-    /// `--no-spec` turns it off).
+    /// Generate the `spec/` folder (on by default; `--no-spec` turns it off).
     pub spec: bool,
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

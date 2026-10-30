@@ -1,16 +1,61 @@
+//! Write phase: the only part of the pipeline with disk side effects.
+
 use std::fs;
+use std::io;
 use std::path::Path;
 
 use super::ScaffoldError;
 use super::renderer::RenderedFile;
 use super::update::{SlotOp, UpdatePlan};
 
-/// Write all rendered files to disk under `root`.
+/// Write every rendered file under `root`, creating directories as needed.
 ///
-/// Creates directories as needed. This is the only phase with side effects.
+/// # Errors
+/// [`ScaffoldError::Io`] if a directory or file cannot be written.
 pub fn write(files: &[RenderedFile], root: &Path) -> Result<(), ScaffoldError> {
     for file in files {
         write_file(root, &file.dest, &file.content)?;
+    }
+    Ok(())
+}
+
+/// Apply an [`UpdatePlan`] to the existing project at `root`.
+///
+/// Unchanged components are not in the plan, so the user's code in them is
+/// never touched. Removed and replaced directories are deleted before anything
+/// is written, so a replacement starts from an empty directory. The caller owns
+/// the preconditions (created directories don't exist yet, git tree is clean).
+///
+/// # Errors
+/// [`ScaffoldError::Io`] if a file or directory cannot be removed or written.
+pub fn apply_update(plan: &UpdatePlan, root: &Path) -> Result<(), ScaffoldError> {
+    for op in &plan.slot_ops {
+        if let SlotOp::Remove(dir) | SlotOp::Replace(dir) = op {
+            let path = root.join(dir);
+            if path.exists() {
+                fs::remove_dir_all(&path).map_err(io_error(&path))?;
+            }
+        }
+    }
+
+    for file in &plan.creates {
+        write_file(root, &file.dest, &file.content)?;
+    }
+
+    // Leave byte-identical shared files (e.g. `.gitignore`) untouched.
+    for file in &plan.shared_files {
+        let unchanged =
+            fs::read(root.join(&file.dest)).is_ok_and(|current| current == file.content);
+        if !unchanged {
+            write_file(root, &file.dest, &file.content)?;
+        }
+    }
+
+    for dest in &plan.shared_removals {
+        let path = root.join(dest);
+        if path.exists() {
+            fs::remove_file(&path).map_err(io_error(&path))?;
+        }
     }
 
     Ok(())
@@ -19,84 +64,26 @@ pub fn write(files: &[RenderedFile], root: &Path) -> Result<(), ScaffoldError> {
 /// Write one file under `root`, creating parent directories as needed.
 fn write_file(root: &Path, dest: &Path, content: &[u8]) -> Result<(), ScaffoldError> {
     let path = root.join(dest);
-
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| ScaffoldError::Io {
-            path: parent.display().to_string(),
-            source: e,
-        })?;
+        fs::create_dir_all(parent).map_err(io_error(parent))?;
     }
-
-    fs::write(&path, content).map_err(|e| ScaffoldError::Io {
-        path: path.display().to_string(),
-        source: e,
-    })
+    fs::write(&path, content).map_err(io_error(&path))
 }
 
-/// Apply an [`UpdatePlan`] to an existing project at `root`.
-///
-/// Component directories that are unchanged (KEEP) are never in the plan, so the
-/// user's code in them is never touched. The caller is responsible for the
-/// `Create`-target precondition (the dir must not already exist) and the
-/// git-clean safety gate; this function is the disk side effect only.
-///
-/// Ordering: directories that go away (`Remove`) or are swapped (`Replace`) are
-/// deleted **first**, so a `Replace` removes the old tool's files before the new
-/// tool's are written into the same directory. Kept components are outside the
-/// plan entirely, so this never risks losing user work in them.
-pub fn apply_update(plan: &UpdatePlan, root: &Path) -> Result<(), ScaffoldError> {
-    // 1. Remove departing / replaced component directories.
-    for op in &plan.slot_ops {
-        if let SlotOp::Remove(dir) | SlotOp::Replace(dir) = op {
-            let path = root.join(dir);
-            if path.exists() {
-                fs::remove_dir_all(&path).map_err(|e| ScaffoldError::Io {
-                    path: path.display().to_string(),
-                    source: e,
-                })?;
-            }
-        }
-    }
-
-    // 2. Write component files for created / replaced / re-rendered directories.
-    for file in &plan.creates {
-        write_file(root, &file.dest, &file.content)?;
-    }
-
-    // 3. Overwrite shared top-level files, skipping byte-identical ones so an
-    //    unaffected file (e.g. `.gitignore`) is left alone.
-    for file in &plan.shared_files {
-        let path = root.join(&file.dest);
-        let unchanged = fs::read(&path)
-            .map(|cur| cur == file.content)
-            .unwrap_or(false);
-        if !unchanged {
-            write_file(root, &file.dest, &file.content)?;
-        }
-    }
-
-    // 4. Remove shared files that no longer apply.
-    for dest in &plan.shared_removals {
-        let path = root.join(dest);
-        if path.exists() {
-            fs::remove_file(&path).map_err(|e| ScaffoldError::Io {
-                path: path.display().to_string(),
-                source: e,
-            })?;
-        }
-    }
-
-    Ok(())
+fn io_error(path: &Path) -> impl FnOnce(io::Error) -> ScaffoldError {
+    let path = path.display().to_string();
+    move |source| ScaffoldError::Io { path, source }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
+
+    use super::super::test_support::{a, registry};
+    use super::*;
+    use crate::registry::types::{Network, Role, RoleAssignment, Selection};
+    use crate::scaffold::update::{Mutation, apply, apply_all, plan_update};
 
     #[test]
     fn writes_files_to_disk() {
@@ -147,25 +134,6 @@ mod tests {
         assert!(dir.path().join("a/b/c/deep.txt").is_file());
     }
 
-    // -----------------------------------------------------------------------
-    // apply_update: end-to-end against a real scaffolded tree
-    // -----------------------------------------------------------------------
-
-    use crate::registry::loader::Registry;
-    use crate::registry::types::{Network, Role, RoleAssignment, Selection};
-    use crate::scaffold::update::{Mutation, apply, apply_all, plan_update};
-
-    fn reg() -> Registry {
-        Registry::load().expect("registry loads")
-    }
-
-    fn a(role: Role, tool: &str) -> RoleAssignment {
-        RoleAssignment {
-            role,
-            tool_id: tool.into(),
-        }
-    }
-
     fn sel(assignments: Vec<RoleAssignment>) -> Selection {
         Selection {
             project_name: "proj".into(),
@@ -176,11 +144,11 @@ mod tests {
         }
     }
 
-    /// Scaffold `s` into a fresh temp dir and return (tempdir, root path).
+    /// Scaffold `s` into a fresh temp dir; the `TempDir` guard owns `root`.
     fn scaffolded(s: &Selection) -> (tempfile::TempDir, PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_path_buf();
-        crate::scaffold::scaffold(s, &reg(), &root).unwrap();
+        crate::scaffold::scaffold(s, &registry(), &root).unwrap();
         (tmp, root)
     }
 
@@ -190,7 +158,7 @@ mod tests {
         let (_tmp, root) = scaffolded(&old);
 
         let new = apply(&old, &Mutation::Add(a(Role::OffChain, "meshjs")));
-        let plan = plan_update(&old, &new, &reg()).unwrap();
+        let plan = plan_update(&old, &new, &registry()).unwrap();
         apply_update(&plan, &root).unwrap();
 
         assert!(root.join("off-chain/package.json").is_file());
@@ -211,7 +179,7 @@ mod tests {
         let validator_before = fs::read(root.join("on-chain/validators/giftcard.ak")).unwrap();
 
         let new = apply(&old, &Mutation::Remove(Role::OffChain));
-        let plan = plan_update(&old, &new, &reg()).unwrap();
+        let plan = plan_update(&old, &new, &registry()).unwrap();
         apply_update(&plan, &root).unwrap();
 
         assert!(!root.join("off-chain").exists()); // removed
@@ -235,7 +203,7 @@ mod tests {
         fs::write(root.join("off-chain/USER.txt"), b"gone after swap").unwrap();
 
         let new = apply(&old, &Mutation::Add(a(Role::OffChain, "tx3")));
-        let plan = plan_update(&old, &new, &reg()).unwrap();
+        let plan = plan_update(&old, &new, &registry()).unwrap();
         apply_update(&plan, &root).unwrap();
 
         // The replaced dir is wiped (user file gone) and now matches a fresh
@@ -262,7 +230,7 @@ mod tests {
                 Mutation::Add(a(Role::OffChain, "scalus")),
             ],
         );
-        let plan = plan_update(&old, &new, &reg()).unwrap();
+        let plan = plan_update(&old, &new, &registry()).unwrap();
         apply_update(&plan, &root).unwrap();
 
         assert!(!root.join("on-chain").exists());
@@ -270,10 +238,9 @@ mod tests {
         assert!(root.join("protocol").is_dir());
     }
 
-    /// Recursively read a directory into a sorted map of relative-path → bytes.
-    fn read_tree(root: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
-        let mut out = std::collections::BTreeMap::new();
-        fn walk(base: &Path, dir: &Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+    /// Recursively read a directory into a sorted map of relative path -> bytes.
+    fn read_tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
+        fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
             for entry in fs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
                 if path.is_dir() {
@@ -288,6 +255,7 @@ mod tests {
                 }
             }
         }
+        let mut out = BTreeMap::new();
         if root.is_dir() {
             walk(root, root, &mut out);
         }

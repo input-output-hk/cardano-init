@@ -1,3 +1,5 @@
+//! Context phase: turn a `Selection` into the data the templates render from.
+
 use std::collections::BTreeMap;
 
 use serde::Serialize;
@@ -5,47 +7,67 @@ use serde::Serialize;
 use super::{ScaffoldError, planner};
 use crate::contract;
 use crate::registry::loader::Registry;
-use crate::registry::types::{EnvMapping, Role, Selection};
+use crate::registry::types::{EnvMapping, Role, Selection, ToolDef};
 
-/// `cardano-up`'s output var for the cardano-node UNIX socket path. It appears in
-/// `cardano-up context env` whenever a node-backed package (kupo/ogmios/…) is
-/// installed, so it is the default source for the contract's `NODE_SOCKET_PATH`.
-/// A provider that supplies its own node socket (e.g. dolos) overrides this via
-/// its own `[infra].env` mapping (TECH_SPEC §3.2).
+/// `cardano-up`'s variable for the cardano-node socket, present whenever a
+/// node-backed package is installed: the default source for the contract's
+/// `NODE_SOCKET_PATH`. Providers with their own socket (e.g. dolos) override it
+/// through their `[infra].env` mappings.
 const CARDANO_UP_NODE_SOCKET_VAR: &str = "CARDANO_NODE_SOCKET_PATH";
+
+/// Contract `.env` keys seeded empty in every project, for whichever component
+/// provisions the endpoint to fill in.
+const SEEDED_ENV_KEYS: &[&str] = &[
+    contract::ENV_INDEXER_URL,
+    contract::ENV_INDEXER_PORT,
+    contract::ENV_NODE_SOCKET_PATH,
+    contract::ENV_OGMIOS_URL,
+    contract::ENV_TX_SUBMIT_URL,
+    contract::ENV_DOLOS_GRPC_URL,
+    contract::ENV_CARDANO_NODE_API_URL,
+];
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/// Per-role information available to templates.
+/// One component's tool, as seen by templates.
 #[derive(Debug, Clone, Serialize)]
 pub struct RoleContext {
     pub tool_id: String,
     pub tool_name: String,
     pub language: String,
     pub dir: String,
-    /// The tool's official site/docs URL (registry `website`). Surfaced in the
-    /// generated `AGENTS.md` so agents jump straight to authoritative docs.
+    /// The tool's official site, linked from the generated `AGENTS.md`.
     pub website: String,
 }
 
-/// One selected infrastructure provider, available to the shared cardano-up
-/// driver template. Infra tools aggregate into a single `infra/` component, so
-/// this carries the data the driver needs: the `cardano-up` package id (for the
-/// install set) and the tool's env mappings (folded into `infra_env`).
+impl RoleContext {
+    fn new(tool: &ToolDef, dir: &str) -> Self {
+        Self {
+            tool_id: tool.id.clone(),
+            tool_name: tool.name.clone(),
+            language: tool.languages.first().cloned().unwrap_or_default(),
+            dir: dir.to_string(),
+            website: tool.website.clone(),
+        }
+    }
+}
+
+/// One selected infrastructure provider. All providers share the single
+/// `infra/` driver component, so this carries what the driver needs rather
+/// than a per-component [`RoleContext`].
 #[derive(Debug, Clone, Serialize)]
 pub struct InfraToolContext {
     pub tool_id: String,
     pub tool_name: String,
-    /// The provider's official site/docs URL (registry `website`), surfaced in
-    /// the generated `AGENTS.md`.
+    /// The provider's official site, linked from the generated `AGENTS.md`.
     pub website: String,
     pub cardano_up_package: String,
     pub env: Vec<EnvMapping>,
 }
 
-/// The complete context passed to MiniJinja templates.
+/// Everything templates can reference; serialized into `MiniJinja`.
 #[derive(Debug, Serialize)]
 pub struct TemplateContext {
     pub project_name: String,
@@ -56,49 +78,41 @@ pub struct TemplateContext {
     pub has_infra: bool,
     pub has_devnet: bool,
     pub has_formal_methods: bool,
-    /// True when a single tool fills both on-chain and off-chain and they collapse
-    /// into one `protocol/` component (TECH_SPEC §3.4). When true, `has_on_chain`
-    /// and `has_off_chain` are false (the two roles are represented by `fullstack`).
+    /// One tool fills both on-chain and off-chain as a fused `protocol/`
+    /// component. Then `has_on_chain` and `has_off_chain` are false.
     pub has_fullstack: bool,
-
-    /// True when the `blueprint/` directory is scaffolded: any non-infrastructure
-    /// role is present (i.e. the project is not infrastructure-only). Mirrors the
-    /// planner's blueprint predicate (TECH_SPEC §6.2).
+    /// `blueprint/` is scaffolded (any non-infrastructure role is present).
     pub has_blueprint: bool,
 
     pub on_chain: Option<RoleContext>,
     pub off_chain: Option<RoleContext>,
-    /// The fused on-chain+off-chain component (`dir = "protocol"`). `Some` only
-    /// when one tool fills both roles and declares a `[fullstack]` template; then
-    /// `on_chain`/`off_chain` are `None`.
+    /// The fused component; when `Some`, `on_chain` and `off_chain` are `None`.
     pub fullstack: Option<RoleContext>,
+    /// Infrastructure providers, sorted by tool id.
     pub infra_tools: Vec<InfraToolContext>,
     pub devnet: Option<RoleContext>,
     pub formal_methods: Option<RoleContext>,
 
-    /// The `cardano-up` context name the infra component drives (= project name).
+    /// The `cardano-up` context name the infra component drives.
     pub infra_context_name: String,
-    /// Resolved, key-unique `.env` emissions for the infra driver: the base node
-    /// socket default plus each provider's mappings, explicit-over-default, in
-    /// canonical order (proposal §5.4). Empty when no infra role is present.
+    /// The `.env` mappings the infra driver writes, unique by key (see
+    /// [`resolve_infra_env`]). Empty without infrastructure.
     pub infra_env: Vec<EnvMapping>,
 
     pub blueprint_path: String,
-    /// Backed by a `BTreeMap` so it serializes in sorted-key order (determinism, §11).
+    /// Sorted by key, so the rendered `.env` is deterministic.
     pub env_vars: BTreeMap<String, String>,
 
     pub nix: bool,
+    /// Packages for the top-level Nix shell, deduped, in canonical role order.
     pub nix_packages: Vec<String>,
-    /// Component directories whose tool ships its own Nix flake
-    /// (`nix_self_contained`). The top-level flake references each as a
-    /// `path:./<dir>` input and pulls its dev shell in via `inputsFrom`, so the
-    /// whole toolchain composes into the root shell. Canonical (`Role::ALL`)
-    /// order, deduped. Empty unless a self-contained tool is selected.
+    /// Directories of components whose tool ships its own flake; the root flake
+    /// composes each one's dev shell. Deduped, in canonical role order.
     pub nix_component_flakes: Vec<String>,
 
-    /// Whether the `spec/` protocol-specification folder is generated.
+    /// Whether the `spec/` folder is generated.
     pub spec: bool,
-    /// Whether `spec/giftcard.md` (the worked example) is generated.
+    /// Whether the worked example `spec/giftcard.md` is generated.
     pub spec_example: bool,
 }
 
@@ -106,184 +120,65 @@ pub struct TemplateContext {
 // Builder
 // ---------------------------------------------------------------------------
 
-/// Insert or replace an env mapping keyed by its `.env` target (`to`). A later
-/// mapping for an already-present key replaces the earlier one, giving explicit
-/// provider mappings precedence over the base default (proposal §5.4).
-fn upsert_env(env: &mut Vec<EnvMapping>, mapping: EnvMapping) {
-    match env.iter_mut().find(|e| e.to == mapping.to) {
-        Some(existing) => *existing = mapping,
-        None => env.push(mapping),
-    }
-}
-
-/// Build a `TemplateContext` from a `Selection` and the tool `Registry`.
+/// Build the [`TemplateContext`] for `selection`.
+///
+/// Assignments are walked in canonical order so every list in the context is
+/// independent of the order the selection was built in (determinism, §11).
+///
+/// # Errors
+/// [`ScaffoldError::ToolNotFound`] for an unknown tool and
+/// [`ScaffoldError::RoleMismatch`] for a tool assigned to a role it lacks.
 pub fn build_context(
     selection: &Selection,
     registry: &Registry,
 ) -> Result<TemplateContext, ScaffoldError> {
+    let fullstack_id = planner::fullstack_tool_id(selection, registry);
+    let fullstack_id = fullstack_id.as_deref();
+
     let mut on_chain = None;
     let mut off_chain = None;
     let mut fullstack = None;
     let mut infra_tools = Vec::new();
     let mut devnet = None;
     let mut formal_methods = None;
-    let mut nix_packages = Vec::new();
-    // (canonical index, component dir) for tools shipping their own flake.
-    let mut nix_flake_components: Vec<(usize, String)> = Vec::new();
+    let mut nix_packages: Vec<String> = Vec::new();
+    let mut nix_component_flakes: Vec<String> = Vec::new();
 
-    // When one tool fills both on-chain and off-chain via a `[fullstack]` template,
-    // the two collapse into a single `protocol/` component. Derived here (and in
-    // the planner) from the same shared helper so context and plan agree.
-    let fullstack_id = super::planner::fullstack_tool_id(selection, registry);
-
-    // Walk assignments in canonical order (Role::ALL, then tool id) rather than
-    // the order they were supplied/added, so every order-sensitive field derived
-    // below is reproducible for a given selection (§11). Without this, `nix_packages`
-    // — accumulated in first-encountered order — would differ between a fresh
-    // scaffold (assignments already canonical) and the same selection reached via
-    // `add` (which appends), yielding a byte-different `flake.nix`.
-    let mut ordered_assignments: Vec<&_> = selection.assignments.iter().collect();
-    ordered_assignments.sort_by_key(|a| {
-        let role_idx = Role::ALL
-            .iter()
-            .position(|r| *r == a.role)
-            .expect("role is in Role::ALL");
-        (role_idx, a.tool_id.clone())
-    });
-
-    for assignment in ordered_assignments {
-        let tool =
-            registry
-                .get(&assignment.tool_id)
-                .ok_or_else(|| ScaffoldError::ToolNotFound {
-                    tool_id: assignment.tool_id.clone(),
-                })?;
-
+    for assignment in planner::canonical_assignments(selection) {
+        let tool = planner::tool_for(registry, assignment)?;
         if !tool.roles.contains_key(&assignment.role) {
-            return Err(ScaffoldError::RoleMismatch {
-                tool_id: assignment.tool_id.clone(),
-                role: assignment.role.to_string(),
-            });
+            return Err(planner::role_mismatch(assignment));
         }
+        let dir = planner::component_dir(assignment, fullstack_id);
 
-        // A self-contained tool ships its own component-local flake (emitted
-        // under `--nix`), so its packages must not pollute the naive top-level
-        // shell, which cannot build it. See `ToolDef::nix_self_contained`.
-        if !tool.nix_self_contained {
+        // A self-contained tool's packages can't be built by the plain top-level
+        // shell, so the root flake composes its component's own shell instead.
+        if tool.nix_self_contained {
+            if assignment.role != Role::Infrastructure
+                && !nix_component_flakes.iter().any(|d| d == dir)
+            {
+                nix_component_flakes.push(dir.to_string());
+            }
+        } else {
             for pkg in &tool.nix_packages {
                 if !nix_packages.contains(pkg) {
                     nix_packages.push(pkg.clone());
                 }
             }
-        } else if assignment.role != Role::Infrastructure {
-            // Self-contained tool: record its component dir so the top-level
-            // flake composes that component's own dev shell (`inputsFrom`).
-            let is_fullstack_member = fullstack_id.as_deref() == Some(assignment.tool_id.as_str())
-                && matches!(assignment.role, Role::OnChain | Role::OffChain);
-            let dir = if is_fullstack_member {
-                contract::DIR_PROTOCOL.to_string()
-            } else {
-                assignment.role.dir().to_string()
-            };
-            let idx = Role::ALL
-                .iter()
-                .position(|r| *r == assignment.role)
-                .expect("role is in Role::ALL");
-            if !nix_flake_components.iter().any(|(_, d)| *d == dir) {
-                nix_flake_components.push((idx, dir));
-            }
         }
 
-        // Infrastructure tools aggregate into a single component, so they carry
-        // cardano-up data rather than a per-component RoleContext.
-        if assignment.role == Role::Infrastructure {
-            let infra = tool
-                .infra
-                .as_ref()
-                .expect("infra tool must declare [infra] (validated at registry load)");
-            infra_tools.push(InfraToolContext {
-                tool_id: tool.id.clone(),
-                tool_name: tool.name.clone(),
-                website: tool.website.clone(),
-                cardano_up_package: infra.cardano_up_package.clone(),
-                env: infra.env.clone(),
-            });
-            continue;
-        }
-
-        // Fullstack collapse: the on-chain + off-chain assignments of this tool
-        // become one `protocol/` component. Build its RoleContext once (on the
-        // on-chain assignment); the off-chain half adds nothing further (its
-        // nix_packages were already unioned above).
-        if fullstack_id.as_deref() == Some(assignment.tool_id.as_str())
-            && matches!(assignment.role, Role::OnChain | Role::OffChain)
-        {
-            if assignment.role == Role::OnChain {
-                fullstack = Some(RoleContext {
-                    tool_id: tool.id.clone(),
-                    tool_name: tool.name.clone(),
-                    language: tool.languages.first().cloned().unwrap_or_default(),
-                    dir: contract::DIR_PROTOCOL.to_string(),
-                    website: tool.website.clone(),
-                });
-            }
-            continue;
-        }
-
-        let rc = RoleContext {
-            tool_id: tool.id.clone(),
-            tool_name: tool.name.clone(),
-            language: tool.languages.first().cloned().unwrap_or_default(),
-            dir: assignment.role.dir().to_string(),
-            website: tool.website.clone(),
-        };
+        let fused = planner::is_fullstack_member(assignment, fullstack_id);
         match assignment.role {
-            Role::OnChain => on_chain = Some(rc),
-            Role::OffChain => off_chain = Some(rc),
-            Role::Devnet => devnet = Some(rc),
-            Role::FormalMethods => formal_methods = Some(rc),
-            Role::Infrastructure => unreachable!("infra handled above"),
+            Role::Infrastructure => infra_tools.push(infra_tool_context(tool)),
+            Role::OnChain if fused => fullstack = Some(RoleContext::new(tool, dir)),
+            // The fused component was already built from the on-chain half.
+            Role::OffChain if fused => {}
+            Role::OnChain => on_chain = Some(RoleContext::new(tool, dir)),
+            Role::OffChain => off_chain = Some(RoleContext::new(tool, dir)),
+            Role::Devnet => devnet = Some(RoleContext::new(tool, dir)),
+            Role::FormalMethods => formal_methods = Some(RoleContext::new(tool, dir)),
         }
     }
-
-    // Canonical order for the only multi-tool role: sorted by tool id (§11).
-    // Mirrors the planner's infra ordering so context and plan agree.
-    infra_tools.sort_by(|a, b| a.tool_id.cmp(&b.tool_id));
-
-    // Resolve the infra `.env` emissions once, at generation time (§5.4): the
-    // base node-socket default, then each provider's mappings in canonical order,
-    // key-unique by `to` so an explicit mapping replaces the default.
-    let mut infra_env: Vec<EnvMapping> = Vec::new();
-    if !infra_tools.is_empty() {
-        upsert_env(
-            &mut infra_env,
-            EnvMapping {
-                from: CARDANO_UP_NODE_SOCKET_VAR.to_string(),
-                to: contract::ENV_NODE_SOCKET_PATH.to_string(),
-            },
-        );
-        for t in &infra_tools {
-            for m in &t.env {
-                upsert_env(&mut infra_env, m.clone());
-            }
-        }
-    }
-
-    let mut env_vars = BTreeMap::new();
-    env_vars.insert(
-        contract::ENV_NETWORK.to_string(),
-        selection.network.to_string(),
-    );
-    env_vars.insert(contract::ENV_INDEXER_URL.to_string(), String::new());
-    env_vars.insert(contract::ENV_INDEXER_PORT.to_string(), String::new());
-    env_vars.insert(contract::ENV_NODE_SOCKET_PATH.to_string(), String::new());
-    env_vars.insert(contract::ENV_OGMIOS_URL.to_string(), String::new());
-    env_vars.insert(contract::ENV_TX_SUBMIT_URL.to_string(), String::new());
-    env_vars.insert(contract::ENV_DOLOS_GRPC_URL.to_string(), String::new());
-    env_vars.insert(
-        contract::ENV_CARDANO_NODE_API_URL.to_string(),
-        String::new(),
-    );
 
     Ok(TemplateContext {
         project_name: selection.project_name.clone(),
@@ -295,13 +190,9 @@ pub fn build_context(
         has_devnet: devnet.is_some(),
         has_formal_methods: formal_methods.is_some(),
         has_fullstack: fullstack.is_some(),
+        has_blueprint: planner::blueprint_dir_present(selection),
 
-        has_blueprint: on_chain.is_some()
-            || off_chain.is_some()
-            || fullstack.is_some()
-            || devnet.is_some()
-            || formal_methods.is_some(),
-
+        infra_env: resolve_infra_env(&infra_tools),
         on_chain,
         off_chain,
         fullstack,
@@ -310,38 +201,78 @@ pub fn build_context(
         formal_methods,
 
         infra_context_name: selection.project_name.clone(),
-        infra_env,
 
         blueprint_path: contract::BLUEPRINT_PATH.to_string(),
-        env_vars,
+        env_vars: seeded_env_vars(selection),
+
+        nix: selection.nix,
+        nix_packages,
+        nix_component_flakes,
 
         spec: selection.spec,
         spec_example: selection.spec && planner::spec_example_present(selection),
-        nix: selection.nix,
-        nix_packages,
-        nix_component_flakes: {
-            // Canonical (Role::ALL) order; dirs already deduped above.
-            nix_flake_components.sort_by_key(|(idx, _)| *idx);
-            nix_flake_components
-                .into_iter()
-                .map(|(_, dir)| dir)
-                .collect()
-        },
     })
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+fn infra_tool_context(tool: &ToolDef) -> InfraToolContext {
+    let infra = tool
+        .infra
+        .as_ref()
+        .expect("infra tool declares [infra] (validated at registry load)");
+    InfraToolContext {
+        tool_id: tool.id.clone(),
+        tool_name: tool.name.clone(),
+        website: tool.website.clone(),
+        cardano_up_package: infra.cardano_up_package.clone(),
+        env: infra.env.clone(),
+    }
+}
+
+/// The `.env` mappings the infra driver writes: the cardano-up node-socket
+/// default, then each provider's mappings in order. Unique by target key, with a
+/// later mapping replacing an earlier one, so an explicit provider mapping wins
+/// over the default (§5.4). Empty when there is no infrastructure.
+fn resolve_infra_env(infra_tools: &[InfraToolContext]) -> Vec<EnvMapping> {
+    if infra_tools.is_empty() {
+        return Vec::new();
+    }
+    let node_socket_default = EnvMapping {
+        from: CARDANO_UP_NODE_SOCKET_VAR.to_string(),
+        to: contract::ENV_NODE_SOCKET_PATH.to_string(),
+    };
+    let mut env = vec![node_socket_default];
+    for mapping in infra_tools.iter().flat_map(|t| &t.env) {
+        upsert_env(&mut env, mapping.clone());
+    }
+    env
+}
+
+/// Insert `mapping`, replacing any existing mapping with the same target key.
+fn upsert_env(env: &mut Vec<EnvMapping>, mapping: EnvMapping) {
+    match env.iter_mut().find(|e| e.to == mapping.to) {
+        Some(existing) => *existing = mapping,
+        None => env.push(mapping),
+    }
+}
+
+/// The `.env` vocabulary: the network, plus every contract endpoint seeded empty.
+fn seeded_env_vars(selection: &Selection) -> BTreeMap<String, String> {
+    let mut vars: BTreeMap<String, String> = SEEDED_ENV_KEYS
+        .iter()
+        .map(|key| ((*key).to_string(), String::new()))
+        .collect();
+    vars.insert(
+        contract::ENV_NETWORK.to_string(),
+        selection.network.to_string(),
+    );
+    vars
+}
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::{a, registry};
     use super::*;
     use crate::registry::types::{Network, RoleAssignment};
-
-    fn registry() -> Registry {
-        Registry::load().expect("registry should load")
-    }
 
     fn selection(assignments: Vec<RoleAssignment>) -> Selection {
         Selection {
@@ -356,18 +287,9 @@ mod tests {
     #[test]
     fn context_with_all_roles() {
         let sel = selection(vec![
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "aiken".into(),
-            },
-            RoleAssignment {
-                role: Role::OffChain,
-                tool_id: "meshjs".into(),
-            },
-            RoleAssignment {
-                role: Role::Devnet,
-                tool_id: "yaci".into(),
-            },
+            a(Role::OnChain, "aiken"),
+            a(Role::OffChain, "meshjs"),
+            a(Role::Devnet, "yaci"),
         ]);
         let ctx = build_context(&sel, &registry()).unwrap();
 
@@ -386,14 +308,8 @@ mod tests {
         // Scalus on both roles + [fullstack] template → the context represents one
         // `protocol` component, not separate on-chain/off-chain contexts.
         let sel = selection(vec![
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "scalus".into(),
-            },
-            RoleAssignment {
-                role: Role::OffChain,
-                tool_id: "scalus".into(),
-            },
+            a(Role::OnChain, "scalus"),
+            a(Role::OffChain, "scalus"),
         ]);
         let ctx = build_context(&sel, &registry()).unwrap();
 
@@ -412,10 +328,7 @@ mod tests {
 
     #[test]
     fn context_on_chain_only() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
+        let sel = selection(vec![a(Role::OnChain, "aiken")]);
         let ctx = build_context(&sel, &registry()).unwrap();
 
         assert!(ctx.has_on_chain);
@@ -431,10 +344,7 @@ mod tests {
 
     #[test]
     fn has_flags_match_assignments() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OffChain,
-            tool_id: "meshjs".into(),
-        }]);
+        let sel = selection(vec![a(Role::OffChain, "meshjs")]);
         let ctx = build_context(&sel, &registry()).unwrap();
 
         assert!(!ctx.has_on_chain);
@@ -447,14 +357,8 @@ mod tests {
     #[test]
     fn context_with_formal_methods() {
         let sel = selection(vec![
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "aiken".into(),
-            },
-            RoleAssignment {
-                role: Role::FormalMethods,
-                tool_id: "blaster".into(),
-            },
+            a(Role::OnChain, "aiken"),
+            a(Role::FormalMethods, "blaster"),
         ]);
         let ctx = build_context(&sel, &registry()).unwrap();
 
@@ -466,10 +370,7 @@ mod tests {
 
     #[test]
     fn contract_constants_propagated() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
+        let sel = selection(vec![a(Role::OnChain, "aiken")]);
         let ctx = build_context(&sel, &registry()).unwrap();
 
         assert_eq!(ctx.blueprint_path, "blueprint/plutus.json");
@@ -480,18 +381,9 @@ mod tests {
     #[test]
     fn role_dirs_match_contract() {
         let sel = selection(vec![
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "aiken".into(),
-            },
-            RoleAssignment {
-                role: Role::OffChain,
-                tool_id: "meshjs".into(),
-            },
-            RoleAssignment {
-                role: Role::Devnet,
-                tool_id: "yaci".into(),
-            },
+            a(Role::OnChain, "aiken"),
+            a(Role::OffChain, "meshjs"),
+            a(Role::Devnet, "yaci"),
         ]);
         let ctx = build_context(&sel, &registry()).unwrap();
 
@@ -502,73 +394,46 @@ mod tests {
 
     #[test]
     fn unknown_tool_errors() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "nonexistent".into(),
-        }]);
+        let sel = selection(vec![a(Role::OnChain, "nonexistent")]);
         let result = build_context(&sel, &registry());
         assert!(matches!(result, Err(ScaffoldError::ToolNotFound { .. })));
     }
 
     #[test]
     fn role_mismatch_errors() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::Devnet,
-            tool_id: "aiken".into(),
-        }]);
+        let sel = selection(vec![a(Role::Devnet, "aiken")]);
         let result = build_context(&sel, &registry());
         assert!(matches!(result, Err(ScaffoldError::RoleMismatch { .. })));
     }
 
     #[test]
     fn nix_packages_collected() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
+        let sel = selection(vec![a(Role::OnChain, "aiken")]);
         let ctx = build_context(&sel, &registry()).unwrap();
         assert!(ctx.nix_packages.contains(&"aiken".to_string()));
     }
 
     #[test]
     fn nix_packages_order_is_assignment_order_independent() {
-        // The same logical selection reached in a different assignment order (e.g.
-        // a fresh scaffold vs. one built up via `add`) must yield the identical
-        // `nix_packages` list, or `flake.nix` would differ byte-for-byte for equal
-        // inputs (determinism contract, §11). Regression test for #65.
-        let on_chain = || RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        };
-        let off_chain = || RoleAssignment {
-            role: Role::OffChain,
-            tool_id: "meshjs".into(),
-        };
+        // A fresh scaffold and the same selection built up via `add` (which
+        // appends) must render the same `flake.nix` (determinism, §11).
+        let on_chain = || a(Role::OnChain, "aiken");
+        let off_chain = || a(Role::OffChain, "meshjs");
 
         let canonical =
             build_context(&selection(vec![on_chain(), off_chain()]), &registry()).unwrap();
-        // Reversed order, as an `add` of the on-chain role onto an off-chain-only
-        // project would produce (append, not canonical insert).
         let reversed =
             build_context(&selection(vec![off_chain(), on_chain()]), &registry()).unwrap();
 
         assert_eq!(canonical.nix_packages, reversed.nix_packages);
-        // And the canonical order is Role::ALL order: on-chain (aiken) before
-        // off-chain (nodejs).
         assert_eq!(canonical.nix_packages, vec!["aiken", "nodejs"]);
     }
 
     #[test]
     fn infra_context_aggregates_providers() {
         let sel = selection(vec![
-            RoleAssignment {
-                role: Role::Infrastructure,
-                tool_id: "ogmios".into(),
-            },
-            RoleAssignment {
-                role: Role::Infrastructure,
-                tool_id: "kupo".into(),
-            },
+            a(Role::Infrastructure, "ogmios"),
+            a(Role::Infrastructure, "kupo"),
         ]);
         let ctx = build_context(&sel, &registry()).unwrap();
 
@@ -597,10 +462,7 @@ mod tests {
 
     #[test]
     fn no_infra_env_without_infra() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
+        let sel = selection(vec![a(Role::OnChain, "aiken")]);
         let ctx = build_context(&sel, &registry()).unwrap();
         assert!(ctx.infra_env.is_empty());
         // OGMIOS_URL is still seeded into the always-present .env vocabulary.
@@ -634,14 +496,8 @@ mod tests {
     fn nix_packages_deduped_across_tools() {
         // Scalus on-chain + scalus off-chain — same tool, same nix_packages
         let sel = selection(vec![
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "scalus".into(),
-            },
-            RoleAssignment {
-                role: Role::OffChain,
-                tool_id: "scalus".into(),
-            },
+            a(Role::OnChain, "scalus"),
+            a(Role::OffChain, "scalus"),
         ]);
         let ctx = build_context(&sel, &registry()).unwrap();
         // sbt and jdk should appear only once each

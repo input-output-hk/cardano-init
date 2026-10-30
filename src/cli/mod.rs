@@ -1,3 +1,9 @@
+//! The impure edge: argument parsing, command dispatch, prompts and output.
+//! Orchestrates the pure core (`registry`, `scaffold`, `doctor`); holds no
+//! generation logic of its own.
+
+mod args;
+mod error;
 pub mod git;
 pub mod interactive;
 pub mod oneshot;
@@ -6,690 +12,81 @@ pub mod theme;
 pub mod update;
 pub mod version_check;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches};
 
-use crate::registry::loader::{Registry, RegistryError};
-use crate::registry::types::{Link, Role, ToolDef};
-use crate::scaffold::ScaffoldError;
+pub use args::{AddArgs, Cli, Command, InitArgs, RemoveArgs, UpdateFlags};
+pub use error::CliError;
 
-// ---------------------------------------------------------------------------
-// CLI arguments
-// ---------------------------------------------------------------------------
+use crate::doctor::{self, catalog::DepCatalog, probe};
+use crate::registry::loader::Registry;
+use crate::registry::types::{Role, Selection};
 
-/// Scaffold a new Cardano protocol project.
-#[derive(Parser, Debug)]
-#[command(name = "cardano-init", version, about)]
-pub struct Cli {
-    #[command(subcommand)]
-    pub command: Option<Command>,
+/// Appended to `--help`: the tool catalog lives in `list`, not here.
+const HELP_FOOTER: &str = "\
+Run 'cardano-init list' to see the tools available for each role.
 
-    /// Print machine-readable JSON instead of human-readable text (global)
-    #[arg(long, global = true)]
-    pub json: bool,
+Examples:
+  cardano-init                                        # interactive mode
+  cardano-init --name my-app --on-chain aiken         # one-shot, single role
+  cardano-init --name my-app --on-chain aiken --off-chain meshjs --nix
+  cardano-init -n my-app -p scalus -d yaci            # short flags
+";
 
-    #[command(flatten)]
-    pub init: InitArgs,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum Command {
-    /// Check that the dependencies this project needs are installed, and
-    /// advise how to install any that are missing
-    Doctor,
-
-    /// List the available roles and tools (use --json for agents)
-    List(ListArgs),
-
-    /// Add or swap a tool/role in the project in the current directory
-    Add(AddArgs),
-
-    /// Remove a role (or an infrastructure provider) from the project in the
-    /// current directory
-    Remove(RemoveArgs),
-}
-
-/// Arguments for `list`.
-#[derive(clap::Args, Debug, Default)]
-pub struct ListArgs {
-    /// Show a compact matrix of tools by role (human output only; `--json` is
-    /// unaffected)
-    #[arg(long)]
-    pub table: bool,
-}
-
-/// Flags shared by the update commands (add / remove).
-#[derive(clap::Args, Debug, Default, Clone)]
-pub struct UpdateFlags {
-    /// Show the change set without writing anything
-    #[arg(long, visible_alias = "dryrun")]
-    pub dry_run: bool,
-
-    /// Update even when the git working tree has uncommitted changes (there is
-    /// then no `git diff` to review/revert against)
-    #[arg(long)]
-    pub force: bool,
-
-    /// Proceed even if the resulting off-chain ↔ provider selection is flagged
-    /// incompatible (downgrades the stop to a warning)
-    #[arg(long, visible_alias = "ignore-warnings")]
-    pub ignore_warning: bool,
-
-    /// Allow experimental tools in the resulting selection
-    #[arg(long, short = 'e', visible_alias = "experimental")]
-    pub allow_experimental: bool,
-}
-
-/// Arguments for `add`: the same role flags as init (presence assigns/replaces).
-#[derive(clap::Args, Debug)]
-pub struct AddArgs {
-    /// On-chain tool (replaces the current on-chain tool if any)
-    #[arg(long, visible_aliases = ["on", "onchain"], value_name = "TOOL_ID")]
-    pub on_chain: Option<String>,
-
-    /// Off-chain tool (replaces the current off-chain tool if any)
-    #[arg(long, visible_aliases = ["off", "offchain"], value_name = "TOOL_ID")]
-    pub off_chain: Option<String>,
-
-    /// Fullstack tool filling both on-chain and off-chain as one `protocol/`
-    /// component. Not combinable with --on-chain/--off-chain.
-    #[arg(
-        long,
-        short = 'f',
-        visible_short_alias = 'p',
-        visible_alias = "protocol",
-        value_name = "TOOL_ID"
-    )]
-    pub fullstack: Option<String>,
-
-    /// Infrastructure provider to add (repeatable)
-    #[arg(
-        long,
-        short = 'i',
-        visible_alias = "infrastructure",
-        value_name = "TOOL_ID"
-    )]
-    pub infra: Vec<String>,
-
-    /// Devnet tool (replaces the current devnet tool if any)
-    #[arg(long, short = 'd', value_name = "TOOL_ID")]
-    pub devnet: Option<String>,
-
-    /// Formal-methods tool (replaces the current one if any)
-    #[arg(long, visible_aliases = ["formal", "formalmethods"], value_name = "TOOL_ID")]
-    pub formal_methods: Option<String>,
-
-    #[command(flatten)]
-    pub flags: UpdateFlags,
-}
-
-/// Arguments for `remove`: bare role flags drop that role; `--infra <id>` drops
-/// one provider.
-#[derive(clap::Args, Debug)]
-pub struct RemoveArgs {
-    /// Remove the on-chain component
-    #[arg(long, visible_aliases = ["on", "onchain"])]
-    pub on_chain: bool,
-
-    /// Remove the off-chain component
-    #[arg(long, visible_aliases = ["off", "offchain"])]
-    pub off_chain: bool,
-
-    /// Remove an infrastructure provider by id (repeatable)
-    #[arg(
-        long,
-        short = 'i',
-        visible_alias = "infrastructure",
-        value_name = "TOOL_ID"
-    )]
-    pub infra: Vec<String>,
-
-    /// Remove the devnet component
-    #[arg(long, short = 'd')]
-    pub devnet: bool,
-
-    /// Remove the formal-methods component
-    #[arg(long, visible_aliases = ["formal", "formalmethods"])]
-    pub formal_methods: bool,
-
-    #[command(flatten)]
-    pub flags: UpdateFlags,
-}
-
-/// Arguments for the default init mode (interactive or one-shot).
-#[derive(clap::Args, Debug)]
-pub struct InitArgs {
-    /// Project name (required in one-shot mode)
-    #[arg(long, short = 'n')]
-    pub name: Option<String>,
-
-    /// On-chain tool (e.g., aiken, scalus)
-    #[arg(long, visible_aliases = ["on", "onchain"], value_name = "TOOL_ID")]
-    pub on_chain: Option<String>,
-
-    /// Off-chain tool (e.g., meshjs, scalus)
-    #[arg(long, visible_aliases = ["off", "offchain"], value_name = "TOOL_ID")]
-    pub off_chain: Option<String>,
-
-    /// Fullstack tool for both on-chain and off-chain, as one `protocol/`
-    /// component. Not combinable with --on-chain/--off-chain
-    #[arg(
-        long,
-        short = 'f',
-        visible_short_alias = 'p',
-        visible_alias = "protocol",
-        value_name = "TOOL_ID"
-    )]
-    pub fullstack: Option<String>,
-
-    /// Infrastructure tool (repeatable: --infra kupo --infra ogmios)
-    #[arg(
-        long,
-        short = 'i',
-        visible_alias = "infrastructure",
-        value_name = "TOOL_ID"
-    )]
-    pub infra: Vec<String>,
-
-    /// Devnet tool (e.g., yaci)
-    #[arg(long, short = 'd', value_name = "TOOL_ID")]
-    pub devnet: Option<String>,
-
-    /// Formal methods tool (e.g., blaster)
-    #[arg(long, visible_aliases = ["formal", "formalmethods"], value_name = "TOOL_ID")]
-    pub formal_methods: Option<String>,
-
-    /// Generate Nix flake for dependency management
-    #[arg(long)]
-    pub nix: bool,
-
-    /// Skip the `spec/` protocol-specification folder (generated by default)
-    #[arg(long)]
-    pub no_spec: bool,
-
-    /// Opt in to experimental tools
-    #[arg(long, short = 'e', visible_alias = "experimental")]
-    pub allow_experimental: bool,
-
-    /// Show what would be generated without writing to disk
-    #[arg(long, visible_alias = "dryrun")]
-    pub dry_run: bool,
-
-    /// Scaffold a combination the compatibility check flags as incompatible
-    #[arg(long, visible_alias = "ignore-warnings")]
-    pub ignore_warning: bool,
-}
-
-impl InitArgs {
-    /// Returns true if any one-shot flags were provided.
-    fn has_oneshot_flags(&self) -> bool {
-        self.on_chain.is_some()
-            || self.off_chain.is_some()
-            || self.fullstack.is_some()
-            || !self.infra.is_empty()
-            || self.devnet.is_some()
-            || self.formal_methods.is_some()
-            || self.nix
-            || self.no_spec
-            || self.dry_run
-    }
-}
-
-// ---------------------------------------------------------------------------
-// CLI errors
-// ---------------------------------------------------------------------------
-
-// `miette::Diagnostic` supplies the *human* rendering (framed title + `help:`
-// remedy + code, via the fancy handler installed in `run`). The inherent
-// `code()`/`context()`/`exit_code()` methods below remain the source of truth
-// for the JSON contract and exit dispatch — the `code(...)` slugs here mirror
-// them and must stay in sync.
-#[derive(Debug, thiserror::Error, miette::Diagnostic)]
-pub enum CliError {
-    #[error("{0}")]
-    #[diagnostic(code(cardano_init::registry_load))]
-    Registry(#[from] RegistryError),
-
-    #[error("{0}")]
-    #[diagnostic(code(cardano_init::scaffold_error))]
-    Scaffold(#[from] ScaffoldError),
-
-    #[error("{0}")]
-    #[diagnostic(code(cardano_init::registry_load))]
-    Catalog(#[from] crate::doctor::catalog::CatalogError),
-
-    #[error("directory '{}' already exists. Refusing to overwrite", path)]
-    #[diagnostic(
-        code(cardano_init::dir_exists),
-        help("choose a different --name, or remove/empty the existing directory.")
-    )]
-    DirectoryExists { path: String },
-
-    #[error("no tool named '{tool_id}' fills the {role} role")]
-    #[diagnostic(
-        code(cardano_init::unknown_tool),
-        help("valid {role} tools: {}", valid_tools.join(", ")),
-        url("https://github.com/input-output-hk/cardano-init#tools")
-    )]
-    UnknownTool {
-        tool_id: String,
-        role: String,
-        valid_tools: Vec<String>,
-    },
-
-    #[error("tool '{tool_id}' does not support the '{role}' role")]
-    #[diagnostic(
-        code(cardano_init::tool_role_mismatch),
-        help("'{tool_id}' fills: {}", valid_roles.join(", ")),
-        url("https://github.com/input-output-hk/cardano-init#tools")
-    )]
-    ToolRoleMismatch {
-        tool_id: String,
-        role: String,
-        valid_roles: Vec<String>,
-    },
-
-    #[error("no roles selected")]
-    #[diagnostic(
-        code(cardano_init::no_roles_selected),
-        help("select at least one tool, or pass a one-shot flag like --on-chain aiken.")
-    )]
-    NoRolesSelected,
-
-    #[error(
-        "{} is experimental — it may be unstable or incomplete, so it's opt-in (expect rough edges and breaking changes)",
-        labels.join(", ")
-    )]
-    #[diagnostic(
-        code(cardano_init::experimental_not_allowed),
-        help(
-            "to scaffold it anyway, re-run with --allow-experimental:\n\n    cardano-init --name <project> {} --allow-experimental",
-            example_flags.join(" ")
-        )
-    )]
-    ExperimentalNotAllowed {
-        /// Tool ids (machine-facing `context`).
-        tools: Vec<String>,
-        /// Human labels, `Name (id)`, for the message.
-        labels: Vec<String>,
-        /// The role flags that selected the experimental tool(s), e.g.
-        /// `["--formal-methods", "blaster"]`, so the example is copy-pasteable.
-        example_flags: Vec<String>,
-    },
-
-    #[error("tool '{tool_id}' does not support fullstack (no [fullstack] template)")]
-    #[diagnostic(
-        code(cardano_init::fullstack_unsupported),
-        help("fullstack-capable tools: {}", valid_tools.join(", "))
-    )]
-    FullstackUnsupported {
-        tool_id: String,
-        valid_tools: Vec<String>,
-    },
-
-    #[error("--fullstack cannot be combined with --on-chain or --off-chain")]
-    #[diagnostic(
-        code(cardano_init::fullstack_conflict),
-        help("--fullstack X already fills both roles; use it alone.")
-    )]
-    FullstackConflict,
-
-    // Boxed to keep `CliError` small (this payload carries several strings).
-    // `transparent` delegates both Display and the diagnostic (code + `#[help]`)
-    // to the inner error.
-    #[error(transparent)]
-    #[diagnostic(transparent)]
-    IncompatibleTools(Box<IncompatibleToolsError>),
-
-    #[error("invalid project name '{name}' — {reason}")]
-    #[diagnostic(code(cardano_init::invalid_project_name))]
-    InvalidProjectName { name: String, reason: String },
-
-    #[error("--name is required when using one-shot flags (--on-chain, --off-chain, etc.)")]
-    #[diagnostic(
-        code(cardano_init::name_required),
-        help(
-            "run without flags for interactive mode, or provide --name:\n\n    cardano-init --name my-protocol --on-chain aiken"
-        )
-    )]
-    NameRequired,
-
-    #[error(
-        "this directory doesn't look like a cardano-init project — unrecognized: {}",
-        .dirs.join(", ")
-    )]
-    #[diagnostic(
-        code(cardano_init::project_unrecognized),
-        help(
-            "run add/remove inside a generated project; fix or rename any renamed/foreign component directories first."
-        )
-    )]
-    ProjectUnrecognized { dirs: Vec<String> },
-
-    #[error("can't add the {role} component: '{dir}/' already exists and isn't recognized")]
-    #[diagnostic(
-        code(cardano_init::slot_occupied),
-        help("remove or rename '{dir}/' first, then re-run.")
-    )]
-    SlotOccupied { role: String, dir: String },
-
-    #[error("the working tree at '{path}' has uncommitted changes")]
-    #[diagnostic(
-        code(cardano_init::worktree_dirty),
-        help(
-            "commit or stash first so the update is reviewable with `git diff`, or re-run with --force to update anyway."
-        )
-    )]
-    WorktreeDirty { path: String },
-
-    #[error("nothing to change — the project already matches this selection")]
-    #[diagnostic(
-        code(cardano_init::nothing_to_change),
-        help(
-            "pass a different tool/role, or use `cardano-init add`/`remove` to change the stack."
-        )
-    )]
-    NothingToChange,
-
-    #[error("user aborted")]
-    #[diagnostic(code(cardano_init::aborted))]
-    Aborted,
-
-    #[error("prompt error: {0}")]
-    #[diagnostic(code(cardano_init::prompt_error))]
-    Prompt(#[from] dialoguer::Error),
-}
-
-/// Payload for [`CliError::IncompatibleTools`] — boxed in the variant so
-/// `CliError` stays small (an off-chain ↔ provider mismatch carries several
-/// strings for both the human message and the JSON context).
-#[derive(Debug, thiserror::Error, miette::Diagnostic)]
-#[error("{off_chain} can't be paired with {providers} — {reason}")]
-#[diagnostic(code(cardano_init::incompatible_tools))]
-pub struct IncompatibleToolsError {
-    /// Human label `Name (id)` for the off-chain tool.
-    pub off_chain: String,
-    /// Human labels `Name (id)` for the offending provider(s), comma-joined.
-    pub providers: String,
-    /// Why the pair can't talk (seam mismatch / self-hosting).
-    pub reason: String,
-    /// Pre-formatted multi-line remedy (which providers / off-chain tools fit,
-    /// plus the `--ignore-warning` escape hatch); surfaced as the `help:` line.
-    #[help]
-    pub help: String,
-    /// Machine-facing ids `[off_chain_id, provider_ids…]` (JSON context).
-    pub ids: Vec<String>,
-    /// Provider ids compatible with the chosen off-chain tool (JSON context).
-    pub compatible_providers: Vec<String>,
-    /// Off-chain ids compatible with the chosen providers (JSON context).
-    pub compatible_off_chain: Vec<String>,
-}
-
-impl CliError {
-    /// Process exit-code category (TECH_SPEC §2.3):
-    /// - `2` — usage / validation errors (bad or missing input);
-    /// - `1` — runtime errors (I/O, registry/render failure, …);
-    /// - `0` — interactive abort by user choice (not an error).
-    pub fn exit_code(&self) -> i32 {
-        match self {
-            CliError::UnknownTool { .. }
-            | CliError::ToolRoleMismatch { .. }
-            | CliError::NoRolesSelected
-            | CliError::ExperimentalNotAllowed { .. }
-            | CliError::FullstackUnsupported { .. }
-            | CliError::FullstackConflict
-            | CliError::IncompatibleTools(_)
-            | CliError::InvalidProjectName { .. }
-            | CliError::NameRequired
-            | CliError::ProjectUnrecognized { .. }
-            | CliError::SlotOccupied { .. }
-            | CliError::NothingToChange => 2,
-
-            CliError::Aborted => 0,
-
-            CliError::Registry(_)
-            | CliError::Scaffold(_)
-            | CliError::Catalog(_)
-            | CliError::DirectoryExists { .. }
-            | CliError::WorktreeDirty { .. }
-            | CliError::Prompt(_) => 1,
-        }
-    }
-
-    /// Stable, machine-readable error code (TECH_SPEC §2.5). Part of the JSON
-    /// contract; never changes for a given error kind.
-    pub fn code(&self) -> &'static str {
-        match self {
-            CliError::Registry(_) | CliError::Catalog(_) => "registry_load",
-            CliError::Scaffold(_) => "scaffold_error",
-            CliError::DirectoryExists { .. } => "dir_exists",
-            CliError::UnknownTool { .. } => "unknown_tool",
-            CliError::ToolRoleMismatch { .. } => "tool_role_mismatch",
-            CliError::NoRolesSelected => "no_roles_selected",
-            CliError::ExperimentalNotAllowed { .. } => "experimental_not_allowed",
-            CliError::FullstackUnsupported { .. } => "fullstack_unsupported",
-            CliError::FullstackConflict => "fullstack_conflict",
-            CliError::IncompatibleTools(_) => "incompatible_tools",
-            CliError::InvalidProjectName { .. } => "invalid_project_name",
-            CliError::NameRequired => "name_required",
-            CliError::ProjectUnrecognized { .. } => "project_unrecognized",
-            CliError::SlotOccupied { .. } => "slot_occupied",
-            CliError::WorktreeDirty { .. } => "worktree_dirty",
-            CliError::NothingToChange => "nothing_to_change",
-            CliError::Aborted => "aborted",
-            CliError::Prompt(_) => "prompt_error",
-        }
-    }
-
-    /// Structured, agent-facing context: the offending input plus valid
-    /// alternatives where applicable (TECH_SPEC §2.5, PRD FR-15).
-    pub fn context(&self) -> serde_json::Value {
-        use serde_json::json;
-        match self {
-            CliError::Registry(e) => json!({ "detail": e.to_string() }),
-            CliError::Catalog(e) => json!({ "detail": e.to_string() }),
-            CliError::Scaffold(e) => json!({ "detail": e.to_string() }),
-            CliError::DirectoryExists { path } => json!({ "path": path }),
-            CliError::UnknownTool {
-                tool_id,
-                role,
-                valid_tools,
-            } => json!({ "tool_id": tool_id, "role": role, "valid_tools": valid_tools }),
-            CliError::ToolRoleMismatch {
-                tool_id,
-                role,
-                valid_roles,
-            } => json!({ "tool_id": tool_id, "role": role, "valid_roles": valid_roles }),
-            CliError::FullstackUnsupported {
-                tool_id,
-                valid_tools,
-            } => json!({ "tool_id": tool_id, "valid_tools": valid_tools }),
-            CliError::InvalidProjectName { name, reason } => {
-                json!({ "name": name, "reason": reason })
-            }
-            CliError::ExperimentalNotAllowed { tools, .. } => {
-                json!({ "tools": tools, "remedy": "--allow-experimental" })
-            }
-            CliError::IncompatibleTools(e) => json!({
-                "tools": e.ids,
-                "reason": e.reason,
-                "compatible_providers": e.compatible_providers,
-                "compatible_off_chain": e.compatible_off_chain,
-                "remedy": "--ignore-warning",
-            }),
-            CliError::ProjectUnrecognized { dirs } => json!({ "dirs": dirs }),
-            CliError::SlotOccupied { role, dir } => json!({ "role": role, "dir": dir }),
-            CliError::WorktreeDirty { path } => json!({ "path": path }),
-            CliError::NoRolesSelected
-            | CliError::FullstackConflict
-            | CliError::NameRequired
-            | CliError::NothingToChange
-            | CliError::Aborted
-            | CliError::Prompt(_) => json!({}),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tool catalog for --help
-// ---------------------------------------------------------------------------
-
-/// Build the section appended to --help: a pointer to `list` for the tool
-/// catalog (kept out of --help to avoid a wall of text), plus usage examples.
-fn build_help_footer() -> String {
-    use std::fmt::Write;
-
-    let mut out =
-        String::from("Run 'cardano-init list' to see the tools available for each role.\n\n");
-
-    let _ = writeln!(out, "Examples:");
-    let _ = writeln!(
-        out,
-        "  cardano-init                                        # interactive mode"
-    );
-    let _ = writeln!(
-        out,
-        "  cardano-init --name my-app --on-chain aiken         # one-shot, single role"
-    );
-    let _ = writeln!(
-        out,
-        "  cardano-init --name my-app --on-chain aiken --off-chain meshjs --nix"
-    );
-    let _ = writeln!(
-        out,
-        "  cardano-init -n my-app -p scalus -d yaci            # short flags"
-    );
-
-    out
-}
-
-pub(super) fn tool_support_links(
-    tool: &ToolDef,
-    catalog: &crate::doctor::catalog::DepCatalog,
-) -> Vec<Link> {
-    let mut links: Vec<Link> = Vec::new();
-    for dep in &tool.system_deps {
-        for link in catalog.get(dep).map_or(&[][..], |r| &r.support) {
-            if !links.iter().any(|l| l.url == link.url) {
-                links.push(link.clone());
-            }
-        }
-    }
-    links
-}
-
-pub(super) fn format_tool(out: &mut String, tool: &ToolDef, support: &[Link]) {
-    use std::fmt::Write;
-
-    let mut roles: Vec<&str> = tool.roles.keys().map(|r| r.as_kebab()).collect();
-    roles.sort();
-    let experimental_tag = if tool.experimental {
-        "  [experimental]"
-    } else {
-        ""
-    };
-    let _ = writeln!(out, "  {} ({}){}", tool.name, tool.id, experimental_tag);
-    if tool.experimental {
-        let _ = writeln!(
-            out,
-            "    Status:    experimental — may be unstable or incomplete; needs --allow-experimental"
-        );
-    }
-    let _ = writeln!(out, "    Roles:     {}", roles.join(", "));
-    let _ = writeln!(out, "    Languages: {}", tool.languages.join(", "));
-    let _ = writeln!(out, "    Website:   {}", tool.website);
-    for (i, link) in tool.community.iter().enumerate() {
-        let label = if i == 0 { "Community:" } else { "" };
-        let _ = writeln!(out, "    {label:<10} {}: {}", link.name, link.url);
-    }
-    for (i, link) in support.iter().enumerate() {
-        let label = if i == 0 { "Tooling:" } else { "" };
-        let _ = writeln!(out, "    {label:<10} {}: {}", link.name, link.url);
-    }
-
-    // Wrap description to ~72 chars with 4-space indent
-    let _ = write!(out, "    ");
-    let mut col = 4;
-    for word in tool.description.split_whitespace() {
-        if col + word.len() + 1 > 76 && col > 4 {
-            let _ = write!(out, "\n    ");
-            col = 4;
-        }
-        if col > 4 {
-            let _ = write!(out, " ");
-            col += 1;
-        }
-        let _ = write!(out, "{word}");
-        col += word.len();
-    }
-    let _ = writeln!(out);
-}
-
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
-
-/// Main CLI entry point. Parse args, dispatch, and present the result (or a
-/// machine-readable error). Returns the process exit code.
+/// Main CLI entry point: parse args, dispatch, and present the result (or the
+/// error). Returns the process exit code.
 pub fn run() -> i32 {
     let registry = match Registry::load() {
         Ok(r) => r,
-        Err(e) => {
-            // Registry load happens before we know whether `--json` was passed;
-            // this is a packaging bug (embedded data), so default to human output.
-            let err = CliError::from(e);
-            let code = err.exit_code();
-            output::print_error(err, false);
-            return code;
-        }
+        // Loaded before `--json` is known; a failure here is a packaging bug
+        // (embedded data), so report it as human output.
+        Err(e) => return fail(&CliError::from(e), false),
     };
 
-    // Append usage examples + a pointer to `list` (the tool catalog lives there,
-    // not in --help).
-    let cmd = Cli::command().after_help(build_help_footer());
-    let matches = cmd.get_matches();
+    let matches = Cli::command().after_help(HELP_FOOTER).get_matches();
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated");
     let json = cli.json;
 
     if matches!(
         cli.command,
-        None | Some(Command::Add(_)) | Some(Command::Remove(_))
+        None | Some(Command::Add(_) | Command::Remove(_))
     ) {
         version_check::start(json);
     }
 
     let result = match cli.command {
         Some(Command::Doctor) => run_doctor(&registry, json),
-        Some(Command::List(args)) => crate::doctor::catalog::DepCatalog::load()
+        Some(Command::List(args)) => DepCatalog::load()
             .map_err(CliError::from)
             .map(|catalog| output::print_list(&registry, &catalog, json, args.table)),
-        Some(Command::Add(args)) => update::run_add(args, &registry, json),
-        Some(Command::Remove(args)) => update::run_remove(args, &registry, json),
-        None => run_init(cli.init, &registry, json),
+        Some(Command::Add(args)) => update::run_add(&args, &registry, json),
+        Some(Command::Remove(args)) => update::run_remove(&args, &registry, json),
+        None => run_init(&cli.init, &registry, json),
     };
 
     match result {
         Ok(()) => 0,
-        Err(e) => {
-            let code = e.exit_code();
-            output::print_error(e, json);
-            code
-        }
+        Err(e) => fail(&e, json),
     }
 }
 
-/// The required dependencies for a set of tool ids: the base dep `just`, plus
-/// the `system_deps` of each tool (deduped/sorted later by the resolver).
+/// Present `err` and return its exit code.
+fn fail(err: &CliError, json: bool) -> i32 {
+    output::print_error(err, json);
+    err.exit_code()
+}
+
+/// The required dependencies for a set of tool ids: the base dep `just` plus
+/// each tool's `system_deps` (the resolver dedups/sorts).
 ///
-/// The aggregated infra component is reported by the scan under the synthetic
-/// `INFRA_DRIVER_ID`; it contributes the union of every infra tool's
-/// `system_deps` (data-driven from the registry — `{docker, cardano-up}`).
+/// The scan reports the aggregated infra component under
+/// [`doctor::INFRA_DRIVER_ID`]; it needs the union of every infra tool's deps.
 fn required_deps<'a>(tool_ids: impl Iterator<Item = &'a str>, registry: &Registry) -> Vec<String> {
-    let mut deps = vec![crate::doctor::BASE_DEP.to_string()];
+    let mut deps = vec![doctor::BASE_DEP.to_string()];
     for id in tool_ids {
-        if id == crate::doctor::INFRA_DRIVER_ID {
-            for tool in registry.tools_for_role(crate::registry::types::Role::Infrastructure) {
+        if id == doctor::INFRA_DRIVER_ID {
+            for tool in registry.tools_for_role(Role::Infrastructure) {
                 deps.extend(tool.system_deps.iter().cloned());
             }
         } else if let Some(tool) = registry.get(id) {
@@ -699,69 +96,9 @@ fn required_deps<'a>(tool_ids: impl Iterator<Item = &'a str>, registry: &Registr
     deps
 }
 
-/// Turn a detected [`Incompatibility`](crate::registry::compat::Incompatibility)
-/// into a stop-generation `CliError`, pre-formatting the "which tools do fit"
-/// remedy (with the self-hosting case — no compatible provider — phrased as
-/// "omit the provider").
-fn incompatible_tools_error(inc: crate::registry::compat::Incompatibility) -> CliError {
-    let provider_labels: Vec<String> = inc
-        .providers
-        .iter()
-        .map(|p| format!("{} ({})", p.name, p.id))
-        .collect();
-    let providers_text = provider_labels.join(", ");
-
-    // These lines feed the diagnostic's `help:` field; miette owns the
-    // indentation, so they carry none of their own.
-    let providers_line = if !inc.compatible_providers.is_empty() {
-        format!(
-            "Providers that work with {}: {}",
-            inc.off_chain_name,
-            inc.compatible_providers.join(", ")
-        )
-    } else if inc.self_hosted {
-        format!(
-            "{} provides its own devnet — omit the provider selection.",
-            inc.off_chain_name
-        )
-    } else {
-        format!(
-            "No bundled provider serves {} — point it at a public provider (see its README).",
-            inc.off_chain_name
-        )
-    };
-    let off_chain_line = if inc.compatible_off_chain.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\nOff-chain tools that work with {}: {}",
-            providers_text,
-            inc.compatible_off_chain.join(", ")
-        )
-    };
-
-    let mut ids = vec![inc.off_chain_id.clone()];
-    ids.extend(inc.providers.iter().map(|p| p.id.clone()));
-
-    CliError::IncompatibleTools(Box::new(IncompatibleToolsError {
-        off_chain: format!("{} ({})", inc.off_chain_name, inc.off_chain_id),
-        providers: providers_text,
-        reason: inc.reason,
-        help: format!(
-            "{providers_line}{off_chain_line}\n\nTo scaffold this combination anyway, re-run with --ignore-warning."
-        ),
-        ids,
-        compatible_providers: inc.compatible_providers,
-        compatible_off_chain: inc.compatible_off_chain,
-    }))
-}
-
-/// Run `work` while showing a transient spinner labelled `message`, clearing it
-/// before returning. The spinner is shown only for **human, attended** (TTY)
-/// output — under `--json` or when piped it would corrupt the stream, so
-/// `work` runs plainly. indicatif draws to stderr, keeping stdout clean either
-/// way. Scoped to genuinely latency-bearing work (system probing / dep
-/// resolution), not near-instant steps (clig.dev: no fake progress).
+/// Run `work` behind a transient spinner on stderr. Only for human, attended
+/// output (a spinner would corrupt `--json` or piped streams), and only around
+/// genuinely slow work.
 fn with_spinner<T>(message: &str, json: bool, work: impl FnOnce() -> T) -> T {
     use indicatif::{ProgressBar, ProgressStyle};
 
@@ -781,11 +118,9 @@ fn with_spinner<T>(message: &str, json: bool, work: impl FnOnce() -> T) -> T {
     result
 }
 
-/// Run the standalone `doctor`: scan the current directory for generated
-/// components, then report dependency status + install plans.
+/// `doctor`: scan the current directory for generated components, then report
+/// dependency status and install plans.
 fn run_doctor(registry: &Registry, json: bool) -> Result<(), CliError> {
-    use crate::doctor::{self, catalog::DepCatalog, probe};
-
     let catalog = DepCatalog::load()?;
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let scan = probe::scan_project(&cwd, registry);
@@ -811,28 +146,22 @@ fn run_doctor(registry: &Registry, json: bool) -> Result<(), CliError> {
     Ok(())
 }
 
-/// Experimental gate: fail if `selection` includes a not-yet-build-green tool.
-/// Shared by `init` (one-shot) and the update commands; the caller skips it when
+/// Fail if `selection` includes an experimental tool. Callers skip it when
 /// `--allow-experimental` was given.
-fn experimental_gate(
-    selection: &crate::registry::types::Selection,
-    registry: &Registry,
-) -> Result<(), CliError> {
+fn experimental_gate(selection: &Selection, registry: &Registry) -> Result<(), CliError> {
     let experimental = output::selected_experimental_tools(selection, registry);
     if experimental.is_empty() {
         return Ok(());
     }
     let tools: Vec<String> = experimental.iter().map(|t| t.id.clone()).collect();
-    let labels: Vec<String> = experimental
+    let labels = experimental
         .iter()
         .map(|t| format!("{} ({})", t.name, t.id))
         .collect();
-    // The exact role flags that pulled in the experimental tool(s), so the
-    // suggested command is copy-pasteable.
-    let example_flags: Vec<String> = selection
+    let example_flags = selection
         .assignments
         .iter()
-        .filter(|a| tools.iter().any(|id| id == &a.tool_id))
+        .filter(|a| tools.contains(&a.tool_id))
         .flat_map(|a| [role_flag(a.role).to_string(), a.tool_id.clone()])
         .collect();
     Err(CliError::ExperimentalNotAllowed {
@@ -842,8 +171,27 @@ fn experimental_gate(
     })
 }
 
-/// The one-shot flag that assigns a tool to a given role, e.g. `--on-chain`.
-/// Used to build a copy-pasteable example command in error messages.
+/// Off-chain ↔ provider compatibility gate. With `--ignore-warning` an
+/// incompatibility is only a warning (printed for human output).
+fn compat_gate(
+    selection: &Selection,
+    registry: &Registry,
+    ignore_warning: bool,
+    json: bool,
+) -> Result<(), CliError> {
+    let Some(inc) = crate::registry::compat::check(&selection.assignments, registry) else {
+        return Ok(());
+    };
+    if !ignore_warning {
+        return Err(inc.into());
+    }
+    if !json {
+        output::print_incompatibility_warning(&inc);
+    }
+    Ok(())
+}
+
+/// The one-shot flag that assigns a tool to `role`, e.g. `--on-chain`.
 fn role_flag(role: Role) -> &'static str {
     match role {
         Role::OnChain => "--on-chain",
@@ -854,37 +202,21 @@ fn role_flag(role: Role) -> &'static str {
     }
 }
 
-/// Run the default init mode (interactive or one-shot).
-fn run_init(args: InitArgs, registry: &Registry, json: bool) -> Result<(), CliError> {
-    // `--name` is required for one-shot flags, and always in JSON mode (which
-    // is non-interactive and must never prompt — TECH_SPEC §2.1).
+/// The default command: build a selection (one-shot when `--name` is given,
+/// interactive otherwise), gate it, then scaffold (or preview) the project.
+fn run_init(args: &InitArgs, registry: &Registry, json: bool) -> Result<(), CliError> {
+    // JSON mode is non-interactive and must never prompt (tech spec §2.1).
     if args.name.is_none() && (args.has_oneshot_flags() || json) {
         return Err(CliError::NameRequired);
     }
-
-    // `--fullstack X` is sugar for `--on-chain X --off-chain X`; combining it with
-    // an explicit on-chain/off-chain flag is ambiguous (TECH_SPEC §2.2).
-    if args.fullstack.is_some() && (args.on_chain.is_some() || args.off_chain.is_some()) {
+    let roles = args.role_flags();
+    if roles.has_fullstack_conflict() {
         return Err(CliError::FullstackConflict);
     }
 
-    // Decide mode: one-shot if --name provided, interactive otherwise
-    let selection = if let Some(ref name) = args.name {
-        let selection = oneshot::build_selection(
-            name,
-            args.on_chain.as_deref(),
-            args.off_chain.as_deref(),
-            args.fullstack.as_deref(),
-            &args.infra,
-            args.devnet.as_deref(),
-            args.formal_methods.as_deref(),
-            args.nix,
-            !args.no_spec,
-            registry,
-        )?;
-        // Experimental gate (one-shot / JSON): selecting a not-yet-build-green
-        // tool requires explicit opt-in. Non-interactive can't prompt, so this
-        // is a hard usage error unless --allow-experimental was passed.
+    let selection = if let Some(name) = &args.name {
+        let selection = oneshot::build_selection(name, &roles, args.nix, !args.no_spec, registry)?;
+        // Interactive mode asks instead; non-interactive can only refuse.
         if !args.allow_experimental {
             experimental_gate(&selection, registry)?;
         }
@@ -893,28 +225,11 @@ fn run_init(args: InitArgs, registry: &Registry, json: bool) -> Result<(), CliEr
         interactive::run_interactive(registry, args.allow_experimental, args.ignore_warning)?
     };
 
-    // Off-chain ↔ devnet compatibility gate. Interactive mode already filters
-    // incompatible options at selection time, so this primarily guards one-shot;
-    // with --ignore-warning it degrades to a warning and proceeds anyway.
-    if let Some(inc) = crate::registry::compat::check(&selection.assignments, registry) {
-        if args.ignore_warning {
-            if !json {
-                output::print_incompatibility_warning(&inc);
-            }
-        } else {
-            return Err(incompatible_tools_error(inc));
-        }
-    }
+    compat_gate(&selection, registry, args.ignore_warning, json)?;
 
     let root = PathBuf::from(&selection.project_name);
-
-    // Safety: refuse to write into an existing, non-empty directory (never
-    // overwrite user files). A missing or empty target dir is fine (§6.4).
-    if root.exists()
-        && std::fs::read_dir(&root)
-            .map(|mut entries| entries.next().is_some())
-            .unwrap_or(true)
-    {
+    // Never write into a non-empty directory (an empty one is fine, §6.4).
+    if root.exists() && !is_empty_dir(&root) {
         return Err(CliError::DirectoryExists {
             path: selection.project_name.clone(),
         });
@@ -928,35 +243,31 @@ fn run_init(args: InitArgs, registry: &Registry, json: bool) -> Result<(), CliEr
         return Ok(());
     }
 
-    // No pre-generation summary here: interactive mode already showed the panel
-    // at its confirm step, and the one-shot path goes straight to the success
-    // panel (same rows + a CREATED badge), so a separate preview would just
-    // duplicate it.
     with_spinner("Scaffolding project…", json, || {
         crate::scaffold::scaffold(&selection, registry, &root)
     })?;
 
-    // Give the new project a git repo + initial commit, so `add`/`remove`
-    // have a clean tree to diff against out of the box. Best-effort: skips when
-    // git is absent or we're already inside a repo, never fails generation.
+    // Best-effort: gives `add`/`remove` a clean tree to diff against.
     let git = git::init_project_repo(&root);
 
-    // Check-and-advise: resolve the deps this selection needs (TECH_SPEC §9).
     let report = with_spinner("Checking dependencies…", json, || {
         resolve_selection_deps(&selection, registry)
     })?;
     output::print_success(&selection, registry, &report, git, json);
-
     Ok(())
 }
 
-/// Resolve the dependency report for a generated selection (check-and-advise).
-fn resolve_selection_deps(
-    selection: &crate::registry::types::Selection,
-    registry: &Registry,
-) -> Result<crate::doctor::Report, CliError> {
-    use crate::doctor::{self, catalog::DepCatalog, probe};
+/// Whether `dir` is a readable directory with no entries.
+fn is_empty_dir(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|mut entries| entries.next().is_none())
+}
 
+/// Resolve the dependency report for a generated selection (check-and-advise,
+/// tech spec §9).
+fn resolve_selection_deps(
+    selection: &Selection,
+    registry: &Registry,
+) -> Result<doctor::Report, CliError> {
     let catalog = DepCatalog::load()?;
     let required = required_deps(
         selection.assignments.iter().map(|a| a.tool_id.as_str()),
@@ -969,228 +280,91 @@ fn resolve_selection_deps(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::oneshot::RoleFlags;
 
-    fn parse(args: &[&str]) -> Cli {
-        Cli::try_parse_from(std::iter::once("cardano-init").chain(args.iter().copied()))
-            .unwrap_or_else(|e| panic!("{args:?} should parse: {e}"))
-    }
-
-    #[test]
-    fn cli_definition_has_no_flag_conflicts() {
-        Cli::command().debug_assert();
-    }
-
-    #[test]
-    fn role_flag_aliases_parse() {
-        for (on, off) in [("--on", "--off"), ("--onchain", "--offchain")] {
-            let cli = parse(&[on, "aiken", off, "meshjs"]);
-            assert_eq!(cli.init.on_chain.as_deref(), Some("aiken"));
-            assert_eq!(cli.init.off_chain.as_deref(), Some("meshjs"));
-        }
-        for formal in ["--formal", "--formalmethods"] {
-            let cli = parse(&[formal, "blaster"]);
-            assert_eq!(cli.init.formal_methods.as_deref(), Some("blaster"));
-        }
-    }
-
-    #[test]
-    fn fullstack_short_flags_and_alias_parse() {
-        for flag in ["-f", "-p", "--protocol", "--fullstack"] {
-            let cli = parse(&[flag, "scalus"]);
-            assert_eq!(cli.init.fullstack.as_deref(), Some("scalus"), "{flag}");
-        }
-    }
-
-    #[test]
-    fn init_short_flags_parse() {
-        let cli = parse(&[
-            "-n", "demo", "-i", "kupo", "-i", "ogmios", "-d", "yaci", "-e",
-        ]);
-        assert_eq!(cli.init.name.as_deref(), Some("demo"));
-        assert_eq!(cli.init.infra, vec!["kupo", "ogmios"]);
-        assert_eq!(cli.init.devnet.as_deref(), Some("yaci"));
-        assert!(cli.init.allow_experimental);
-    }
-
-    #[test]
-    fn add_and_remove_accept_aliases() {
-        let Some(Command::Add(add)) = parse(&["add", "-p", "scalus", "--dryrun"]).command else {
-            panic!("expected add");
-        };
-        assert_eq!(add.fullstack.as_deref(), Some("scalus"));
-        assert!(add.flags.dry_run);
-
-        let Some(Command::Remove(rm)) = parse(&["remove", "--on", "--formal"]).command else {
-            panic!("expected remove");
-        };
-        assert!(rm.on_chain && rm.formal_methods);
-        assert!(!rm.off_chain);
-    }
-
-    #[test]
-    fn format_tool_lists_community_links() {
-        let registry = Registry::load().unwrap();
-        for tool in registry.all_tools() {
-            let mut out = String::new();
-            format_tool(&mut out, tool, &[]);
-            for link in &tool.community {
-                assert!(
-                    out.contains(&format!("{}: {}", link.name, link.url)),
-                    "{}: community link '{}' missing from list output",
-                    tool.id,
-                    link.name
-                );
-            }
-            assert_eq!(out.contains("Community:"), !tool.community.is_empty());
-        }
-    }
-
-    #[test]
-    fn format_tool_lists_tooling_from_system_deps() {
-        let registry = Registry::load().unwrap();
-        let catalog = crate::doctor::catalog::DepCatalog::load().unwrap();
-        let aiken = registry.get("aiken").unwrap();
-        let support = tool_support_links(aiken, &catalog);
-        assert!(!support.is_empty());
-        let mut out = String::new();
-        format_tool(&mut out, aiken, &support);
-        assert!(out.contains("Tooling:"));
-        for link in &support {
-            assert!(out.contains(&format!("{}: {}", link.name, link.url)));
-        }
-
-        let meshjs = registry.get("meshjs").unwrap();
-        assert!(tool_support_links(meshjs, &catalog).is_empty());
-    }
-
-    #[test]
-    fn no_spec_flag_parses_and_counts_as_oneshot() {
-        let cli = Cli::try_parse_from(["cardano-init", "--no-spec"]).unwrap();
-        assert!(cli.init.no_spec);
-        // Like --nix, it only makes sense alongside --name.
-        assert!(cli.init.has_oneshot_flags());
-
-        let cli = Cli::try_parse_from(["cardano-init"]).unwrap();
-        assert!(!cli.init.no_spec);
+    fn string_array(value: &serde_json::Value) -> Vec<&str> {
+        value
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect()
     }
 
     #[test]
     fn unknown_tool_error_code_and_context() {
         let registry = Registry::load().unwrap();
-        // `bogus` is not a tool; one-shot validation should surface it with the
-        // stable code + the valid alternatives for the role.
-        let err = oneshot::build_selection(
-            "demo",
-            Some("bogus"),
-            None,
-            None,
-            &[],
-            None,
-            None,
-            false,
-            true,
-            &registry,
-        )
-        .unwrap_err();
+        let roles = RoleFlags {
+            on_chain: Some("bogus"),
+            ..RoleFlags::default()
+        };
+        let err = oneshot::build_selection("demo", &roles, false, true, &registry).unwrap_err();
 
         assert_eq!(err.code(), "unknown_tool");
         let ctx = err.context();
         assert_eq!(ctx["tool_id"], "bogus");
         assert_eq!(ctx["role"], "On-chain");
-        // on-chain is fillable by aiken + plinth + scalus.
-        let valid: Vec<&str> = ctx["valid_tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(valid, vec!["aiken", "plinth", "scalus"]);
+        assert_eq!(
+            string_array(&ctx["valid_tools"]),
+            vec!["aiken", "plinth", "scalus"]
+        );
     }
 
     #[test]
     fn tool_role_mismatch_lists_valid_roles() {
         let registry = Registry::load().unwrap();
-        // aiken is on-chain only; asking it to fill off-chain is a mismatch.
-        let err = oneshot::build_selection(
-            "demo",
-            None,
-            Some("aiken"),
-            None,
-            &[],
-            None,
-            None,
-            false,
-            true,
-            &registry,
-        )
-        .unwrap_err();
+        // aiken is on-chain only.
+        let roles = RoleFlags {
+            off_chain: Some("aiken"),
+            ..RoleFlags::default()
+        };
+        let err = oneshot::build_selection("demo", &roles, false, true, &registry).unwrap_err();
         assert_eq!(err.code(), "tool_role_mismatch");
-        let ctx = err.context();
-        assert_eq!(ctx["valid_roles"], serde_json::json!(["on-chain"]));
+        assert_eq!(
+            err.context()["valid_roles"],
+            serde_json::json!(["on-chain"])
+        );
     }
 
     #[test]
     fn fullstack_conflict_with_explicit_role_flag() {
-        // --fullstack combined with --on-chain is a usage error; caught in
-        // run_init before any generation happens.
         let registry = Registry::load().unwrap();
         let args = InitArgs {
             name: Some("demo".to_string()),
             on_chain: Some("aiken".to_string()),
-            off_chain: None,
             fullstack: Some("scalus".to_string()),
-            infra: vec![],
-            devnet: None,
-            formal_methods: None,
-            nix: false,
-            no_spec: false,
-            allow_experimental: false,
             dry_run: true,
-            ignore_warning: false,
+            ..InitArgs::default()
         };
-        let err = run_init(args, &registry, true).unwrap_err();
+        let err = run_init(&args, &registry, true).unwrap_err();
         assert_eq!(err.code(), "fullstack_conflict");
         assert_eq!(err.exit_code(), 2);
     }
 
-    /// Build InitArgs for a one-shot run with just the fields a test varies.
+    /// One-shot dry-run `InitArgs` for the experimental-gate tests.
     fn init_args(formal_methods: Option<&str>, allow_experimental: bool) -> InitArgs {
         InitArgs {
             name: Some("exp-gate-demo".to_string()),
             on_chain: Some("aiken".to_string()),
-            off_chain: None,
-            fullstack: None,
-            infra: vec![],
-            devnet: None,
             formal_methods: formal_methods.map(str::to_string),
-            nix: false,
-            no_spec: false,
             allow_experimental,
             dry_run: true,
-            ignore_warning: false,
+            ..InitArgs::default()
         }
     }
 
     #[test]
     fn experimental_tool_gated_without_flag() {
-        // One-shot selecting blaster (experimental) without --allow-experimental
-        // is a usage error before any generation happens.
         let registry = Registry::load().unwrap();
-        let err = run_init(init_args(Some("blaster"), false), &registry, true).unwrap_err();
+        let err = run_init(&init_args(Some("blaster"), false), &registry, true).unwrap_err();
         assert_eq!(err.code(), "experimental_not_allowed");
         assert_eq!(err.exit_code(), 2);
         let ctx = err.context();
-        let tools: Vec<&str> = ctx["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(tools, vec!["blaster"]);
+        assert_eq!(string_array(&ctx["tools"]), vec!["blaster"]);
         assert_eq!(ctx["remedy"], "--allow-experimental");
 
-        // The human message names the tool (name + id); the copy-pasteable opt-in
-        // command (with the exact role flag) is the diagnostic's `help:` line.
+        // The message names the tool; the `help:` line is a copy-pasteable
+        // command with the exact role flag.
         let msg = err.to_string();
         assert!(msg.contains("Blaster (blaster)"), "message: {msg}");
         let help = miette::Diagnostic::help(&err)
@@ -1203,77 +377,48 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_code_mirrors_inherent_code() {
-        // The miette `#[diagnostic(code(...))]` slug (drives the human display)
-        // must stay in sync with the inherent `code()` (the JSON contract): the
-        // derive slug is the inherent slug under the `cardano_init::` namespace.
-        let err = CliError::NameRequired;
-        let diag = miette::Diagnostic::code(&err)
-            .map(|c| c.to_string())
-            .expect("variant declares a diagnostic code");
-        assert_eq!(diag, format!("cardano_init::{}", err.code()));
-    }
-
-    #[test]
     fn experimental_tool_allowed_with_flag() {
-        // With --allow-experimental the same selection passes the gate (dry-run
-        // → Ok, no disk write).
         let registry = Registry::load().unwrap();
-        let res = run_init(init_args(Some("blaster"), true), &registry, true);
+        let res = run_init(&init_args(Some("blaster"), true), &registry, true);
         assert!(res.is_ok(), "expected Ok, got {res:?}");
     }
 
     #[test]
     fn non_experimental_selection_needs_no_flag() {
-        // A selection with no experimental tool is unaffected by the gate.
         let registry = Registry::load().unwrap();
-        let res = run_init(init_args(None, false), &registry, true);
+        let res = run_init(&init_args(None, false), &registry, true);
         assert!(res.is_ok(), "expected Ok, got {res:?}");
     }
 
-    /// InitArgs for a one-shot tx3 + devnet run (tx3 is experimental, so
-    /// allow_experimental is set); `ignore_warning` toggles the compat gate.
+    /// One-shot dry-run `InitArgs` for tx3 (experimental, so allowed) + `devnet`.
     fn tx3_devnet_args(devnet: &str, ignore_warning: bool) -> InitArgs {
         InitArgs {
             name: Some("compat-demo".to_string()),
-            on_chain: None,
             off_chain: Some("tx3".to_string()),
-            fullstack: None,
-            infra: vec![],
             devnet: Some(devnet.to_string()),
-            formal_methods: None,
-            nix: false,
-            no_spec: false,
             allow_experimental: true,
             dry_run: true,
             ignore_warning,
+            ..InitArgs::default()
         }
     }
 
     #[test]
     fn incompatible_offchain_devnet_is_gated() {
-        // tx3 (TRP, self-hosted devnet) + yaci (Blockfrost) don't share a seam,
-        // so generation stops before any disk write.
+        // tx3 (TRP, self-hosted devnet) + yaci (Blockfrost) don't share a seam.
         let registry = Registry::load().unwrap();
-        let err = run_init(tx3_devnet_args("yaci", false), &registry, true).unwrap_err();
+        let err = run_init(&tx3_devnet_args("yaci", false), &registry, true).unwrap_err();
         assert_eq!(err.code(), "incompatible_tools");
         assert_eq!(err.exit_code(), 2);
         let ctx = err.context();
         assert_eq!(ctx["remedy"], "--ignore-warning");
-        let tools: Vec<&str> = ctx["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(tools, vec!["tx3", "yaci"]);
+        assert_eq!(string_array(&ctx["tools"]), vec!["tx3", "yaci"]);
     }
 
     #[test]
     fn incompatible_offchain_devnet_allowed_with_ignore_warning() {
-        // --ignore-warning downgrades the stop to a warning and proceeds.
         let registry = Registry::load().unwrap();
-        let res = run_init(tx3_devnet_args("yaci", true), &registry, true);
+        let res = run_init(&tx3_devnet_args("yaci", true), &registry, true);
         assert!(res.is_ok(), "expected Ok, got {res:?}");
     }
 
@@ -1290,9 +435,7 @@ mod tests {
     #[test]
     fn required_deps_resolves_infra_driver_to_union() {
         let registry = Registry::load().unwrap();
-        // The aggregated infra component (reported under INFRA_DRIVER_ID by the
-        // scan) contributes the union of infra tools' system_deps.
-        let deps = required_deps([crate::doctor::INFRA_DRIVER_ID].into_iter(), &registry);
+        let deps = required_deps([doctor::INFRA_DRIVER_ID].into_iter(), &registry);
         assert!(deps.contains(&"just".to_string()));
         assert!(deps.contains(&"docker".to_string()));
         assert!(deps.contains(&"cardano-up".to_string()));

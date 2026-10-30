@@ -1,113 +1,71 @@
-//! The `add` / `remove` commands: edit an existing project's role/tool
-//! set in place. Impure edge — reconstructs the current selection from the tree
-//! (via `doctor::probe`), mutates it, then diffs and writes with `scaffold`.
-//!
-//! Reuses the init gates verbatim (compat + experimental) so an update is held
-//! to exactly the same rules as a fresh scaffold.
+//! The `add` / `remove` commands: change an existing project's role/tool set in
+//! place. Reconstructs the current selection from the tree (`doctor::probe`),
+//! applies the requested mutations, then plans and writes the diff (`scaffold`).
+//! The result must pass the same gates as a fresh scaffold.
 
 use std::path::{Path, PathBuf};
 
-use super::oneshot::{validate_fullstack_tool, validate_tool_for_role};
 use super::{AddArgs, CliError, RemoveArgs, UpdateFlags, output, theme};
 use crate::doctor::probe;
 use crate::registry::loader::Registry;
-use crate::registry::types::{Role, RoleAssignment, Selection};
+use crate::registry::types::{Role, Selection};
 use crate::scaffold::update::{self, Mutation, SlotOp};
 
-// ---------------------------------------------------------------------------
-// Command handlers
-// ---------------------------------------------------------------------------
-
-/// `cardano-init add …` — assign/replace tools in the current project.
-pub fn run_add(args: AddArgs, registry: &Registry, json: bool) -> Result<(), CliError> {
-    // `--fullstack X` is sugar for on-chain + off-chain X; not combinable.
-    if args.fullstack.is_some() && (args.on_chain.is_some() || args.off_chain.is_some()) {
+/// `cardano-init add …`: assign or replace tools in the current project.
+pub fn run_add(args: &AddArgs, registry: &Registry, json: bool) -> Result<(), CliError> {
+    let roles = args.role_flags();
+    if roles.has_fullstack_conflict() {
         return Err(CliError::FullstackConflict);
     }
-
-    let mut mutations = Vec::new();
-    if let Some(id) = &args.fullstack {
-        validate_fullstack_tool(id, registry)?;
-        mutations.push(add(Role::OnChain, id));
-        mutations.push(add(Role::OffChain, id));
-    }
-    if let Some(id) = &args.on_chain {
-        validate_tool_for_role(id, Role::OnChain, registry)?;
-        mutations.push(add(Role::OnChain, id));
-    }
-    if let Some(id) = &args.off_chain {
-        validate_tool_for_role(id, Role::OffChain, registry)?;
-        mutations.push(add(Role::OffChain, id));
-    }
-    for id in &args.infra {
-        validate_tool_for_role(id, Role::Infrastructure, registry)?;
-        mutations.push(add(Role::Infrastructure, id));
-    }
-    if let Some(id) = &args.devnet {
-        validate_tool_for_role(id, Role::Devnet, registry)?;
-        mutations.push(add(Role::Devnet, id));
-    }
-    if let Some(id) = &args.formal_methods {
-        validate_tool_for_role(id, Role::FormalMethods, registry)?;
-        mutations.push(add(Role::FormalMethods, id));
-    }
+    let mutations: Vec<Mutation> = roles
+        .assignments(registry)?
+        .into_iter()
+        .map(Mutation::Add)
+        .collect();
 
     let cwd = current_dir();
     let old = detect_selection(&cwd, registry, json)?;
     let new = update::apply_all(&old, &mutations);
-    finish_update(&cwd, old, new, &args.flags, registry, json)
+    finish_update(&cwd, &old, &new, &args.flags, registry, json)
 }
 
-/// `cardano-init remove …` — drop roles / infra providers from the project.
-pub fn run_remove(args: RemoveArgs, registry: &Registry, json: bool) -> Result<(), CliError> {
-    let mut mutations = Vec::new();
-    if args.on_chain {
-        mutations.push(Mutation::Remove(Role::OnChain));
-    }
-    if args.off_chain {
-        mutations.push(Mutation::Remove(Role::OffChain));
-    }
-    if args.devnet {
-        mutations.push(Mutation::Remove(Role::Devnet));
-    }
-    if args.formal_methods {
-        mutations.push(Mutation::Remove(Role::FormalMethods));
-    }
-    for id in &args.infra {
-        mutations.push(Mutation::RemoveInfra(id.clone()));
-    }
+/// `cardano-init remove …`: drop roles or infra providers from the project.
+pub fn run_remove(args: &RemoveArgs, registry: &Registry, json: bool) -> Result<(), CliError> {
+    let roles = [
+        (args.on_chain, Role::OnChain),
+        (args.off_chain, Role::OffChain),
+        (args.devnet, Role::Devnet),
+        (args.formal_methods, Role::FormalMethods),
+    ];
+    let mutations: Vec<Mutation> = roles
+        .into_iter()
+        .filter_map(|(flag, role)| flag.then_some(Mutation::Remove(role)))
+        .chain(args.infra.iter().cloned().map(Mutation::RemoveInfra))
+        .collect();
 
     let cwd = current_dir();
     let old = detect_selection(&cwd, registry, json)?;
     let new = update::apply_all(&old, &mutations);
-    finish_update(&cwd, old, new, &args.flags, registry, json)
-}
-
-// ---------------------------------------------------------------------------
-// Shared flow
-// ---------------------------------------------------------------------------
-
-fn add(role: Role, tool_id: &str) -> Mutation {
-    Mutation::Add(RoleAssignment {
-        role,
-        tool_id: tool_id.to_string(),
-    })
+    finish_update(&cwd, &old, &new, &args.flags, registry, json)
 }
 
 fn current_dir() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// Reconstruct the current selection, refusing to guess when the tree has
-/// unrecognized components (fatal in non-interactive/JSON; a confirm otherwise).
+/// Reconstruct the current selection. Unrecognized components are fatal under
+/// `json` (automation must not act on a guess) and need a confirm otherwise.
 fn detect_selection(cwd: &Path, registry: &Registry, json: bool) -> Result<Selection, CliError> {
     let recon = probe::reconstruct(cwd, registry);
 
-    let mut problems: Vec<String> = recon.unrecognized.iter().map(|u| u.dir.clone()).collect();
-    problems.extend(recon.unknown_infra.iter().cloned());
+    let problems: Vec<String> = recon
+        .unrecognized
+        .iter()
+        .map(|u| u.dir.clone())
+        .chain(recon.unknown_infra.iter().cloned())
+        .collect();
 
     if !problems.is_empty() {
-        // Automation must not act on a guess.
         if json {
             return Err(CliError::ProjectUnrecognized { dirs: problems });
         }
@@ -132,12 +90,12 @@ fn detect_selection(cwd: &Path, registry: &Registry, json: bool) -> Result<Selec
     Ok(recon.selection)
 }
 
-/// Validate the mutated selection, then plan → (dry-run | git-gate + confirm +
-/// apply) → report. Shared by add/remove.
+/// Gate the new selection, plan the change, then preview it (`--dry-run`) or
+/// apply it behind the git clean-tree check, and report.
 fn finish_update(
     cwd: &Path,
-    old: Selection,
-    new: Selection,
+    old: &Selection,
+    new: &Selection,
     flags: &UpdateFlags,
     registry: &Registry,
     json: bool,
@@ -148,25 +106,15 @@ fn finish_update(
     if new.assignments.is_empty() {
         return Err(CliError::NoRolesSelected);
     }
-
-    // Same gates a fresh scaffold runs, on the resulting selection.
     if !flags.allow_experimental {
-        super::experimental_gate(&new, registry)?;
+        super::experimental_gate(new, registry)?;
     }
-    if let Some(inc) = crate::registry::compat::check(&new.assignments, registry) {
-        if flags.ignore_warning {
-            if !json {
-                output::print_incompatibility_warning(&inc);
-            }
-        } else {
-            return Err(super::incompatible_tools_error(inc));
-        }
-    }
+    super::compat_gate(new, registry, flags.ignore_warning, json)?;
 
-    let plan = update::plan_update(&old, &new, registry)?;
+    let plan = update::plan_update(old, new, registry)?;
 
-    // A create target must not already exist (a foreign/renamed dir would have
-    // been flagged unrecognized; this is the last-line guard).
+    // Last-line guard: a foreign directory in a create slot would normally have
+    // been reported as unrecognized already.
     for op in &plan.slot_ops {
         if let SlotOp::Create(dir) = op
             && cwd.join(dir).exists()
@@ -182,11 +130,11 @@ fn finish_update(
     super::version_check::announce(json);
 
     if flags.dry_run {
-        output::print_update_plan(&old, &new, &plan, registry, json);
+        output::print_update_plan(old, new, &plan, registry, json);
         return Ok(());
     }
 
-    // Git safety net: the change must be reviewable/revertible.
+    // The change must be reviewable and revertible with git.
     let clean = super::git::is_clean(cwd);
     if !flags.force && !clean {
         return Err(CliError::WorktreeDirty {
@@ -194,12 +142,10 @@ fn finish_update(
         });
     }
 
-    // A clean tree makes the whole change reviewable and revertible with git, so
-    // apply it straight away — no prompt (good agent DevX). Only pause to confirm
-    // when `--force` is overriding a dirty tree, where the update can't be cleanly
-    // undone; there we show the plan first, then ask.
+    // A clean tree applies without a prompt (git can undo it); a forced dirty
+    // tree can't be cleanly undone, so show the plan and ask first.
     if !json && !clean {
-        output::print_update_plan(&old, &new, &plan, registry, json);
+        output::print_update_plan(old, new, &plan, registry, json);
         if !confirm("Apply this update to a dirty working tree?", true)? {
             return Err(CliError::Aborted);
         }
@@ -207,8 +153,8 @@ fn finish_update(
 
     crate::scaffold::writer::apply_update(&plan, cwd)?;
 
-    let report = super::resolve_selection_deps(&new, registry)?;
-    output::print_update_success(&old, &new, registry, &plan, &report, json);
+    let report = super::resolve_selection_deps(new, registry)?;
+    output::print_update_success(old, new, registry, &plan, &report, json);
     Ok(())
 }
 
@@ -220,12 +166,8 @@ fn confirm(prompt: &str, default: bool) -> Result<bool, CliError> {
         .map_err(CliError::from)
 }
 
-// ---------------------------------------------------------------------------
-// Tests — the CLI decision logic (`finish_update` / `detect_selection`): the
-// git-clean gate, the trust boundary, dry-run branching, and the slot/no-op
-// guards. Exercised on the internal seams with an explicit `cwd` so nothing
-// touches the process-global working directory (keeps them parallel-safe).
-// ---------------------------------------------------------------------------
+// Tests drive `finish_update` / `detect_selection` with an explicit `cwd`, never
+// the process-global working directory, so they stay parallel-safe.
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -233,7 +175,7 @@ mod tests {
     use std::process::Command;
 
     use super::*;
-    use crate::registry::types::Network;
+    use crate::registry::types::{Network, RoleAssignment};
 
     fn reg() -> Registry {
         Registry::load().expect("registry loads")
@@ -270,16 +212,14 @@ mod tests {
             .arg(root)
             .args(args)
             .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+            .is_ok_and(|o| o.status.success())
     }
 
     fn git_available() -> bool {
         Command::new("git")
             .arg("--version")
             .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+            .is_ok_and(|o| o.status.success())
     }
 
     /// Turn `root` into a git repo with everything committed → a clean tree.
@@ -320,7 +260,7 @@ mod tests {
         // instead of blocking on stdin. A regression that re-adds the prompt
         // would hang this test.
         let new = add_offchain(&old);
-        finish_update(&root, old, new, &UpdateFlags::default(), &reg(), false)
+        finish_update(&root, &old, &new, &UpdateFlags::default(), &reg(), false)
             .expect("clean-tree update applies");
 
         assert!(root.join("off-chain/package.json").is_file());
@@ -340,7 +280,7 @@ mod tests {
 
         let new = add_offchain(&old);
         let err =
-            finish_update(&root, old, new, &UpdateFlags::default(), &reg(), false).unwrap_err();
+            finish_update(&root, &old, &new, &UpdateFlags::default(), &reg(), false).unwrap_err();
 
         assert!(matches!(err, CliError::WorktreeDirty { .. }));
         // Nothing was written past the gate.
@@ -355,7 +295,7 @@ mod tests {
 
         let new = add_offchain(&old);
         let err =
-            finish_update(&root, old, new, &UpdateFlags::default(), &reg(), false).unwrap_err();
+            finish_update(&root, &old, &new, &UpdateFlags::default(), &reg(), false).unwrap_err();
 
         assert!(matches!(err, CliError::WorktreeDirty { .. }));
     }
@@ -378,7 +318,7 @@ mod tests {
         };
         // JSON mode never prompts, so --force applies straight through.
         let new = add_offchain(&old);
-        finish_update(&root, old, new, &flags, &reg(), true).expect("--force applies");
+        finish_update(&root, &old, &new, &flags, &reg(), true).expect("--force applies");
 
         assert!(root.join("off-chain/package.json").is_file());
     }
@@ -396,7 +336,7 @@ mod tests {
             ..UpdateFlags::default()
         };
         let new = add_offchain(&old);
-        finish_update(&root, old, new, &flags, &reg(), false).expect("dry-run is Ok");
+        finish_update(&root, &old, &new, &flags, &reg(), false).expect("dry-run is Ok");
 
         assert!(!root.join("off-chain").exists());
     }
@@ -408,15 +348,8 @@ mod tests {
         let old = sel(vec![a(Role::OnChain, "aiken")]);
         let (_tmp, root) = scaffolded(&old);
 
-        let err = finish_update(
-            &root,
-            old.clone(),
-            old,
-            &UpdateFlags::default(),
-            &reg(),
-            false,
-        )
-        .unwrap_err();
+        let err =
+            finish_update(&root, &old, &old, &UpdateFlags::default(), &reg(), false).unwrap_err();
 
         assert!(matches!(err, CliError::NothingToChange));
     }
@@ -433,7 +366,7 @@ mod tests {
 
         let new = add_offchain(&old);
         let err =
-            finish_update(&root, old, new, &UpdateFlags::default(), &reg(), false).unwrap_err();
+            finish_update(&root, &old, &new, &UpdateFlags::default(), &reg(), false).unwrap_err();
 
         assert!(matches!(err, CliError::SlotOccupied { .. }));
     }

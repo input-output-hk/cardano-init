@@ -33,13 +33,22 @@ cardano-init/
 │   ├── main.rs                 # Entry point: delegates to cli::run()
 │   │
 │   ├── cli/                    # Impure edge: user interaction, formatting, process control
-│   │   ├── mod.rs              # Arg parsing (clap), dispatch, top-level error type
+│   │   ├── mod.rs              # Dispatch + the init/doctor flows
+│   │   ├── args.rs             # Arg parsing (clap structs)
+│   │   ├── error.rs            # Top-level error type (CliError)
 │   │   ├── interactive.rs      # Guided interactive flow (dialoguer)
 │   │   ├── oneshot.rs          # Flag → Selection, validation, machine-readable errors
-│   │   ├── output.rs           # Presenter: renders results/errors as human text or JSON
+│   │   ├── output/             # Presenter: renders results/errors as human text or JSON
+│   │   │   ├── mod.rs          #   JSON envelope, errors, summary, success, dry-run
+│   │   │   ├── layout.rs       #   panels, rules, tables, wrapping
+│   │   │   ├── list.rs         #   `list`
+│   │   │   ├── doctor.rs       #   `doctor`
+│   │   │   ├── update.rs       #   `add` / `remove`
+│   │   │   └── notice.rs       #   version-update banner
 │   │   ├── theme.rs            # Terminal styling palette (console)
 │   │   ├── git.rs              # git helpers: clean-tree gate + init a new project's repo
-│   │   └── update.rs           # add/remove: mutate an existing scaffolded project (§6.4, TECH_SPEC §15)
+│   │   ├── update.rs           # add/remove: mutate an existing scaffolded project (§6.4, TECH_SPEC §15)
+│   │   └── version_check/      # Pre-generation version-update notice (TECH_SPEC §10)
 │   │
 │   ├── registry/               # Pure: tool + role definitions from embedded TOML
 │   │   ├── mod.rs
@@ -277,7 +286,7 @@ Render processes each entry whose source is a `.jinja` template through MiniJinj
 
 ### 7.1 Modes
 
-`cli/mod.rs` parses args with `clap`. There is an optional subcommand and a flattened set of init flags:
+`cli/args.rs` defines the `clap` args; `cli/mod.rs` dispatches. There is an optional subcommand and a flattened set of init flags:
 
 - **One-shot** (`--name` + role flags): flags → `Selection` in `oneshot.rs`, non-interactive, deterministic. Primary path for agents and CI.
 - **Interactive** (no `--name`): guided `dialoguer` flow in `interactive.rs`.
@@ -290,7 +299,7 @@ A safety check refuses to overwrite an existing target directory.
 To serve both humans and agents without scattering format branches:
 
 - A global **`--json`** flag (human-readable output by default; `--json` implies non-interactive: JSON mode never prompts).
-- **`output.rs` as a presenter**: the core returns *structured results* and *typed errors*; only the presenter knows about colors, tables, or JSON. Every command's JSON wraps in the §2.4 envelope via `output::emit_json_ok` / `print_error`. Adding a new output is a presenter change, nothing else.
+- **`output/` as a presenter**: the core returns *structured results* and *typed errors*; only the presenter knows about colors, tables, or JSON. Every command's JSON wraps in the §2.4 envelope via `output::emit_json_ok` / `print_error`. Adding a new output is a presenter change, nothing else.
 
 ### 7.3 Machine-readable errors & discovery (PRD FR-13/FR-15)
 

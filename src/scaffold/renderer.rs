@@ -1,138 +1,117 @@
-use std::collections::HashMap;
+//! Render phase: produce the final bytes for every planned file.
+
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use minijinja::value::Value;
 use minijinja::{AutoEscape, Environment, UndefinedBehavior};
 
 use super::context::TemplateContext;
 use super::planner::{FilePlan, TemplateSource};
 use super::{ScaffoldError, TemplateAssets};
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 /// A file with its final content, ready to be written to disk.
 #[derive(Debug)]
 pub struct RenderedFile {
     /// Destination path relative to the project root.
     pub dest: PathBuf,
-    /// The rendered (or pass-through) content.
     pub content: Vec<u8>,
 }
 
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
-
-/// Render all files in the plan, producing final content for each.
+/// Render every entry of `plan` against `context`: renderable entries go through
+/// `MiniJinja`, the rest are copied verbatim, and inline sources are used as-is.
 ///
-/// - Files with `render == true` are processed through MiniJinja.
-/// - Files with `render == false` are passed through as-is.
-/// - `Inline` sources use their embedded bytes directly.
+/// # Errors
+/// [`ScaffoldError::AssetNotFound`] for a missing template asset and
+/// [`ScaffoldError::Render`] when a template fails to parse or render.
 pub fn render(
     plan: &FilePlan,
     context: &TemplateContext,
 ) -> Result<Vec<RenderedFile>, ScaffoldError> {
-    // Pre-load all template sources into owned strings so MiniJinja can borrow them.
-    let mut sources: HashMap<String, String> = HashMap::new();
-    for entry in &plan.entries {
-        if !entry.render {
+    let sources = renderable_sources(plan)?;
+    let env = environment(&sources)?;
+    let ctx = Value::from_serialize(context);
+
+    plan.entries
+        .iter()
+        .map(|entry| {
+            let content = match &entry.source {
+                TemplateSource::Inline(bytes) => bytes.clone(),
+                source => {
+                    let key = source
+                        .asset_key()
+                        .expect("only Inline sources lack an asset key");
+                    if entry.render {
+                        env.get_template(&key)
+                            .and_then(|template| template.render(&ctx))
+                            .map_err(|e| render_error(&key, e))?
+                            .into_bytes()
+                    } else {
+                        TemplateAssets::require(&key)?.data.into_owned()
+                    }
+                }
+            };
+            Ok(RenderedFile {
+                dest: entry.dest.clone(),
+                content,
+            })
+        })
+        .collect()
+}
+
+/// The text of every distinct template the plan renders, keyed by asset key.
+fn renderable_sources(plan: &FilePlan) -> Result<BTreeMap<String, String>, ScaffoldError> {
+    let mut sources = BTreeMap::new();
+    let keys = plan
+        .entries
+        .iter()
+        .filter(|entry| entry.render)
+        .filter_map(|entry| entry.source.asset_key());
+    for key in keys {
+        if sources.contains_key(&key) {
             continue;
         }
-        if let Some(key) = entry.source.asset_key() {
-            if sources.contains_key(&key) {
-                continue;
-            }
-            let data = TemplateAssets::get(&key)
-                .ok_or_else(|| ScaffoldError::AssetNotFound { path: key.clone() })?;
-            let text = std::str::from_utf8(&data.data)
-                .expect("renderable template must be valid UTF-8")
-                .to_string();
-            sources.insert(key, text);
-        }
+        let asset = TemplateAssets::require(&key)?;
+        // Embedded first-party asset: invalid UTF-8 is an authoring bug.
+        let text = String::from_utf8(asset.data.into_owned())
+            .expect("renderable template must be valid UTF-8");
+        sources.insert(key, text);
     }
+    Ok(sources)
+}
 
-    // Build the MiniJinja environment with all templates loaded.
-    //
-    // Rendering contract (TECH_SPEC §4.3):
-    // - strict undefined: a template referencing an undefined variable fails at
-    //   generation time instead of silently emitting an empty string;
-    // - autoescape off: output is code/config, never HTML;
-    // - keep trailing newline: the authored file's final newline is preserved, so
-    //   output bytes match the template source (determinism, §11).
+/// A `MiniJinja` environment holding `sources`, configured per the rendering
+/// contract (tech spec §4.3): undefined variables are errors, output is never
+/// HTML-escaped, and a template's trailing newline is kept so output bytes
+/// match the authored file (determinism, §11).
+fn environment(sources: &BTreeMap<String, String>) -> Result<Environment<'_>, ScaffoldError> {
     let mut env = Environment::new();
     env.set_undefined_behavior(UndefinedBehavior::Strict);
     env.set_auto_escape_callback(|_name| AutoEscape::None);
     env.set_keep_trailing_newline(true);
-    for (key, text) in &sources {
+    for (key, text) in sources {
         env.add_template(key, text)
-            .map_err(|e| ScaffoldError::Render {
-                path: key.clone(),
-                source: e,
-            })?;
+            .map_err(|e| render_error(key, e))?;
     }
-
-    let ctx_value = minijinja::value::Value::from_serialize(context);
-    let mut rendered = Vec::with_capacity(plan.entries.len());
-
-    for entry in &plan.entries {
-        let content = match &entry.source {
-            TemplateSource::Inline(bytes) => bytes.clone(),
-            source => {
-                let asset_key = source
-                    .asset_key()
-                    .expect("non-Inline source must have asset_key");
-
-                if !entry.render {
-                    let data = TemplateAssets::get(&asset_key).ok_or_else(|| {
-                        ScaffoldError::AssetNotFound {
-                            path: asset_key.clone(),
-                        }
-                    })?;
-                    data.data.to_vec()
-                } else {
-                    let tmpl = env
-                        .get_template(&asset_key)
-                        .map_err(|e| ScaffoldError::Render {
-                            path: asset_key.clone(),
-                            source: e,
-                        })?;
-                    tmpl.render(&ctx_value)
-                        .map_err(|e| ScaffoldError::Render {
-                            path: asset_key,
-                            source: e,
-                        })?
-                        .into_bytes()
-                }
-            }
-        };
-
-        rendered.push(RenderedFile {
-            dest: entry.dest.clone(),
-            content,
-        });
-    }
-
-    Ok(rendered)
+    Ok(env)
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+fn render_error(path: &str, source: minijinja::Error) -> ScaffoldError {
+    ScaffoldError::Render {
+        path: path.to_string(),
+        source,
+    }
+}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::Path;
 
-    use crate::registry::loader::Registry;
+    use super::super::test_support::{a, registry};
+    use super::*;
     use crate::registry::types::{Network, Role, RoleAssignment, Selection};
     use crate::scaffold::context::build_context;
     use crate::scaffold::planner;
-
-    fn registry() -> Registry {
-        Registry::load().expect("registry should load")
-    }
 
     fn selection(assignments: Vec<RoleAssignment>) -> Selection {
         Selection {
@@ -146,10 +125,7 @@ mod tests {
 
     #[test]
     fn static_file_passes_through() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
+        let sel = selection(vec![a(Role::OnChain, "aiken")]);
         let reg = registry();
         let plan = planner::plan(&sel, &reg).unwrap();
         let ctx = build_context(&sel, &reg).unwrap();
@@ -167,10 +143,7 @@ mod tests {
 
     #[test]
     fn jinja_template_renders_context() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
+        let sel = selection(vec![a(Role::OnChain, "aiken")]);
         let reg = registry();
         let plan = planner::plan(&sel, &reg).unwrap();
         let ctx = build_context(&sel, &reg).unwrap();
@@ -189,10 +162,7 @@ mod tests {
 
     #[test]
     fn inline_source_produces_empty_content() {
-        let sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
+        let sel = selection(vec![a(Role::OnChain, "aiken")]);
         let reg = registry();
         let plan = planner::plan(&sel, &reg).unwrap();
         let ctx = build_context(&sel, &reg).unwrap();
@@ -208,10 +178,7 @@ mod tests {
 
     #[test]
     fn nix_flake_renders_with_packages() {
-        let mut sel = selection(vec![RoleAssignment {
-            role: Role::OnChain,
-            tool_id: "aiken".into(),
-        }]);
+        let mut sel = selection(vec![a(Role::OnChain, "aiken")]);
         sel.nix = true;
         let reg = registry();
         let plan = planner::plan(&sel, &reg).unwrap();
@@ -283,13 +250,6 @@ mod tests {
             network,
             nix,
             spec: true,
-        }
-    }
-
-    fn a(role: Role, tool: &str) -> RoleAssignment {
-        RoleAssignment {
-            role,
-            tool_id: tool.into(),
         }
     }
 
@@ -474,16 +434,7 @@ mod tests {
 
     #[test]
     fn full_plan_renders_without_error() {
-        let sel = selection(vec![
-            RoleAssignment {
-                role: Role::OnChain,
-                tool_id: "aiken".into(),
-            },
-            RoleAssignment {
-                role: Role::OffChain,
-                tool_id: "meshjs".into(),
-            },
-        ]);
+        let sel = selection(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
         let reg = registry();
         let plan = planner::plan(&sel, &reg).unwrap();
         let ctx = build_context(&sel, &reg).unwrap();

@@ -1,9 +1,7 @@
-//! Loads the embedded `registry/deps.toml` into a `DepCatalog` (TECH_SPEC §9.2).
+//! Loads the embedded `registry/deps.toml` into a `DepCatalog` (tech-spec §9.2).
 //!
-//! Recipes are **data**; the installer vocabulary they reference is **code**
-//! (`installers.rs`). Installer keys are validated against the `Installer` enum
-//! here, at load — an unknown installer is a load error, exactly like an unknown
-//! `Role` in a tool file.
+//! Recipes are data; the installers they reference are code. Unknown installer
+//! keys are rejected at load.
 
 use std::collections::HashMap;
 
@@ -16,10 +14,6 @@ use super::installers::Installer;
 #[folder = "registry/"]
 #[include = "deps.toml"]
 struct DepsAsset;
-
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
@@ -36,10 +30,6 @@ pub enum CatalogError {
     UnknownInstaller { dep: String, installer: String },
 }
 
-// ---------------------------------------------------------------------------
-// Domain types
-// ---------------------------------------------------------------------------
-
 /// A single install method: which installer, and the arg to pass it.
 #[derive(Debug, Clone)]
 pub struct InstallMethod {
@@ -52,11 +42,11 @@ pub use crate::registry::types::Link as SupportLink;
 /// A per-dependency recipe.
 #[derive(Debug, Clone)]
 pub struct DepRecipe {
-    /// Presence check: the dep is present if any of these is on `PATH`.
+    /// The dep is present if any of these is on `PATH`.
     pub binaries: Vec<String>,
-    /// Universal fallback when the resolver can't produce a plan.
+    /// Fallback advice when no install plan can be resolved.
     pub docs: String,
-    /// Ordered install methods (order = preference).
+    /// Install methods in preference order.
     pub install: Vec<InstallMethod>,
     pub support: Vec<SupportLink>,
 }
@@ -66,10 +56,6 @@ pub struct DepRecipe {
 pub struct DepCatalog {
     recipes: HashMap<String, DepRecipe>,
 }
-
-// ---------------------------------------------------------------------------
-// TOML intermediate types (private)
-// ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 struct DepRecipeToml {
@@ -81,9 +67,38 @@ struct DepRecipeToml {
     support: Vec<SupportLink>,
 }
 
-// ---------------------------------------------------------------------------
-// Loading
-// ---------------------------------------------------------------------------
+impl DepRecipeToml {
+    fn into_recipe(self, dep: &str) -> Result<DepRecipe, CatalogError> {
+        let install = self
+            .install
+            .into_iter()
+            .map(|entry| parse_install_method(dep, entry))
+            .collect::<Result<_, _>>()?;
+        Ok(DepRecipe {
+            binaries: self.binaries,
+            docs: self.docs,
+            install,
+            support: self.support,
+        })
+    }
+}
+
+fn parse_install_method(
+    dep: &str,
+    entry: HashMap<String, String>,
+) -> Result<InstallMethod, CatalogError> {
+    let mut pairs = entry.into_iter();
+    let (Some((key, arg)), None) = (pairs.next(), pairs.next()) else {
+        return Err(CatalogError::MalformedInstall {
+            dep: dep.to_string(),
+        });
+    };
+    let installer = Installer::from_key(&key).ok_or_else(|| CatalogError::UnknownInstaller {
+        dep: dep.to_string(),
+        installer: key,
+    })?;
+    Ok(InstallMethod { installer, arg })
+}
 
 impl DepCatalog {
     /// Load and validate the embedded `registry/deps.toml`.
@@ -93,37 +108,16 @@ impl DepCatalog {
         Self::from_str(text)
     }
 
-    /// Parse and validate from a TOML string (also the test entry point).
+    /// Parse and validate a catalog from TOML text.
     pub fn from_str(text: &str) -> Result<Self, CatalogError> {
         let raw: HashMap<String, DepRecipeToml> = toml::from_str(text)?;
-        let mut recipes = HashMap::with_capacity(raw.len());
-
-        for (dep, recipe) in raw {
-            let mut install = Vec::with_capacity(recipe.install.len());
-            for entry in recipe.install {
-                // Exactly one { installer = arg } per entry.
-                if entry.len() != 1 {
-                    return Err(CatalogError::MalformedInstall { dep: dep.clone() });
-                }
-                let (key, arg) = entry.into_iter().next().expect("len checked above");
-                let installer =
-                    Installer::from_key(&key).ok_or_else(|| CatalogError::UnknownInstaller {
-                        dep: dep.clone(),
-                        installer: key,
-                    })?;
-                install.push(InstallMethod { installer, arg });
-            }
-            recipes.insert(
-                dep,
-                DepRecipe {
-                    binaries: recipe.binaries,
-                    docs: recipe.docs,
-                    install,
-                    support: recipe.support,
-                },
-            );
-        }
-
+        let recipes = raw
+            .into_iter()
+            .map(|(dep, recipe)| {
+                let recipe = recipe.into_recipe(&dep)?;
+                Ok((dep, recipe))
+            })
+            .collect::<Result<_, CatalogError>>()?;
         Ok(DepCatalog { recipes })
     }
 
@@ -132,9 +126,9 @@ impl DepCatalog {
         self.recipes.get(dep_id)
     }
 
-    /// All dep ids (unspecified order).
+    /// All dep ids, in unspecified order.
     pub fn dep_ids(&self) -> impl Iterator<Item = &str> {
-        self.recipes.keys().map(|s| s.as_str())
+        self.recipes.keys().map(String::as_str)
     }
 }
 
