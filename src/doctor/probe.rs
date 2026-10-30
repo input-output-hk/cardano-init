@@ -472,6 +472,25 @@ mod tests {
     }
 
     #[test]
+    fn scan_identifies_lucid_evolution_not_evolution() {
+        // `@lucid-evolution` must not be mistaken for the Evolution SDK
+        // (`@evolution-sdk`), whose name it shares a word with.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("off-chain")).unwrap();
+        fs::write(
+            root.join("off-chain/package.json"),
+            r#"{ "dependencies": { "@lucid-evolution/lucid": "^0.8.9" } }"#,
+        )
+        .unwrap();
+
+        let result = scan_project(root, &registry());
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(result.components[0].tool_id, "lucid-evolution");
+        assert!(result.unrecognized.is_empty());
+    }
+
+    #[test]
     fn scan_identifies_tx3_despite_meshsdk_dependency() {
         // The Tx3 off-chain template legitimately depends on @meshsdk/core (it
         // imports it in blueprint.ts), so its package.json trips MeshJS's

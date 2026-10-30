@@ -1,0 +1,28 @@
+[tool]
+id = "lucid-evolution"
+name = "Lucid Evolution"
+description = """\
+A TypeScript framework for building, signing, and submitting Cardano \
+transactions, maintained by Anastasia Labs. Lucid Evolution bundles wallet \
+and provider integrations (Blockfrost, Kupmios, Maestro, Koios), Plutus \
+helpers, and an in-memory emulator for testing transaction logic without a \
+chain — a good fit for dApp backends and frontends."""
+website = "https://anastasia-labs.github.io/lucid-evolution/"
+community = [
+  { name = "GitHub Issues", url = "https://github.com/Anastasia-Labs/lucid-evolution/issues" },
+]
+languages = ["typescript"]
+system_deps = ["node"]
+nix_packages = ["nodejs"]
+# A package.json alone is ambiguous (any JS project has one); require the
+# Lucid Evolution dependency so foreign projects read as "unrecognized" instead.
+detect = [{ file = "package.json", contains = "@lucid-evolution" }]
+
+[roles.off-chain]
+template = "lucid-evolution/off-chain"
+
+# Lucid Evolution connects through its Blockfrost or Kupmios (Kupo + Ogmios)
+# providers. It has no UTxORPC provider, so it cannot use a UTxORPC-only
+# provider such as Dolos.
+[compat]
+consumes = ["blockfrost", "kupo", "ogmios"]
