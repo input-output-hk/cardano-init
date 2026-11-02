@@ -1,0 +1,81 @@
+[manifest]
+summary = "Plutarch on-chain project: the GiftCard example in Plutarch (a one-shot minting policy + redeem spending validator) compiled to Plutus Core, writing a combined CIP-57 blueprint to ../blueprint/plutus.json"
+
+[[files]]
+source = "Justfile.jinja"
+dest = "Justfile"
+
+[[files]]
+source = "onchain.cabal"
+dest = "onchain.cabal"
+
+[[files]]
+source = "cabal.project"
+dest = "cabal.project"
+
+[[files]]
+source = ".gitignore"
+dest = ".gitignore"
+
+[[files]]
+source = "src/GiftCard/MintingPolicy.hs"
+dest = "src/GiftCard/MintingPolicy.hs"
+
+[[files]]
+source = "src/GiftCard/Redeem.hs"
+dest = "src/GiftCard/Redeem.hs"
+
+[[files]]
+source = "src/GiftCard/Scripts.hs"
+dest = "src/GiftCard/Scripts.hs"
+
+[[files]]
+source = "src/GiftCard/Types.hs"
+dest = "src/GiftCard/Types.hs"
+
+[[files]]
+source = "src/GiftCard/Utils.hs"
+dest = "src/GiftCard/Utils.hs"
+
+[[files]]
+source = "app/GenBlueprint.hs.jinja"
+dest = "app/GenBlueprint.hs"
+
+[[files]]
+source = "test/Spec.hs"
+dest = "test/Spec.hs"
+
+# Nix layer: a haskell.nix dev shell with GHC 9.8, emitted only under `--nix`.
+# A plain nixpkgs shell cannot build the CHaP/Plutus dependencies, so this
+# component ships its own flake instead of joining the top-level shell.
+[[files]]
+source = "flake.nix.jinja"
+dest = "flake.nix"
+when = "nix"
+
+# Pins haskell.nix, nixpkgs, CHaP and hackage.nix to a tested set that matches
+# cabal.project's index-state. Without it the flake resolves at HEAD.
+[[files]]
+source = "flake.lock"
+dest = "flake.lock"
+when = "nix"
+
+[[files]]
+source = "nix/outputs.nix"
+dest = "nix/outputs.nix"
+when = "nix"
+
+[[files]]
+source = "nix/pkgs.nix"
+dest = "nix/pkgs.nix"
+when = "nix"
+
+[[files]]
+source = "nix/project.nix.jinja"
+dest = "nix/project.nix"
+when = "nix"
+
+[[files]]
+source = "nix/shell.nix"
+dest = "nix/shell.nix"
+when = "nix"

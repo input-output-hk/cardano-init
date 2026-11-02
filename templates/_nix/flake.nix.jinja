@@ -13,9 +13,10 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-      in
-      {
-        devShells.default = pkgs.mkShell {
+
+        # `shell` picks which dev shell to compose from components that ship
+        # their own flake: "default" (with editor/lint tooling) or "minimal".
+        mkShell = shell: pkgs.mkShell {
           name = "{{ project_name }}";
 {% if nix_component_flakes %}
           # Compose the dev shells of components that ship their own flake (e.g.
@@ -23,7 +24,7 @@
           # `just build` for them — works from the project root.
           inputsFrom = [
 {%- for dir in nix_component_flakes %}
-            inputs."{{ dir }}".devShells.${system}.default
+            inputs."{{ dir }}".devShells.${system}.${shell}
 {%- endfor %}
           ];
 {% endif %}
@@ -39,6 +40,13 @@
             echo "Run 'just' to see available tasks."
           '';
         };
+      in
+      {
+        devShells.default = mkShell "default";
+
+        # Toolchains only, without language servers or linters that build from
+        # source. Used by CI: `nix develop .#minimal`.
+        devShells.minimal = mkShell "minimal";
       });
 {%- if nix_component_flakes %}
 

@@ -1649,9 +1649,10 @@ Rule: the locked UTxO can be spent only if the same transaction burns exactly
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-      in
-      {
-        devShells.default = pkgs.mkShell {
+
+        # `shell` picks which dev shell to compose from components that ship
+        # their own flake: "default" (with editor/lint tooling) or "minimal".
+        mkShell = shell: pkgs.mkShell {
           name = "snap-project";
 
           buildInputs = with pkgs; [
@@ -1665,6 +1666,13 @@ Rule: the locked UTxO can be spent only if the same transaction burns exactly
             echo "Run 'just' to see available tasks."
           '';
         };
+      in
+      {
+        devShells.default = mkShell "default";
+
+        # Toolchains only, without language servers or linters that build from
+        # source. Used by CI: `nix develop .#minimal`.
+        devShells.minimal = mkShell "minimal";
       });
 }
 

@@ -1,0 +1,15 @@
+{ inputs, pkgs, lib }:
+
+pkgs.haskell-nix.cabalProject' {
+  name = "{{ project_name }}";
+
+  # Plutarch 1.15 is built and tested upstream with GHC 9.8.
+  compiler-nix-name = lib.mkDefault "ghc984";
+
+  src = lib.cleanSource ../.;
+
+  inputMap = { "https://chap.intersectmbo.org/" = inputs.CHaP; };
+
+  # Skip Haddock for every dependency; it roughly doubles the first build.
+  modules = [{ doHaddock = false; }];
+}

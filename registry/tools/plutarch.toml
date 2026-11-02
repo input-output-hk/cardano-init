@@ -1,0 +1,24 @@
+[tool]
+id = "plutarch"
+name = "Plutarch"
+description = """\
+Write Cardano validators in Plutarch, a typed language embedded in Haskell. \
+Instead of compiling ordinary Haskell, you build Plutus Core terms directly, \
+which gives fine control over script size and execution cost. Choose it when \
+you know Haskell and need highly optimised validators."""
+website = "https://plutarch-plutus.org"
+community = [
+  { name = "GitHub Discussions", url = "https://github.com/Plutonomicon/plutarch-plutus/discussions" },
+]
+languages = ["haskell"]
+system_deps = ["cabal", "ghc"]
+nix_packages = ["cabal-install", "haskell.compiler.ghc984", "pkg-config", "libsodium", "secp256k1", "blst"]
+# Like Plinth, Plutarch ships its own component-local haskell.nix flake under
+# `--nix` (a plain nixpkgs shell cannot build its CHaP/Plutus dependencies).
+# The top-level flake composes that flake's dev shell via `inputsFrom`.
+nix_self_contained = true
+# Plinth projects also have a cabal.project, so match on the Plutarch source.
+detect = [{ file = "cabal.project", contains = "plutarch-plutus" }]
+
+[roles.on-chain]
+template = "plutarch/on-chain"

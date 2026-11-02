@@ -273,6 +273,17 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_plutarch_nix() {
+        // Plutarch on-chain with `--nix`: locks the component-local GHC 9.8
+        // haskell.nix flake, the pinned Plutarch source in cabal.project, and
+        // keeps Plutarch's packages out of the aggregated top-level shell.
+        assert_snapshot(
+            "plutarch_nix",
+            &sel(vec![a(Role::OnChain, "plutarch")], Network::Preview, true),
+        );
+    }
+
+    #[test]
     fn snapshot_plinth_meshjs_nix() {
         // Plinth on-chain + MeshJS off-chain under `--nix`: the top-level flake
         // composes the on-chain haskell.nix shell via `inputsFrom` *and* still

@@ -449,6 +449,49 @@ mod tests {
         assert!(result.unrecognized.is_empty());
     }
 
+    /// Write the Plinth or Plutarch template's Cabal files into `on-chain/`
+    /// and return the tool `doctor` identifies there.
+    fn identify_haskell_on_chain(tool: &str) -> String {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let dir = root.join("on-chain");
+        fs::create_dir_all(&dir).unwrap();
+        let (cabal_project, onchain_cabal) = match tool {
+            "plinth" => (
+                include_str!("../../templates/plinth/on-chain/cabal.project"),
+                include_str!("../../templates/plinth/on-chain/onchain.cabal"),
+            ),
+            "plutarch" => (
+                include_str!("../../templates/plutarch/on-chain/cabal.project"),
+                include_str!("../../templates/plutarch/on-chain/onchain.cabal"),
+            ),
+            other => panic!("not a Haskell on-chain tool: {other}"),
+        };
+        fs::write(dir.join("cabal.project"), cabal_project).unwrap();
+        fs::write(dir.join("onchain.cabal"), onchain_cabal).unwrap();
+
+        let result = scan_project(root, &registry());
+        assert!(
+            result.unrecognized.is_empty(),
+            "{tool} on-chain unrecognized"
+        );
+        result
+            .components
+            .iter()
+            .find(|c| c.kind == ComponentKind::Role(Role::OnChain))
+            .unwrap()
+            .tool_id
+            .clone()
+    }
+
+    #[test]
+    fn haskell_on_chain_tools_are_told_apart() {
+        // Plinth and Plutarch projects both have a cabal.project and an
+        // onchain.cabal; detection must still name the right tool.
+        assert_eq!(identify_haskell_on_chain("plinth"), "plinth");
+        assert_eq!(identify_haskell_on_chain("plutarch"), "plutarch");
+    }
+
     #[test]
     fn foreign_package_json_is_unrecognized_not_meshjs() {
         // A from-scratch JS project (e.g. Next.js) has a package.json but no

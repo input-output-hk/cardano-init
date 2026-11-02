@@ -19,7 +19,9 @@ nix_packages = ["cabal-install", "haskell.compiler.ghc966", "pkg-config", "libso
 # build its CHaP/Plutus dependencies. The top-level flake composes that flake's
 # dev shell (via `inputsFrom`) instead of listing these packages directly.
 nix_self_contained = true
-detect = ["cabal.project"]
+# Match the Plinth compiler plugin, not cabal.project: other Haskell tools
+# (Plutarch) have a cabal.project too.
+detect = [{ file = "onchain.cabal", contains = "plutus-tx-plugin" }]
 
 [roles.on-chain]
 template = "plinth/on-chain"

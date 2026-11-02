@@ -17,7 +17,7 @@ my-protocol/
 └── devnet/         # local chain + its own Justfile
 ```
 
-Only the roles you select get a directory. Add `--nix` to also get a `flake.nix` and `.envrc` that pin the project's toolchains. Add `--dry-run` to see the full file list without writing anything.
+Only the roles you select get a directory. Add `--nix` to also get a `flake.nix` and `.envrc` that pin the project's toolchains. `nix develop` opens the full shell, including editor tooling such as the Haskell language server; `nix develop .#minimal` opens a lighter shell with only what `just build` and `just test` need. Add `--dry-run` to see the full file list without writing anything.
 
 ## The Justfile workflow
 

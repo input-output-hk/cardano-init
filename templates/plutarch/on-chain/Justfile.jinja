@@ -1,0 +1,31 @@
+# On-chain component (Plutarch)
+# Part of {{ project_name }}
+#
+# Plutarch is a typed language embedded in Haskell for writing validators with
+# fine control over the generated Plutus Core. `build` runs the blueprint
+# generator, which serialises the compiled validators into the CIP-57 blueprint
+# at ../{{ blueprint_path }} for the off-chain / devnet / formal components to consume.
+#
+# Plutus comes from IOG's package repository (CHaP) and Plutarch from its git
+# repository, both configured in cabal.project. The first build needs a package
+# index, so `build` runs `cabal update` for you; it's a fast no-op once current.
+
+# Compile the validators and write the CIP-57 blueprint to ../{{ blueprint_path }}.
+build: _check-ghc
+    @cabal update
+    @cabal build all
+    @cabal run -v0 gen-blueprint -- ../{{ blueprint_path }}
+
+# Run the behaviour tests: each validator is evaluated against hand-built
+# script contexts that should succeed or fail.
+test: _check-ghc
+    @cabal test all
+
+clean:
+    @cabal clean
+    @rm -f ../{{ blueprint_path }}
+
+# Plutarch 1.15 is built and tested upstream with GHC 9.8; fail early with a
+# clear message instead of deep inside a dependency build.
+_check-ghc:
+    @ghc --numeric-version 2>/dev/null | grep -q '^9\.8\.' || { echo "Plutarch needs GHC 9.8.x (found: $(ghc --numeric-version 2>/dev/null || echo none)). Install it with: ghcup install ghc 9.8.4"; exit 1; }

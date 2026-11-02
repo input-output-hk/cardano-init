@@ -1,0 +1,113 @@
+module Main (main) where
+
+import Data.ByteString.Short qualified as Short
+import Data.Set qualified as Set
+import GiftCard.Scripts (giftCardScript, redeemScript)
+import GiftCard.Types (GiftCardAction)
+import Plutarch.Script (Script, serialiseScript)
+import PlutusLedgerApi.V3 (TxId, TxOutRef)
+import PlutusTx.Blueprint
+import PlutusTx.Builtins (BuiltinByteString, BuiltinData)
+import System.Environment (getArgs)
+
+{- | The combined CIP-57 blueprint: one contract exposing the gift-card minting
+policy and its redeem spending validator. Both are emitted parameterised
+(their arguments are left free), so any off-chain component can apply a token
+name and seed UTxO / policy id and get working scripts.
+-}
+contractBlueprint :: ContractBlueprint
+contractBlueprint =
+  MkContractBlueprint
+    { contractId = Just "gift-card"
+    , contractPreamble = preamble
+    , contractValidators = Set.fromList [giftCardValidator, redeemValidator]
+    , contractDefinitions =
+        deriveDefinitions @[GiftCardAction, TxOutRef, TxId, BuiltinByteString, Integer, BuiltinData]
+    }
+
+preamble :: Preamble
+preamble =
+  MkPreamble
+    { preambleTitle = "{{ project_name }} gift card"
+    , preambleDescription =
+        Just "One-shot gift-card minting policy and its redeem spending validator"
+    , preambleVersion = "1.0.0"
+    , preamblePlutusVersion = PlutusV3
+    , preambleLicense = Just "Apache-2.0"
+    }
+
+-- | The script bytes as the blueprint expects them (CBOR-wrapped flat UPLC).
+compiledBytes :: Script -> CompiledValidator
+compiledBytes = compiledValidator PlutusV3 . Short.fromShort . serialiseScript
+
+{- | The minting policy. Its title ends in @gift_card.mint@ so off-chain tools
+can find it in the blueprint by convention.
+-}
+giftCardValidator :: ValidatorBlueprint referencedTypes
+giftCardValidator =
+  MkValidatorBlueprint
+    { validatorTitle = "giftcard.gift_card.mint"
+    , validatorDescription =
+        Just "One-shot minting policy: mints a unique gift-card token; burns it on redeem"
+    , validatorParameters =
+        [ MkParameterBlueprint
+            { parameterTitle = Just "Token name"
+            , parameterDescription = Just "Name of the gift-card token"
+            , parameterPurpose = Set.singleton Mint
+            , parameterSchema = definitionRef @BuiltinByteString
+            }
+        , MkParameterBlueprint
+            { parameterTitle = Just "Seed UTxO"
+            , parameterDescription = Just "Output reference spent when minting, guaranteeing uniqueness"
+            , parameterPurpose = Set.singleton Mint
+            , parameterSchema = definitionRef @TxOutRef
+            }
+        ]
+    , validatorRedeemer =
+        MkArgumentBlueprint
+          { argumentTitle = Just "Action"
+          , argumentDescription = Just "Mint the gift-card token or burn it"
+          , argumentPurpose = Set.fromList [Mint]
+          , argumentSchema = definitionRef @GiftCardAction
+          }
+    , validatorDatum = Nothing
+    , validatorCompiled = Just (compiledBytes giftCardScript)
+    }
+
+-- | The redeem spending validator. Its title ends in @redeem.spend@.
+redeemValidator :: ValidatorBlueprint referencedTypes
+redeemValidator =
+  MkValidatorBlueprint
+    { validatorTitle = "giftcard.redeem.spend"
+    , validatorDescription =
+        Just "Guards the locked gift; releases the assets when the gift-card token is burned"
+    , validatorParameters =
+        [ MkParameterBlueprint
+            { parameterTitle = Just "Token name"
+            , parameterDescription = Just "Name of the gift-card token"
+            , parameterPurpose = Set.singleton Spend
+            , parameterSchema = definitionRef @BuiltinByteString
+            }
+        , MkParameterBlueprint
+            { parameterTitle = Just "Policy id"
+            , parameterDescription = Just "Currency symbol of the gift-card minting policy"
+            , parameterPurpose = Set.singleton Spend
+            , parameterSchema = definitionRef @BuiltinByteString
+            }
+        ]
+    , validatorRedeemer =
+        MkArgumentBlueprint
+          { argumentTitle = Just "Redeemer"
+          , argumentDescription = Just "Unused; burning the token in the same transaction authorises the spend"
+          , argumentPurpose = Set.fromList [Spend]
+          , argumentSchema = definitionRef @BuiltinData
+          }
+    , validatorDatum = Nothing
+    , validatorCompiled = Just (compiledBytes redeemScript)
+    }
+
+main :: IO ()
+main =
+  getArgs >>= \case
+    [path] -> writeBlueprint path contractBlueprint
+    args -> fail $ "Expects one argument (output path), got " <> show (length args)
