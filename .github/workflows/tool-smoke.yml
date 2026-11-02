@@ -79,6 +79,13 @@ jobs:
         if: contains(matrix.tools, 'pycardano')
         uses: astral-sh/setup-uv@v10.3.3
 
+      # The Pebble compiler (an npm dev dependency of the template) needs Node 22+.
+      - name: Install Node (Pebble)
+        if: matrix.toolchain == 'pebble'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
       - name: Install JDK
         if: matrix.toolchain == 'scalus'
         uses: actions/setup-java@v4

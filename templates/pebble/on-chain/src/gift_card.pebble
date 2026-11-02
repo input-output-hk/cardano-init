@@ -1,0 +1,34 @@
+// One-shot gift-card minting policy.
+//
+// Creating a gift card mints a single token and locks the gift at the `redeem`
+// script address. The policy is parameterised by a seed UTxO that must be spent
+// when minting; a UTxO can only be spent once, so the token is unique.
+//
+// Parameters are declared as `data` and decoded below. Off-chain code applies
+// them with `applyParamsToScript`, which passes Data, so this keeps the script
+// interchangeable with every other on-chain tool's gift card.
+
+import { mintsOnly } from "./giftcard.pebble";
+
+contract GiftCard {
+    param tokenNameData: data;   // token name (ByteString)
+    param seedData: data;        // seed OutputReference: Constr 0 [tx id, index]
+
+    // Redeemer `Mint` = Constr 0 []
+    mint mint() {
+        const { tx, policy } = context;
+        const tokenName = this.tokenNameData as bytes;
+        const seed = this.seedData as TxOutRef;
+
+        assert tx.inputs.some( i => i.ref == seed ) else "seed UTxO not spent";
+        assert mintsOnly( tx, policy, tokenName, 1 ) else "must mint exactly one token";
+    }
+
+    // Redeemer `Burn` = Constr 1 []
+    mint burn() {
+        const { tx, policy } = context;
+        const tokenName = this.tokenNameData as bytes;
+
+        assert mintsOnly( tx, policy, tokenName, -1 ) else "must burn exactly one token";
+    }
+}
