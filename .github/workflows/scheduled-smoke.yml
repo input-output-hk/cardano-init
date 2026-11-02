@@ -56,6 +56,18 @@ jobs:
             # Sugar for `--on-chain scalus --off-chain scalus`: both roles
             # collapse into one unified `protocol/` sbt build.
             flags: --fullstack scalus
+          # Haskell on-chain tools run their `--nix` variant: the component
+          # flake supplies GHC, cabal and the crypto libraries Plutus needs
+          # (blst has no Ubuntu package), mostly prebuilt from cache.iog.io,
+          # and the run also checks the template's pinned flake.lock still works.
+          - variant: plinth
+            tool: haskell
+            flags: --on-chain plinth --nix
+          - variant: plutarch
+            tool: haskell
+            flags: --on-chain plutarch --nix
+    # Haskell variants compile parts of the Plutus stack from source.
+    timeout-minutes: ${{ matrix.tool == 'haskell' && 300 || 60 }}
     steps:
       - uses: actions/checkout@v5
 
@@ -92,6 +104,23 @@ jobs:
         if: matrix.tool == 'scalus'
         uses: sbt/setup-sbt@v1
 
+      # The haskell.nix store (GHC plus Plutus dependencies) does not fit in
+      # the runner's default free space.
+      - name: Free disk space
+        if: matrix.tool == 'haskell'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Install Nix
+        if: matrix.tool == 'haskell'
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            extra-substituters = https://cache.iog.io https://cache.zw3rk.com
+            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ= loony-tools:pr9m4BkM/5/eSTZlkQyRt57Jz7OMBxNSUiMC4FkcNfk=
+            accept-flake-config = true
+
       - name: Scaffold project in isolation
         run: cargo run --quiet -- --name smoke-${{ matrix.variant }} ${{ matrix.flags }}
 
@@ -100,9 +129,13 @@ jobs:
         # Each component's Justfile installs its own deps (e.g. meshjs `_install`
         # runs `npm install` in off-chain/ on first build), so `just build` is
         # self-sufficient from the project root — no per-tool dep step here.
+        env:
+          # The --nix variants run in the minimal dev shell (toolchain only, no
+          # language server or linters, which would build from source).
+          RUN: ${{ matrix.tool == 'haskell' && 'nix develop .#minimal --command' || '' }}
         run: |
-          just build
-          just test
+          $RUN just build
+          $RUN just test
 
   notify-on-failure:
     needs: smoke
