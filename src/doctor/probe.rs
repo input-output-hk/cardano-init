@@ -472,9 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_identifies_lucid_evolution_not_evolution() {
-        // `@lucid-evolution` must not be mistaken for the Evolution SDK
-        // (`@evolution-sdk`), whose name it shares a word with.
+    fn scan_identifies_lucid_evolution() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("off-chain")).unwrap();

@@ -248,7 +248,8 @@ mod tests {
     #[test]
     fn lucid_evolution_with_dolos_infra_is_incompatible() {
         let reg = registry();
-        // Lucid Evolution has no UTxORPC provider, so Dolos (u5c only) can't feed it.
+        // Lucid Evolution's UTxORPC provider only supports Lucid 0.4.x (the
+        // template uses 0.8.x), so Dolos (u5c only) can't feed it yet.
         let sel = vec![
             a(Role::OffChain, "lucid-evolution"),
             a(Role::Infrastructure, "dolos"),
