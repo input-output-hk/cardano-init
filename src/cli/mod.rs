@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(ctx["role"], "On-chain");
         assert_eq!(
             string_array(&ctx["valid_tools"]),
-            vec!["aiken", "plinth", "plutarch", "scalus"]
+            vec!["aiken", "pebble", "plinth", "plutarch", "scalus"]
         );
     }
 
