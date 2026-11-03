@@ -9,7 +9,7 @@ Tools currently in the registry (✅ available · 🧪 experimental · ⬜ plann
 | ✅ Plinth | ✅ Evolution SDK | | ✅ Dolos | |
 | ⬜ Pebble | 🧪 Tx3 | | ✅ Tx Submit API | |
 | ⬜ Plutarch | ⬜ Lucid Evolution | | ✅ Cardano Node | |
-| ⬜ Opshin | ⬜ Blaze | | ✅ Cardano Node API | |
+| ⬜ Opshin | ✅ Blaze | | ✅ Cardano Node API | |
 | | ⬜ Elm Cardano | | ✅ Dingo | |
 | | ⬜ PyCardano | | | |
 

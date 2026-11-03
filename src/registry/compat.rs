@@ -225,6 +225,35 @@ mod tests {
     }
 
     #[test]
+    fn blaze_with_yaci_is_compatible() {
+        let reg = registry();
+        let sel = vec![a(Role::OffChain, "blaze"), a(Role::Devnet, "yaci")];
+        assert!(check(&sel, &reg).is_none());
+    }
+
+    #[test]
+    fn blaze_with_kupmios_is_compatible() {
+        let reg = registry();
+        let sel = vec![
+            a(Role::OffChain, "blaze"),
+            a(Role::Infrastructure, "kupo"),
+            a(Role::Infrastructure, "ogmios"),
+        ];
+        assert!(check(&sel, &reg).is_none());
+    }
+
+    #[test]
+    fn blaze_with_dolos_infra_is_incompatible() {
+        let reg = registry();
+        // Blaze's UTxORPC provider pins an older Blaze core than the template
+        // uses, so Dolos (u5c only) can't feed it yet.
+        let sel = vec![a(Role::OffChain, "blaze"), a(Role::Infrastructure, "dolos")];
+        let inc = check(&sel, &reg).expect("blaze + dolos infra should be incompatible");
+        assert_eq!(inc.off_chain_id, "blaze");
+        assert!(inc.providers.iter().any(|p| p.id == "dolos"));
+    }
+
+    #[test]
     fn tx3_with_yaci_is_incompatible() {
         let reg = registry();
         let sel = vec![a(Role::OffChain, "tx3"), a(Role::Devnet, "yaci")];

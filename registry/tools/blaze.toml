@@ -1,0 +1,30 @@
+[tool]
+id = "blaze"
+name = "Blaze"
+description = """\
+A TypeScript library for building Cardano transactions and off-chain \
+application logic, maintained by Butane Protocol. Blaze's SDK combines a \
+transaction builder with wallets (hot, cold, CIP-30), providers (Blockfrost, \
+Kupmios, Maestro), helpers for applying parameters to compiled Plutus scripts, \
+and an in-memory emulator for testing transaction logic without a chain."""
+website = "https://blaze.butane.dev"
+community = [
+  { name = "GitHub Issues", url = "https://github.com/butaneprotocol/blaze-cardano/issues" },
+]
+languages = ["typescript"]
+system_deps = ["node"]
+nix_packages = ["nodejs"]
+# A package.json alone is ambiguous (any JS project has one); require the
+# Blaze dependency so foreign projects read as "unrecognized" instead.
+detect = [{ file = "package.json", contains = "@blaze-cardano" }]
+
+[roles.off-chain]
+template = "blaze/off-chain"
+
+# Blaze connects through its Blockfrost or Kupmios (Kupo + Ogmios) providers.
+# A UTxORPC provider exists (`@utxorpc/blaze-provider`), but its latest release
+# (0.3.9) pins @blaze-cardano/core ^0.8 / sdk ^0.2, not the core 0.10 / sdk 0.3
+# this template uses, so `u5c` is deliberately not consumed and a UTxORPC-only
+# provider such as Dolos can't feed it.
+[compat]
+consumes = ["blockfrost", "kupo", "ogmios"]

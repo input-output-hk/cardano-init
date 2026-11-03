@@ -1,0 +1,45 @@
+{
+  "name": "{{ project_name }}-off-chain",
+  "version": "0.0.0",
+  "description": "Off-chain GiftCard bindings for {{ project_name }} (Blaze) — importable as a library",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "bundle-blueprint": "node scripts/bundle-blueprint.mjs",
+    "prebuild": "npm run bundle-blueprint",
+    "build": "tsc",
+    "pretypecheck": "npm run bundle-blueprint",
+    "typecheck": "tsc --noEmit",
+    "prestart": "npm run bundle-blueprint",
+    "start": "tsx src/cli.ts",
+    "pretest": "npm run bundle-blueprint",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@blaze-cardano/ogmios": "^0.0.8",
+    "@blaze-cardano/sdk": "^0.3.3",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@blaze-cardano/emulator": "^0.5.4",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  }
+}

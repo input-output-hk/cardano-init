@@ -45,6 +45,16 @@ jobs:
           - variant: meshjs
             tool: meshjs
             flags: --off-chain meshjs
+          - variant: blaze
+            tool: blaze
+            flags: --off-chain blaze
+          # With an Aiken blueprint, Blaze's unit tests run the full gift-card
+          # round-trip on its in-memory Emulator (no devnet needed), so this
+          # variant proves the blueprint seam end to end.
+          - variant: aiken-blaze
+            tool: blaze
+            aiken: true
+            flags: --on-chain aiken --off-chain blaze
           - variant: scalus-on-chain
             tool: scalus
             flags: --on-chain scalus
@@ -67,14 +77,14 @@ jobs:
 
       # --- per-tool toolchain (extend as the matrix grows) ---
       - name: Install Aiken
-        if: matrix.tool == 'aiken'
+        if: matrix.tool == 'aiken' || matrix.aiken
         uses: aiken-lang/setup-aiken@v1
         with:
           #Keep this in lockstep with templates/aiken/on-chain/aiken.toml.jinja.
           version: v1.1.21
 
       - name: Install Node
-        if: matrix.tool == 'meshjs'
+        if: matrix.tool == 'meshjs' || matrix.tool == 'blaze'
         uses: actions/setup-node@v5
         with:
           node-version: 20

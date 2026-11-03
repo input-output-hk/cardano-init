@@ -472,6 +472,23 @@ mod tests {
     }
 
     #[test]
+    fn scan_identifies_blaze() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("off-chain")).unwrap();
+        fs::write(
+            root.join("off-chain/package.json"),
+            r#"{ "dependencies": { "@blaze-cardano/sdk": "^0.3.3" } }"#,
+        )
+        .unwrap();
+
+        let result = scan_project(root, &registry());
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(result.components[0].tool_id, "blaze");
+        assert!(result.unrecognized.is_empty());
+    }
+
+    #[test]
     fn scan_identifies_tx3_despite_meshsdk_dependency() {
         // The Tx3 off-chain template legitimately depends on @meshsdk/core (it
         // imports it in blueprint.ts), so its package.json trips MeshJS's
