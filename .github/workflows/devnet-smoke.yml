@@ -9,7 +9,7 @@
 #     layer skips and exits 0. Green, but proving nothing.
 #
 # This job installs yaci-devkit for real, scaffolds a fullstack project
-# (aiken on-chain → blueprint → meshjs off-chain → yaci devnet), and runs the
+# (aiken on-chain → blueprint → each off-chain in the matrix → yaci devnet), and runs the
 # whole thing under CARDANO_INIT_REQUIRE_DEVNET=1, which turns every graceful
 # skip into a hard failure. So a green run here MEANS: the devnet came up, the
 # indexer served the chain, and the off-chain mint→lock→redeem round-trip
@@ -35,12 +35,17 @@ permissions:
 
 jobs:
   devnet:
-    name: yaci devnet end-to-end
+    name: yaci devnet end-to-end (${{ matrix.off_chain }})
     # Schedule and manual runs always run; PR runs only for our opt-in label
     # (a `labeled` event fires for every label, so filter to ours).
     if: github.event_name != 'pull_request' || github.event.label.name == 'run-devnet-smoke'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false # one off-chain breaking must not mask the other
+      matrix:
+        # Each off-chain tool that reaches the devnet over the `.env` seam.
+        off_chain: [meshjs, lucid-evolution]
     outputs:
       failed: ${{ steps.failed.outputs.failed }}
     steps:
@@ -52,7 +57,7 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
 
-      # Off-chain (meshjs) + the yaci-devkit CLI both run on Node.
+      # The off-chain component + the yaci-devkit CLI both run on Node.
       - name: Install Node
         uses: actions/setup-node@v5
         with:
@@ -91,7 +96,7 @@ jobs:
           key: yaci-downloads-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.yaci.outputs.version }}
 
       - name: Scaffold a fullstack project in isolation
-        run: cargo run --quiet -- --name devnet-smoke --on-chain aiken --off-chain meshjs --devnet yaci
+        run: cargo run --quiet -- --name devnet-smoke --on-chain aiken --off-chain ${{ matrix.off_chain }} --devnet yaci
 
       - name: Build & run the end-to-end devnet smoke
         working-directory: devnet-smoke
