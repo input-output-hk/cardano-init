@@ -257,7 +257,7 @@ clean:
     @sbt clean
 
 === protocol/build.sbt ===
-val scalusVersion = "0.18.2"
+val scalusVersion = "1.4.1"
 
 resolvers += Resolver.sonatypeCentralSnapshots
 
@@ -341,7 +341,7 @@ target/
 === protocol/project/plugins.sbt ===
 // The Scalus sbt plugin provides the ScalusSbtPlugin (enabled in build.sbt) and
 // the `blueprint` task. Keep the version in sync with scalusVersion in build.sbt.
-addSbtPlugin("org.scalus" % "scalus-sbt-plugin" % "0.18.2")
+addSbtPlugin("org.scalus" % "scalus-sbt-plugin" % "1.4.1")
 
 === protocol/project/build.properties ===
 sbt.version=1.12.8
