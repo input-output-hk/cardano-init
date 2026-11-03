@@ -539,6 +539,23 @@ mod tests {
     }
 
     #[test]
+    fn blaze_off_chain_entries() {
+        assert_plan_contains(
+            &selection(vec![a(Role::OffChain, "blaze")]),
+            &[
+                "off-chain/package.json",
+                "off-chain/Justfile",
+                "off-chain/src/index.ts",
+                "off-chain/src/contract.ts",
+                "off-chain/src/node.ts",
+                "off-chain/src/contract.test.ts",
+                "off-chain/src/contract.integration.test.ts",
+                "off-chain/scripts/bundle-blueprint.mjs",
+            ],
+        );
+    }
+
+    #[test]
     fn plan_order_is_canonical_regardless_of_input_order() {
         let forward = selection(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
         let reversed = selection(vec![a(Role::OffChain, "meshjs"), a(Role::OnChain, "aiken")]);

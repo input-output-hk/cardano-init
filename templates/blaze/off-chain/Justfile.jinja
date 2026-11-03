@@ -1,0 +1,36 @@
+# Off-chain component (Blaze) — GiftCard
+# Part of {{ project_name }}
+
+# Install dependencies only when needed — node_modules is missing, or
+# package.json changed since the last install. Keeps repeat runs fast and quiet
+# (no npm output at all when deps are already up to date).
+#`--no-fund --no-audit --loglevel=error` trims npm's noise when it does run.
+# Delete node_modules (or `just clean`) to force a fresh install.
+_install:
+    @if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install --no-fund --no-audit --loglevel=error; fi
+
+# Build the importable library into dist/ (JS + type declarations).
+build: _install
+    @npm run --silent build
+
+test: _install
+    @npm run --silent test
+
+# Status: show the loaded blueprint and whether the env is ready for txs.
+dev: _install
+    npm run start
+
+# Create a gift card: mint a token and lock <lovelace> at the script address.
+# Submits to the local devnet if one is running (INDEXER_URL in ../.env), else
+# to Blockfrost (needs BLOCKFROST_PROJECT_ID). Needs MNEMONIC either way — see
+# .env.example.
+create token lovelace: _install
+    npx tsx src/cli.ts create {{ "{{token}}" }} {{ "{{lovelace}}" }}
+
+# Redeem the gift card locked at redeem script address <address> (printed by
+# `just create`).
+redeem address: _install
+    npx tsx src/cli.ts redeem {{ "{{address}}" }}
+
+clean:
+    @rm -rf node_modules dist

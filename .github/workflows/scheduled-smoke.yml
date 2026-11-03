@@ -55,6 +55,13 @@ jobs:
             tool: lucid-evolution
             aiken: true
             flags: --on-chain aiken --off-chain lucid-evolution
+          - variant: blaze
+            tool: blaze
+            flags: --off-chain blaze
+          - variant: aiken-blaze
+            tool: blaze
+            aiken: true
+            flags: --on-chain aiken --off-chain blaze
           - variant: scalus-on-chain
             tool: scalus
             flags: --on-chain scalus
@@ -83,8 +90,9 @@ jobs:
           #Keep this in lockstep with templates/aiken/on-chain/aiken.toml.jinja.
           version: v1.1.21
 
+      # The TypeScript off-chain tools all build on Node.
       - name: Install Node
-        if: matrix.tool == 'meshjs' || matrix.tool == 'lucid-evolution'
+        if: contains(fromJSON('["meshjs", "lucid-evolution", "blaze"]'), matrix.tool)
         uses: actions/setup-node@v5
         with:
           node-version: 20

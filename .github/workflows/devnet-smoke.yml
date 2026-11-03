@@ -45,7 +45,7 @@ jobs:
       fail-fast: false # one off-chain breaking must not mask the other
       matrix:
         # Each off-chain tool that reaches the devnet over the `.env` seam.
-        off_chain: [meshjs, lucid-evolution]
+        off_chain: [meshjs, lucid-evolution, blaze]
     outputs:
       failed: ${{ steps.failed.outputs.failed }}
     steps:
@@ -110,14 +110,16 @@ jobs:
           CARDANO_INIT_REQUIRE_DEVNET: "1"
         run: |
           just build
-          npm --prefix off-chain ls @meshsdk/core @meshsdk/provider @meshsdk/transaction
+          if [ "${{ matrix.off_chain }}" = meshjs ]; then
+            npm --prefix off-chain ls @meshsdk/core @meshsdk/provider @meshsdk/transaction
+          fi
           just test
 
       - name: Preserve devnet diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: devnet-diagnostics
+          name: devnet-diagnostics-${{ matrix.off_chain }}
           include-hidden-files: true
           path: |
             devnet-smoke/devnet/.yaci-devnet.log
