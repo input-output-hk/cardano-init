@@ -1,7 +1,8 @@
+import { parse, serialize, Type, Void } from "@blaze-cardano/data";
 import {
   Core,
-  cborToScript,
   applyParams,
+  cborToScript,
   type Blaze,
   type Provider,
   type Wallet,
@@ -120,47 +121,48 @@ export function getBundledValidators(): GiftCardValidators {
   return getGiftCardValidators(bundledBlueprint);
 }
 
-// --- PlutusData helpers -----------------------------------------------------
+// --- On-chain types ---------------------------------------------------------
+// @blaze-cardano/data schemas; `ctor` is the Plutus constructor index.
 
-const bytes = (hex: string) => Core.PlutusData.newBytes(Core.fromHex(hex));
-const int = (n: bigint | number) => Core.PlutusData.newInteger(BigInt(n));
-const constr = (index: number, fields: Core.PlutusData[] = []) => {
-  const list = new Core.PlutusList();
-  for (const f of fields) list.add(f);
-  return Core.PlutusData.newConstrPlutusData(
-    new Core.ConstrPlutusData(BigInt(index), list),
-  );
-};
+/** A Plutus `ByteArray`, as hex. */
+const ByteArray = Type.String();
+
+/** `OutputReference`: Constr 0 [transaction_id (bare bytes), output_index]. */
+const OutputReference = Type.Object(
+  { transactionId: ByteArray, outputIndex: Type.BigInt() },
+  { ctor: 0n },
+);
+
+/** The gift_card policy's `Action` redeemer: Mint = Constr 0, Burn = Constr 1. */
+const Action = Type.Union([
+  Type.Literal("Mint", { ctor: 0n }),
+  Type.Literal("Burn", { ctor: 1n }),
+]);
+
+/**
+ * What `createGiftCard` stores in the inline datum, so `redeem` can rebuild the
+ * parameterised scripts from the on-chain UTxO alone. The validator ignores it.
+ */
+const GiftCardDatum = Type.Object(
+  { seedTxHash: ByteArray, seedOutputIndex: Type.BigInt(), tokenName: ByteArray },
+  { ctor: 0n },
+);
 
 /** UTF-8 text → hex, the on-chain representation of a token name. */
 export const textToHex = (text: string) =>
   Core.toHex(new TextEncoder().encode(text));
 
-// Redeemers of the gift_card policy's `Action` enum: Mint = Constr 0 [],
-// Burn = Constr 1 []. The redeem validator ignores its redeemer (burning the
-// token is the authorization), so it reuses the empty Constr 0.
-const MINT = () => constr(0);
-const BURN = () => constr(1);
-const UNIT_REDEEMER = () => constr(0);
-
-/**
- * Read back what `createGiftCard` stored in the inline datum:
- * Constr 0 [seed tx hash, seed output index, token name].
- */
+/** Read back the seed reference and token name stored by `createGiftCard`. */
 function parseGiftCardDatum(utxo: Core.TransactionUnspentOutput): {
   seed: SeedUtxo;
   tokenNameHex: string;
 } {
-  const invalid = new Error("Gift-card UTxO has no inline datum of the expected shape.");
-  const fields = utxo.output().datum()?.asInlineData()?.asConstrPlutusData()?.getData();
-  if (fields?.getLength() !== 3) throw invalid;
-  const txHash = fields.get(0).asBoundedBytes();
-  const index = fields.get(1).asInteger();
-  const tokenName = fields.get(2).asBoundedBytes();
-  if (!txHash || index === undefined || !tokenName) throw invalid;
+  const data = utxo.output().datum()?.asInlineData();
+  if (!data) throw new Error("Gift-card UTxO has no inline datum.");
+  const datum = parse(GiftCardDatum, data);
   return {
-    seed: { txHash: Core.toHex(txHash), outputIndex: Number(index) },
-    tokenNameHex: Core.toHex(tokenName),
+    seed: { txHash: datum.seedTxHash, outputIndex: Number(datum.seedOutputIndex) },
+    tokenNameHex: datum.tokenName,
   };
 }
 
@@ -206,8 +208,6 @@ export class GiftCardContract {
   }) {
     this.blaze = input.blaze;
     const validators = input.validators ?? getBundledValidators();
-    // The blueprint's compiledCode is single-CBOR, which is what `applyParams`
-    // expects; `cborToScript` wraps the result into a PlutusV3 script.
     this.giftCardCompiledCode = validators.giftCard;
     this.redeemCompiledCode = validators.redeem;
   }
@@ -218,12 +218,13 @@ export class GiftCardContract {
 
   /** Apply the (token name, seed UTxO) parameters to the one-shot mint policy. */
   private giftCardScriptFor(tokenNameHex: string, seed: SeedUtxo): Core.Script {
-    // gift_card params: (token_name: ByteArray, utxo_ref: OutputReference).
-    // OutputReference is Constr 0 [transaction_id (bare bytes), output_index].
     const applied = applyParams(
       Core.HexBlob(this.giftCardCompiledCode),
-      bytes(tokenNameHex),
-      constr(0, [bytes(seed.txHash), int(seed.outputIndex)]),
+      serialize(ByteArray, tokenNameHex),
+      serialize(OutputReference, {
+        transactionId: seed.txHash,
+        outputIndex: BigInt(seed.outputIndex),
+      }),
     );
     return cborToScript(applied, LANGUAGE_VERSION);
   }
@@ -232,8 +233,8 @@ export class GiftCardContract {
   private redeemScriptFor(tokenNameHex: string, policyId: string): Core.Script {
     const applied = applyParams(
       Core.HexBlob(this.redeemCompiledCode),
-      bytes(tokenNameHex),
-      bytes(policyId),
+      serialize(ByteArray, tokenNameHex),
+      serialize(ByteArray, policyId),
     );
     return cborToScript(applied, LANGUAGE_VERSION);
   }
@@ -292,14 +293,11 @@ export class GiftCardContract {
       seedRef,
     );
 
-    // Remember the seed reference + token name in the inline datum so `redeem`
-    // can rebuild the parameterised scripts from just the on-chain UTxO. The
-    // validator itself ignores the datum — burning the token is the auth.
-    const datum = constr(0, [
-      bytes(seedRef.txHash),
-      int(seedRef.outputIndex),
-      bytes(tokenNameHex),
-    ]);
+    const datum = serialize(GiftCardDatum, {
+      seedTxHash: seedRef.txHash,
+      seedOutputIndex: BigInt(seedRef.outputIndex),
+      tokenName: tokenNameHex,
+    });
 
     const tx = await this.blaze
       .newTransaction()
@@ -307,7 +305,7 @@ export class GiftCardContract {
       .addMint(
         Core.PolicyId(policyId),
         new Map([[Core.AssetName(tokenNameHex), 1n]]),
-        MINT(),
+        serialize(Action, "Mint"),
       )
       .provideScript(giftCardScript)
       .lockAssets(
@@ -348,12 +346,13 @@ export class GiftCardContract {
 
     return this.blaze
       .newTransaction()
-      .addInput(giftCardUtxo, UNIT_REDEEMER())
+      // The redeem validator ignores its redeemer: burning the token is the auth.
+      .addInput(giftCardUtxo, Void())
       .provideScript(redeemScript)
       .addMint(
         Core.PolicyId(policyId),
         new Map([[Core.AssetName(tokenNameHex), -1n]]),
-        BURN(),
+        serialize(Action, "Burn"),
       )
       .provideScript(giftCardScript)
       .complete();
