@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
 
 import { config as loadDotenv } from "dotenv";
-import { MeshWallet, YaciProvider } from "@meshsdk/core";
+import { MeshWallet } from "@meshsdk/core";
 import { describe, expect, it } from "vitest";
 
 import { GiftCardContract, hasBundledBlueprint } from "./contract.js";
+import { YaciProvider } from "./yaci-provider.js";
 
 // End-to-end integration test: a full mint→lock→redeem round-trip against a
 // real local devnet (Yaci DevKit). It is gated so it runs ONLY when a devnet is

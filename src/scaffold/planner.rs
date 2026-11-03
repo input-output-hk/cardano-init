@@ -551,8 +551,8 @@ mod tests {
         let sel = selection(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
         let plan = plan(&sel, &registry()).unwrap();
 
-        // base 6 + blueprint marker 1 + aiken 4 + meshjs 11 + spec 2
-        assert_eq!(plan.entries.len(), 24);
+        // base 6 + blueprint marker 1 + aiken 4 + meshjs 13 + spec 2
+        assert_eq!(plan.entries.len(), 26);
     }
 
     #[test]
