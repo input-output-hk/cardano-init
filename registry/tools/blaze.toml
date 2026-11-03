@@ -22,9 +22,7 @@ detect = [{ file = "package.json", contains = "@blaze-cardano" }]
 template = "blaze/off-chain"
 
 # Blaze connects through its Blockfrost or Kupmios (Kupo + Ogmios) providers.
-# A UTxORPC provider exists (`@utxorpc/blaze-provider`), but its latest release
-# (0.3.9) pins @blaze-cardano/core ^0.8 / sdk ^0.2, not the core 0.10 / sdk 0.3
-# this template uses, so `u5c` is deliberately not consumed and a UTxORPC-only
-# provider such as Dolos can't feed it.
+# It has no compatible UTxORPC provider yet, so it cannot use a UTxORPC-only
+# provider such as Dolos.
 [compat]
 consumes = ["blockfrost", "kupo", "ogmios"]

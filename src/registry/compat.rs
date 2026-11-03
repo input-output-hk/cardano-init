@@ -245,8 +245,7 @@ mod tests {
     #[test]
     fn blaze_with_dolos_infra_is_incompatible() {
         let reg = registry();
-        // Blaze's UTxORPC provider pins an older Blaze core than the template
-        // uses, so Dolos (u5c only) can't feed it yet.
+        // Blaze has no compatible UTxORPC provider, so Dolos (u5c only) can't feed it.
         let sel = vec![a(Role::OffChain, "blaze"), a(Role::Infrastructure, "dolos")];
         let inc = check(&sel, &reg).expect("blaze + dolos infra should be incompatible");
         assert_eq!(inc.off_chain_id, "blaze");
