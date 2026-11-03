@@ -14,7 +14,7 @@
 #
 # Invoked via `sh scripts/devnet-test.sh` (no exec bit; see the interface
 # contract). Yaci DevKit supports Linux x64 and macOS arm64 (not Windows).
-set -u
+set -eu
 
 API_URL="http://localhost:8080/api/v1/"
 LOG=".yaci-devnet.log"
@@ -34,6 +34,10 @@ fi
 DEVNET_PID=""
 teardown() {
   status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "Recent devnet log:"
+    tail -n 80 "$LOG" 2>/dev/null || true
+  fi
   echo "Tearing down the ephemeral devnet ..."
   # The npm yaci-devkit CLI has no `down`/`stop` command. killing the process tree.
   if [ -n "$DEVNET_PID" ]; then kill "$DEVNET_PID" >/dev/null 2>&1 || true; fi
@@ -46,20 +50,37 @@ echo "Starting ephemeral Yaci devnet (logs: $LOG) ..."
 nohup yaci-devkit up --enable-yaci-store >"$LOG" 2>&1 &
 DEVNET_PID=$!
 
-echo "Waiting for the devnet API to serve (up to 150s) ..."
+echo "Waiting for the devnet node and indexer to advance (up to 150s) ..."
 node -e "
 const url = '${API_URL}blocks/latest';
+const adminUrl = 'http://localhost:10000/local-cluster/api/admin/devnet/tip';
 const deadline = Date.now() + 150000;
+let firstHeight;
 const probe = async () => {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (res.ok) process.exit(0);
+    const [res, admin] = await Promise.all([
+      fetch(url, { signal: AbortSignal.timeout(5000) }),
+      fetch(adminUrl, { signal: AbortSignal.timeout(5000) }),
+    ]);
+    if (res.ok && admin.ok) {
+      const block = await res.json();
+      const { tips } = await admin.json();
+      const tip = tips?.find((value) => value.nodeName === 'node-1');
+      if (Number.isInteger(tip?.blockNumber) && tip.blockNumber >= 0 &&
+          Number.isInteger(block.height) && block.height >= 0) {
+        firstHeight ??= tip.blockNumber;
+        // HTTP 200 (including a genesis/bootstrapped tip) is not readiness:
+        // wait for the live node to forge and the indexer to catch up before
+        // using the faucet's local-node query/submission connection.
+        if (tip.blockNumber > firstHeight && block.height >= firstHeight) process.exit(0);
+      }
+    }
   } catch {}
-  if (Date.now() > deadline) { console.error('timed out waiting for the devnet API'); process.exit(1); }
+  if (Date.now() > deadline) { console.error('timed out waiting for the devnet node and indexer'); process.exit(1); }
   setTimeout(probe, 3000);
 };
 probe();
-" || { echo "✗ Devnet did not become ready. Recent log:"; tail -n 30 "$LOG" 2>/dev/null || true; exit 1; }
+" || { echo "✗ Devnet did not become ready."; exit 1; }
 
 # Devnet is up. Point the test at it explicitly (overrides ../.env) and run the
 # standalone smoke test.

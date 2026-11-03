@@ -472,6 +472,23 @@ mod tests {
     }
 
     #[test]
+    fn scan_identifies_lucid_evolution() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("off-chain")).unwrap();
+        fs::write(
+            root.join("off-chain/package.json"),
+            r#"{ "dependencies": { "@lucid-evolution/lucid": "^0.8.9" } }"#,
+        )
+        .unwrap();
+
+        let result = scan_project(root, &registry());
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(result.components[0].tool_id, "lucid-evolution");
+        assert!(result.unrecognized.is_empty());
+    }
+
+    #[test]
     fn scan_identifies_blaze() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();

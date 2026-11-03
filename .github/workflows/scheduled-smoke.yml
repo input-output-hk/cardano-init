@@ -45,12 +45,21 @@ jobs:
           - variant: meshjs
             tool: meshjs
             flags: --off-chain meshjs
+          - variant: lucid-evolution
+            tool: lucid-evolution
+            flags: --off-chain lucid-evolution
+          # With an Aiken blueprint, Lucid Evolution's unit tests run the full
+          # gift-card round-trip on its in-memory Emulator (no devnet needed),
+          # so this variant proves the blueprint seam end to end.
+          - variant: aiken-lucid-evolution
+            tool: lucid-evolution
+            aiken: true
+            flags: --on-chain aiken --off-chain lucid-evolution
           - variant: blaze
             tool: blaze
             flags: --off-chain blaze
-          # With an Aiken blueprint, Blaze's unit tests run the full gift-card
-          # round-trip on its in-memory Emulator (no devnet needed), so this
-          # variant proves the blueprint seam end to end.
+          # Same for Blaze: its Emulator runs the gift-card round-trip against
+          # the Aiken blueprint.
           - variant: aiken-blaze
             tool: blaze
             aiken: true
@@ -84,7 +93,7 @@ jobs:
           version: v1.1.21
 
       - name: Install Node
-        if: matrix.tool == 'meshjs' || matrix.tool == 'blaze'
+        if: matrix.tool == 'meshjs' || matrix.tool == 'lucid-evolution' || matrix.tool == 'blaze'
         uses: actions/setup-node@v5
         with:
           node-version: 20

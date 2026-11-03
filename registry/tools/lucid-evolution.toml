@@ -1,0 +1,32 @@
+[tool]
+id = "lucid-evolution"
+name = "Lucid Evolution"
+description = """\
+A TypeScript framework for building, signing, and submitting Cardano \
+transactions, maintained by Anastasia Labs. Lucid Evolution bundles wallet \
+and provider integrations (Blockfrost, Kupmios, Maestro, Koios), Plutus \
+helpers, and an in-memory emulator for testing transaction logic without a \
+chain — a good fit for dApp backends and frontends."""
+website = "https://anastasia-labs.github.io/lucid-evolution/"
+community = [
+  { name = "GitHub Issues", url = "https://github.com/Anastasia-Labs/lucid-evolution/issues" },
+]
+languages = ["typescript"]
+system_deps = ["node"]
+nix_packages = ["nodejs"]
+# A package.json alone is ambiguous (any JS project has one); require the
+# Lucid Evolution dependency so foreign projects read as "unrecognized" instead.
+detect = [{ file = "package.json", contains = "@lucid-evolution" }]
+
+[roles.off-chain]
+template = "lucid-evolution/off-chain"
+
+# Lucid Evolution connects through its Blockfrost or Kupmios (Kupo + Ogmios)
+# providers. A UTxORPC provider exists (`@utxorpc/lucid-evolution-provider`),
+# but it is unmaintained (last release 0.1.7, Sep 2025) and pins Lucid 0.4.x:
+# it is not compatible with the Lucid 0.8.x this template uses (cost models in
+# the old shape; fails to load under Node's ESM resolver). So `u5c` is
+# deliberately not consumed, and a UTxORPC-only provider such as Dolos can't
+# feed it.
+[compat]
+consumes = ["blockfrost", "kupo", "ogmios"]
