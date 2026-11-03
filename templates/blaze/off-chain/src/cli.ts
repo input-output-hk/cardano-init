@@ -8,6 +8,9 @@ import {
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** How long `redeem` waits for the gift-card UTxO to appear. */
+const REDEEM_WAIT_MS = 180_000;
+
 // Runnable entry point for `just dev` / `npm start` and the `create` / `redeem`
 // commands. It submits real transactions when the blueprint is bundled and the
 // required environment variables are present, and degrades to guidance
@@ -98,15 +101,18 @@ async function redeem(redeemAddress: string): Promise<void> {
   const env = requireEnv();
   const { contract } = await createGiftCardContractFromEnv({ env });
 
-  // Wait for the create tx to be indexed, then locate the gift-card UTxO.
+  // Wait for the create tx to be confirmed and indexed (a public testnet block
+  // can take a minute or more), then locate the gift-card UTxO.
+  const deadline = Date.now() + REDEEM_WAIT_MS;
   let giftCardUtxo = await contract.getGiftCardUtxoAt(redeemAddress);
-  for (let i = 0; giftCardUtxo === undefined && i < 60; i++) {
-    await wait(1000);
+  while (giftCardUtxo === undefined && Date.now() < deadline) {
+    await wait(3000);
     giftCardUtxo = await contract.getGiftCardUtxoAt(redeemAddress);
   }
   if (giftCardUtxo === undefined) {
     throw new Error(
-      `No gift-card UTxO (output with an inline datum) found at ${redeemAddress}.`,
+      `No gift-card UTxO found at ${redeemAddress} after ${REDEEM_WAIT_MS / 1000}s. ` +
+        "Check that the create tx is confirmed, then retry.",
     );
   }
 

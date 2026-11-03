@@ -143,8 +143,44 @@ const MINT = () => constr(0);
 const BURN = () => constr(1);
 const UNIT_REDEEMER = () => constr(0);
 
+/**
+ * Read back what `createGiftCard` stored in the inline datum:
+ * Constr 0 [seed tx hash, seed output index, token name].
+ */
+function parseGiftCardDatum(utxo: Core.TransactionUnspentOutput): {
+  seed: SeedUtxo;
+  tokenNameHex: string;
+} {
+  const invalid = new Error("Gift-card UTxO has no inline datum of the expected shape.");
+  const fields = utxo.output().datum()?.asInlineData()?.asConstrPlutusData()?.getData();
+  if (fields?.getLength() !== 3) throw invalid;
+  const txHash = fields.get(0).asBoundedBytes();
+  const index = fields.get(1).asInteger();
+  const tokenName = fields.get(2).asBoundedBytes();
+  if (!txHash || index === undefined || !tokenName) throw invalid;
+  return {
+    seed: { txHash: Core.toHex(txHash), outputIndex: Number(index) },
+    tokenNameHex: Core.toHex(tokenName),
+  };
+}
+
 /** Anything Blaze can build with: any provider, any wallet. */
 export type AnyBlaze = Blaze<Provider, Wallet>;
+
+/**
+ * Blockfrost answers 404 for an address that has never been used. Treat that
+ * as "no UTxOs yet", so a fresh wallet or script address can be polled.
+ */
+async function emptyIfNotFound(
+  query: Promise<Core.TransactionUnspentOutput[]>,
+): Promise<Core.TransactionUnspentOutput[]> {
+  try {
+    return await query;
+  } catch (err) {
+    if ((err as { status?: number }).status === 404) return [];
+    throw err;
+  }
+}
 
 /**
  * Minimal core: derive the parameterised scripts, policy id, and redeem address
@@ -239,7 +275,7 @@ export class GiftCardContract {
     tokenName: string,
     giftLovelace: bigint,
   ): Promise<GiftCardCreation> => {
-    const utxos = await this.blaze.wallet.getUnspentOutputs();
+    const utxos = await emptyIfNotFound(this.blaze.wallet.getUnspentOutputs());
     // Seed with a pure-ADA UTxO so the one-shot input doesn't drag tokens along.
     const seed =
       utxos.find((u) => (u.output().amount().multiasset()?.size ?? 0) === 0) ??
@@ -293,8 +329,8 @@ export class GiftCardContract {
   getGiftCardUtxoAt = async (
     redeemAddress: string,
   ): Promise<Core.TransactionUnspentOutput | undefined> => {
-    const utxos = await this.blaze.provider.getUnspentOutputs(
-      Core.addressFromBech32(redeemAddress),
+    const utxos = await emptyIfNotFound(
+      this.blaze.provider.getUnspentOutputs(Core.addressFromBech32(redeemAddress)),
     );
     return utxos.find((u) => u.output().datum()?.asInlineData() !== undefined);
   };
@@ -307,19 +343,8 @@ export class GiftCardContract {
   redeemGiftCard = async (
     giftCardUtxo: Core.TransactionUnspentOutput,
   ): Promise<Core.Transaction> => {
-    const datum = giftCardUtxo.output().datum()?.asInlineData();
-    const fields = datum?.asConstrPlutusData()?.getData();
-    if (!fields || fields.getLength() !== 3) {
-      throw new Error("Gift-card UTxO has no inline datum of the expected shape.");
-    }
-    const seedTxHash = Core.toHex(fields.get(0).asBoundedBytes()!);
-    const seedIndex = fields.get(1).asInteger()!;
-    const tokenNameHex = Core.toHex(fields.get(2).asBoundedBytes()!);
-
-    const { giftCardScript, redeemScript, policyId } = this.scriptsFor(tokenNameHex, {
-      txHash: seedTxHash,
-      outputIndex: Number(seedIndex),
-    });
+    const { seed, tokenNameHex } = parseGiftCardDatum(giftCardUtxo);
+    const { giftCardScript, redeemScript, policyId } = this.scriptsFor(tokenNameHex, seed);
 
     return this.blaze
       .newTransaction()

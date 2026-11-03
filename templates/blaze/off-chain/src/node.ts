@@ -14,7 +14,7 @@ import {
   type Wallet,
 } from "@blaze-cardano/sdk";
 
-import { GiftCardContract, type AnyBlaze } from "./contract.js";
+import { GiftCardContract } from "./contract.js";
 
 // Node-only helpers: reading configuration from the environment and wiring up a
 // provider + wallet into a Blaze instance. Importing this in a browser bundle
@@ -232,7 +232,7 @@ export async function createGiftCardContractFromEnv(options: {
 }> {
   const { env } = options;
   const blaze = await createBlaze(env);
-  const contract = new GiftCardContract({ blaze: blaze as AnyBlaze });
+  const contract = new GiftCardContract({ blaze });
   return { contract, blaze, provider: env.provider };
 }
 

@@ -4,7 +4,7 @@ import { config as loadDotenv } from "dotenv";
 import { Core } from "@blaze-cardano/sdk";
 import { describe, expect, it } from "vitest";
 
-import { GiftCardContract, hasBundledBlueprint, type AnyBlaze } from "./contract.js";
+import { GiftCardContract, hasBundledBlueprint } from "./contract.js";
 import {
   createBlaze,
   createReadOnlyBlaze,
@@ -66,7 +66,7 @@ const env: GiftCardEnv = {
     "mints + locks a gift card, then redeems it",
     async () => {
       const blaze = await createBlaze(env);
-      const contract = new GiftCardContract({ blaze: blaze as AnyBlaze });
+      const contract = new GiftCardContract({ blaze });
 
       // Fund from the faucet: a small UTxO usable as collateral + a large one to
       // spend. NOTE: Yaci's topup amount is in ADA, not lovelace. Wait until both
@@ -83,7 +83,7 @@ const env: GiftCardEnv = {
       // A backend builds it with a read-only wallet (the user's address, no
       // keys); the user's wallet signs and submits.
       const readOnly = await createReadOnlyBlaze(env, address);
-      const backend = new GiftCardContract({ blaze: readOnly as AnyBlaze });
+      const backend = new GiftCardContract({ blaze: readOnly });
       const { txCbor, redeemAddress } = await backend.createGiftCard(
         "IntegrationGift",
         5_000_000n,
