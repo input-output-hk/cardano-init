@@ -17,7 +17,7 @@ community = [
   { name = "GitHub Discussions", url = "https://github.com/bloxbean/yaci-devkit/discussions" },
 ]
 languages = ["typescript"]
-system_deps = ["docker", "node"]
+system_deps = ["node", "yaci-devkit"]
 nix_packages = []
 detect = [{ file = "scripts/set-env.mjs", contains = "Yaci" }]
 
