@@ -9,7 +9,7 @@
 #     layer skips and exits 0. Green, but proving nothing.
 #
 # This job installs yaci-devkit for real, scaffolds a fullstack project
-# (aiken on-chain → blueprint → meshjs off-chain → yaci devnet), and runs the
+# (aiken on-chain → blueprint → each off-chain in the matrix → yaci devnet), and runs the
 # whole thing under CARDANO_INIT_REQUIRE_DEVNET=1, which turns every graceful
 # skip into a hard failure. So a green run here MEANS: the devnet came up, the
 # indexer served the chain, and the off-chain mint→lock→redeem round-trip
@@ -35,12 +35,17 @@ permissions:
 
 jobs:
   devnet:
-    name: yaci devnet end-to-end
+    name: yaci devnet end-to-end (${{ matrix.off_chain }})
     # Schedule and manual runs always run; PR runs only for our opt-in label
     # (a `labeled` event fires for every label, so filter to ours).
     if: github.event_name != 'pull_request' || github.event.label.name == 'run-devnet-smoke'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false # one off-chain breaking must not mask the other
+      matrix:
+        # Each off-chain tool that reaches the devnet over the `.env` seam.
+        off_chain: [meshjs, lucid-evolution, blaze]
     outputs:
       failed: ${{ steps.failed.outputs.failed }}
     steps:
@@ -52,7 +57,7 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
 
-      # Off-chain (meshjs) + the yaci-devkit CLI both run on Node.
+      # The off-chain component + the yaci-devkit CLI both run on Node.
       - name: Install Node
         uses: actions/setup-node@v5
         with:
@@ -72,18 +77,26 @@ jobs:
           version: v1.1.21
 
       - name: Install yaci-devkit
-        run: npm install -g @bloxbean/yaci-devkit
+        id: yaci
+        run: |
+          npm install -g @bloxbean/yaci-devkit
+          npm list -g @bloxbean/yaci-devkit
+          devkit_version=$(npm list -g @bloxbean/yaci-devkit --json | node -pe 'JSON.parse(require("fs").readFileSync(0, "utf8")).dependencies["@bloxbean/yaci-devkit"].version')
+          echo "version=$devkit_version" >> "$GITHUB_OUTPUT"
 
-      # The first `yaci-devkit up` downloads a cardano-node into ~/.yaci-cli;
-      # cache it so subsequent runs skip the (large) download.
-      - name: Cache yaci-cli node download
+      # Cache downloads only, never local-clusters, generated configuration or
+      # PID files. A new DevKit release needs its matching component binaries;
+      # restoring the old unversioned cache can break submit-api at startup.
+      - name: Cache yaci-cli downloads
         uses: actions/cache@v4
         with:
-          path: ~/.yaci-cli
-          key: yaci-cli-${{ runner.os }}
+          path: |
+            ~/.yaci-cli/cardano-node
+            ~/.yaci-cli/components
+          key: yaci-downloads-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.yaci.outputs.version }}
 
       - name: Scaffold a fullstack project in isolation
-        run: cargo run --quiet -- --name devnet-smoke --on-chain aiken --off-chain meshjs --devnet yaci
+        run: cargo run --quiet -- --name devnet-smoke --on-chain aiken --off-chain ${{ matrix.off_chain }} --devnet yaci
 
       - name: Build & run the end-to-end devnet smoke
         working-directory: devnet-smoke
@@ -97,7 +110,22 @@ jobs:
           CARDANO_INIT_REQUIRE_DEVNET: "1"
         run: |
           just build
+          if [ "${{ matrix.off_chain }}" = meshjs ]; then
+            npm --prefix off-chain ls @meshsdk/core @meshsdk/provider @meshsdk/transaction
+          fi
           just test
+
+      - name: Preserve devnet diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devnet-diagnostics-${{ matrix.off_chain }}
+          include-hidden-files: true
+          path: |
+            devnet-smoke/devnet/.yaci-devnet.log
+            devnet-smoke/off-chain/package-lock.json
+          if-no-files-found: ignore
+          retention-days: 14
 
       # Set only when a step failed or the job timed out. A lost runner runs no
       # steps, so it leaves this unset and doesn't file an issue.

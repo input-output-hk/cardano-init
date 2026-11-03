@@ -107,11 +107,11 @@ The seams today:
 
 | Seam | Wire protocol | Served by | Consumed by |
 |---|---|---|---|
-| `blockfrost` | Blockfrost-compatible REST | Yaci, Dingo | Evolution, Mesh, Scalus |
+| `blockfrost` | Blockfrost-compatible REST | Yaci, Dingo | Blaze, Evolution, Lucid Evolution, Mesh, Scalus |
 | `u5c` | UTxORPC (gRPC) | Dolos | Mesh |
 | `trp` | Tx3 Transaction Resolve Protocol | (self-hosted; Dolos/Demeter) | Tx3 |
-| `ogmios` | Ogmios JSON-RPC | Ogmios | Evolution, Mesh |
-| `kupo` | Kupo HTTP | Kupo | Evolution |
+| `ogmios` | Ogmios JSON-RPC | Ogmios | Blaze, Evolution, Lucid Evolution, Mesh |
+| `kupo` | Kupo HTTP | Kupo | Blaze, Evolution, Lucid Evolution |
 
 `ogmios` + `kupo` together form a **Kupmios** provider; an off-chain tool that uses Kupmios lists both, and a match on either counts as usable (so a partial selection is allowed, not force-completed).
 

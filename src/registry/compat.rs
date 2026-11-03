@@ -225,6 +225,69 @@ mod tests {
     }
 
     #[test]
+    fn lucid_evolution_with_yaci_is_compatible() {
+        let reg = registry();
+        let sel = vec![
+            a(Role::OffChain, "lucid-evolution"),
+            a(Role::Devnet, "yaci"),
+        ];
+        assert!(check(&sel, &reg).is_none());
+    }
+
+    #[test]
+    fn lucid_evolution_with_kupmios_is_compatible() {
+        let reg = registry();
+        let sel = vec![
+            a(Role::OffChain, "lucid-evolution"),
+            a(Role::Infrastructure, "kupo"),
+            a(Role::Infrastructure, "ogmios"),
+        ];
+        assert!(check(&sel, &reg).is_none());
+    }
+
+    #[test]
+    fn lucid_evolution_with_dolos_infra_is_incompatible() {
+        let reg = registry();
+        // Lucid Evolution's UTxORPC provider only supports Lucid 0.4.x (the
+        // template uses 0.8.x), so Dolos (u5c only) can't feed it yet.
+        let sel = vec![
+            a(Role::OffChain, "lucid-evolution"),
+            a(Role::Infrastructure, "dolos"),
+        ];
+        let inc = check(&sel, &reg).expect("lucid-evolution + dolos infra should be incompatible");
+        assert_eq!(inc.off_chain_id, "lucid-evolution");
+        assert!(inc.providers.iter().any(|p| p.id == "dolos"));
+    }
+
+    #[test]
+    fn blaze_with_yaci_is_compatible() {
+        let reg = registry();
+        let sel = vec![a(Role::OffChain, "blaze"), a(Role::Devnet, "yaci")];
+        assert!(check(&sel, &reg).is_none());
+    }
+
+    #[test]
+    fn blaze_with_kupmios_is_compatible() {
+        let reg = registry();
+        let sel = vec![
+            a(Role::OffChain, "blaze"),
+            a(Role::Infrastructure, "kupo"),
+            a(Role::Infrastructure, "ogmios"),
+        ];
+        assert!(check(&sel, &reg).is_none());
+    }
+
+    #[test]
+    fn blaze_with_dolos_infra_is_incompatible() {
+        let reg = registry();
+        // Blaze has no compatible UTxORPC provider, so Dolos (u5c only) can't feed it.
+        let sel = vec![a(Role::OffChain, "blaze"), a(Role::Infrastructure, "dolos")];
+        let inc = check(&sel, &reg).expect("blaze + dolos infra should be incompatible");
+        assert_eq!(inc.off_chain_id, "blaze");
+        assert!(inc.providers.iter().any(|p| p.id == "dolos"));
+    }
+
+    #[test]
     fn tx3_with_yaci_is_incompatible() {
         let reg = registry();
         let sel = vec![a(Role::OffChain, "tx3"), a(Role::Devnet, "yaci")];

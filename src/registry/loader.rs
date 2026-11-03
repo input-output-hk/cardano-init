@@ -322,9 +322,10 @@ mod tests {
 
     #[test]
     fn load_tool_count() {
-        // aiken, plinth, plutarch, scalus, meshjs, evolution, tx3, yaci, blaster + infra:
-        // kupo, ogmios, dolos, tx-submit-api, cardano-node, cardano-node-api, dingo
-        assert_eq!(registry().all_tools().len(), 16);
+        // aiken, plinth, plutarch, scalus, meshjs, evolution, lucid-evolution, blaze,
+        // tx3, yaci, blaster + infra: kupo, ogmios, dolos, tx-submit-api, cardano-node,
+        // cardano-node-api, dingo
+        assert_eq!(registry().all_tools().len(), 18);
     }
 
     #[test]
@@ -352,7 +353,14 @@ mod tests {
     fn tools_for_role_off_chain() {
         assert_eq!(
             sorted_ids_for_role(&registry(), Role::OffChain),
-            vec!["evolution", "meshjs", "scalus", "tx3"]
+            vec![
+                "blaze",
+                "evolution",
+                "lucid-evolution",
+                "meshjs",
+                "scalus",
+                "tx3"
+            ]
         );
     }
 

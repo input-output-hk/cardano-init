@@ -524,6 +524,38 @@ mod tests {
     }
 
     #[test]
+    fn lucid_evolution_off_chain_entries() {
+        assert_plan_contains(
+            &selection(vec![a(Role::OffChain, "lucid-evolution")]),
+            &[
+                "off-chain/package.json",
+                "off-chain/Justfile",
+                "off-chain/src/index.ts",
+                "off-chain/src/contract.ts",
+                "off-chain/src/node.ts",
+                "off-chain/scripts/bundle-blueprint.mjs",
+            ],
+        );
+    }
+
+    #[test]
+    fn blaze_off_chain_entries() {
+        assert_plan_contains(
+            &selection(vec![a(Role::OffChain, "blaze")]),
+            &[
+                "off-chain/package.json",
+                "off-chain/Justfile",
+                "off-chain/src/index.ts",
+                "off-chain/src/contract.ts",
+                "off-chain/src/node.ts",
+                "off-chain/src/contract.test.ts",
+                "off-chain/src/contract.integration.test.ts",
+                "off-chain/scripts/bundle-blueprint.mjs",
+            ],
+        );
+    }
+
+    #[test]
     fn plan_order_is_canonical_regardless_of_input_order() {
         let forward = selection(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
         let reversed = selection(vec![a(Role::OffChain, "meshjs"), a(Role::OnChain, "aiken")]);
@@ -551,8 +583,8 @@ mod tests {
         let sel = selection(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
         let plan = plan(&sel, &registry()).unwrap();
 
-        // base 6 + blueprint marker 1 + aiken 4 + meshjs 11 + spec 2
-        assert_eq!(plan.entries.len(), 24);
+        // base 6 + blueprint marker 1 + aiken 4 + meshjs 13 + spec 2
+        assert_eq!(plan.entries.len(), 26);
     }
 
     #[test]
