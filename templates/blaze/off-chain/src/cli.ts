@@ -11,6 +11,27 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** How long `redeem` waits for the gift-card UTxO to appear. */
 const REDEEM_WAIT_MS = 180_000;
 
+/**
+ * Build a transaction, retrying while the provider's script evaluator catches
+ * up. Blockfrost can report a transaction as confirmed a few seconds before its
+ * evaluator knows the new outputs, so spending fresh outputs (e.g. right after
+ * the previous `create` or `redeem`) briefly fails with "evaluation failure".
+ */
+async function buildWithEvaluationRetry<T>(build: () => Promise<T>): Promise<T> {
+  const attempts = 6;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await build();
+    } catch (err) {
+      const evaluationFailed =
+        err instanceof Error && err.message.includes("evaluation failure");
+      if (!evaluationFailed || attempt === attempts) throw err;
+      console.log("Script evaluation failed; the provider may still be indexing. Retrying in 10s…");
+      await wait(10_000);
+    }
+  }
+}
+
 // Runnable entry point for `just dev` / `npm start` and the `create` / `redeem`
 // commands. It submits real transactions when the blueprint is bundled and the
 // required environment variables are present, and degrades to guidance
@@ -84,9 +105,8 @@ async function create(tokenName: string, lovelace: string): Promise<void> {
     }
   }
 
-  const { tx, redeemAddress } = await contract.createGiftCard(
-    tokenName,
-    BigInt(lovelace),
+  const { tx, redeemAddress } = await buildWithEvaluationRetry(() =>
+    contract.createGiftCard(tokenName, BigInt(lovelace)),
   );
   const txHash = await contract.signAndSubmit(tx);
 
@@ -116,7 +136,7 @@ async function redeem(redeemAddress: string): Promise<void> {
     );
   }
 
-  const tx = await contract.redeemGiftCard(giftCardUtxo);
+  const tx = await buildWithEvaluationRetry(() => contract.redeemGiftCard(giftCardUtxo));
   const txHash = await contract.signAndSubmit(tx);
 
   console.log("Gift card redeemed; assets released to your wallet.");
