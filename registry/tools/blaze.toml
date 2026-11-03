@@ -5,7 +5,7 @@ description = """\
 A TypeScript library for building Cardano transactions and off-chain \
 application logic, maintained by Butane Protocol. Blaze's SDK combines a \
 transaction builder with wallets (hot, cold, CIP-30), providers (Blockfrost, \
-Kupmios, Maestro), helpers for applying parameters to compiled Plutus scripts, \
+Kupmios), helpers for applying parameters to compiled Plutus scripts, \
 and an in-memory emulator for testing transaction logic without a chain."""
 website = "https://blaze.butane.dev"
 community = [

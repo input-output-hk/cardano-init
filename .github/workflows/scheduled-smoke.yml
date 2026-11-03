@@ -58,8 +58,6 @@ jobs:
           - variant: blaze
             tool: blaze
             flags: --off-chain blaze
-          # Same for Blaze: its Emulator runs the gift-card round-trip against
-          # the Aiken blueprint.
           - variant: aiken-blaze
             tool: blaze
             aiken: true
@@ -92,8 +90,9 @@ jobs:
           #Keep this in lockstep with templates/aiken/on-chain/aiken.toml.jinja.
           version: v1.1.21
 
+      # The TypeScript off-chain tools all build on Node.
       - name: Install Node
-        if: matrix.tool == 'meshjs' || matrix.tool == 'lucid-evolution' || matrix.tool == 'blaze'
+        if: contains(fromJSON('["meshjs", "lucid-evolution", "blaze"]'), matrix.tool)
         uses: actions/setup-node@v5
         with:
           node-version: 20
