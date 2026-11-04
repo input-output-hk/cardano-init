@@ -6,6 +6,8 @@
     { "variant": "aiken-lucid-evolution", "toolchain": "lucid-evolution", "aiken": true, "flags": "--on-chain aiken --off-chain lucid-evolution", "tools": ["aiken", "lucid-evolution"] },
     { "variant": "blaze", "toolchain": "blaze", "flags": "--off-chain blaze", "tools": ["blaze"] },
     { "variant": "aiken-blaze", "toolchain": "blaze", "aiken": true, "flags": "--on-chain aiken --off-chain blaze", "tools": ["aiken", "blaze"] },
+    { "variant": "apollo", "toolchain": "apollo", "flags": "--off-chain apollo", "tools": ["apollo"] },
+    { "variant": "aiken-apollo", "toolchain": "apollo", "aiken": true, "flags": "--on-chain aiken --off-chain apollo", "tools": ["aiken", "apollo"] },
     { "variant": "evolution", "toolchain": "evolution", "flags": "--off-chain evolution", "tools": ["evolution"] },
     { "variant": "aiken-evolution", "toolchain": "evolution", "aiken": true, "flags": "--on-chain aiken --off-chain evolution", "tools": ["aiken", "evolution"] },
     { "variant": "scalus-on-chain", "toolchain": "scalus", "flags": "--on-chain scalus", "tools": ["scalus"] },
@@ -17,6 +19,7 @@
   "devnet": [
     { "off_chain": "meshjs", "tools": ["aiken", "meshjs", "yaci"] },
     { "off_chain": "lucid-evolution", "tools": ["aiken", "lucid-evolution", "yaci"] },
-    { "off_chain": "blaze", "tools": ["aiken", "blaze", "yaci"] }
+    { "off_chain": "blaze", "tools": ["aiken", "blaze", "yaci"] },
+    { "off_chain": "apollo", "tools": ["aiken", "apollo", "yaci"] }
   ]
 }

@@ -1,0 +1,66 @@
+[manifest]
+summary = "Apollo (Go) off-chain GiftCard package (importable) + a CLI to run create/redeem txs"
+
+[[files]]
+source = "go.mod.jinja"
+dest = "go.mod"
+
+[[files]]
+source = "go.sum"
+dest = "go.sum"
+
+[[files]]
+source = "Justfile.jinja"
+dest = "Justfile"
+
+[[files]]
+source = ".env.example"
+dest = ".env.example"
+
+[[files]]
+source = "gitignore"
+dest = ".gitignore"
+
+[[files]]
+source = "giftcard/contract.go"
+dest = "giftcard/contract.go"
+
+[[files]]
+source = "giftcard/blueprint.go"
+dest = "giftcard/blueprint.go"
+
+[[files]]
+source = "giftcard/bundle/.gitkeep"
+dest = "giftcard/bundle/.gitkeep"
+
+[[files]]
+source = "giftcard/contract_test.go"
+dest = "giftcard/contract_test.go"
+
+[[files]]
+source = "giftcard/datum_test.go"
+dest = "giftcard/datum_test.go"
+
+[[files]]
+source = "internal/config/config.go.jinja"
+dest = "internal/config/config.go"
+
+[[files]]
+source = "internal/config/config_test.go"
+dest = "internal/config/config_test.go"
+
+[[files]]
+source = "internal/poll/poll.go"
+dest = "internal/poll/poll.go"
+
+[[files]]
+source = "internal/poll/poll_test.go"
+dest = "internal/poll/poll_test.go"
+
+[[files]]
+source = "e2e/roundtrip_test.go.jinja"
+dest = "e2e/roundtrip_test.go"
+
+[[files]]
+source = "cmd/giftcard/main.go.jinja"
+dest = "cmd/giftcard/main.go"

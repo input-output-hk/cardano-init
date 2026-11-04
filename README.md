@@ -156,7 +156,8 @@ Tools currently in the registry (✅ available · ⬜ planned· 🧪 experimenta
 | ✅ Plutarch | 🧪 Tx3 | | ✅ Tx Submit API | |
 | ⬜ Pebble | ✅ Lucid Evolution | | ✅ Cardano Node | |
 | ⬜ Opshin | ✅ Blaze | | ✅ Cardano Node API | |
-| | ⬜ Elm Cardano | | ✅ Dingo | |
+| | ✅ Apollo | | ✅ Dingo | |
+| | ⬜ Elm Cardano | | | |
 | | ⬜ PyCardano | | | |
 
 

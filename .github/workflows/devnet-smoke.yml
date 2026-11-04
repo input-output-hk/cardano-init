@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
-      fail-fast: false # one off-chain breaking must not mask the other
+      fail-fast: false # one off-chain breaking must not mask the others
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     outputs:
       failed: ${{ steps.failed.outputs.failed }}
@@ -76,11 +76,19 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
 
-      # The off-chain component + the yaci-devkit CLI both run on Node.
+      # The yaci-devkit CLI (and the TypeScript off-chain components) run on Node.
       - name: Install Node
         uses: actions/setup-node@v5
         with:
           node-version: 20
+
+      # The Apollo off-chain component is a Go module.
+      - name: Install Go
+        if: matrix.off_chain == 'apollo'
+        uses: actions/setup-go@v5
+        with:
+          # Keep in lockstep with templates/apollo/off-chain/go.mod.jinja.
+          go-version: "1.26.10"
 
       # yaci-cli / yaci-store are JVM services; the devkit needs a JDK on PATH.
       - name: Install JDK

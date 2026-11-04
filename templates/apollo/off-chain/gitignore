@@ -1,0 +1,4 @@
+# Blueprint copied in from ../blueprint/plutus.json by `just build` / `just test`.
+giftcard/bundle/plutus.json
+# Binaries from `go build -o bin/ ./...`.
+bin/
