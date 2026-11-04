@@ -132,6 +132,10 @@ install = [{ curl = "https://sh.rustup.rs" }, { nix = "cargo" }]
 binaries = ["go"]
 docs = "https://go.dev/doc/install"
 install = [{ brew = "go" }, { apt = "golang" }, { winget = "GoLang.Go" }, { nix = "go" }]
+support = [
+  { name = "gopls (Go language server)", url = "https://go.dev/gopls/" },
+  { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=golang.go" },
+]
 
 # --- catalog reference (no tool requires it today; see §9.1) ---
 

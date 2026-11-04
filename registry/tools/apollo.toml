@@ -1,0 +1,24 @@
+[tool]
+id = "apollo"
+name = "Apollo"
+description = """\
+A pure Go library for building Cardano transactions, on the Blink Labs \
+ledger packages (gouroboros, bursa, plutigo). Apollo has a fluent Conway \
+transaction builder with automatic coin selection, Plutus V1–V3 script \
+support, and several chain backends. Choose it for Go backends, bots, and \
+services that build and submit transactions."""
+website = "https://github.com/Salvionied/apollo"
+languages = ["go"]
+system_deps = ["go"]
+nix_packages = ["go"]
+# go.mod is generic; require the Apollo module so other Go projects read as
+# "unrecognized" instead.
+detect = [{ file = "go.mod", contains = "github.com/Salvionied/apollo" }]
+
+[roles.off-chain]
+template = "apollo/off-chain"
+
+# Apollo ships Blockfrost (→ Yaci Store, Dingo), Ogmios + Kupo, and UTxO RPC
+# (→ Dolos) backends, so it can consume any of those seams.
+[compat]
+consumes = ["blockfrost", "kupo", "ogmios", "u5c"]
