@@ -433,6 +433,14 @@ mod tests {
     }
 
     #[test]
+    fn required_deps_for_yaci_includes_its_cli() {
+        let registry = Registry::load().unwrap();
+        let deps = required_deps(["yaci"].into_iter(), &registry);
+        assert!(deps.contains(&"yaci-devkit".to_string()));
+        assert!(deps.contains(&"node".to_string()));
+    }
+
+    #[test]
     fn required_deps_resolves_infra_driver_to_union() {
         let registry = Registry::load().unwrap();
         let deps = required_deps([doctor::INFRA_DRIVER_ID].into_iter(), &registry);

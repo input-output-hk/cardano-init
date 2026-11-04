@@ -89,6 +89,14 @@ support = [
   { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=haskell.haskell" },
 ]
 
+# The Yaci DevKit CLI, which the Yaci devnet template's `just dev` and `just test`
+# call. Distributed on npm (Linux x64 and macOS arm64), so `doctor` installs Node
+# first when it is missing.
+[yaci-devkit]
+binaries = ["yaci-devkit"]
+docs = "https://devkit.yaci.xyz"
+install = [{ npm = "@bloxbean/yaci-devkit" }]
+
 # --- installer-provider deps (reached via installer `bootstrap` lists) ---
 
 [aikup]
