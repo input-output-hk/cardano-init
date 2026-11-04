@@ -76,6 +76,14 @@ jobs:
         with:
           node-version: 20
 
+      # Apollo is a Go module.
+      - name: Install Go
+        if: matrix.toolchain == 'apollo'
+        uses: actions/setup-go@v5
+        with:
+          # Keep in lockstep with templates/apollo/off-chain/go.mod.jinja.
+          go-version: "1.26.10"
+
       # Scalus templates are Scala 3 / sbt builds: they need a JDK and sbt.
       - name: Install JDK
         if: matrix.toolchain == 'scalus'
