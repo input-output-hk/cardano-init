@@ -3,7 +3,7 @@
 # Purpose: prove the one build-green role that no other job exercises — the
 # Yaci DevKit *devnet* — actually works end to end, and that the devnet↔off-chain
 # `.env` seam connects. Every other gate leaves this role untested:
-#   • scheduled-smoke.yml intentionally EXCLUDES yaci (its `just` targets that a
+#   • tool-smoke.yml intentionally EXCLUDES yaci (its `just` targets that a
 #     no-op runner sees only echo), so nothing builds/tests the devnet role.
 #   • The template degrades gracefully — with no yaci-devkit installed, every
 #     layer skips and exits 0. Green, but proving nothing.
@@ -15,37 +15,56 @@
 # indexer served the chain, and the off-chain mint→lock→redeem round-trip
 # executed against it — never a vacuous skip.
 #
-# Like scheduled-smoke/installer-recipes, it depends on the live world (an npm
-# release, a cardano-node download), so it runs on a schedule + on demand, never
-# as an every-commit gate, and files a tracking issue on scheduled failure.
+# Like tool-smoke/installer-recipes, it depends on the live world (an npm
+# release, a cardano-node download), so it files a tracking issue on scheduled
+# failure. On PRs it runs only the rows the PR affects
+# (.github/scripts/select_checks.py).
 
 name: devnet-smoke
 
 on:
   schedule:
-    - cron: "0 8 * * 1" # Mondays 08:00 UTC, after scheduled-smoke (06:00) and installer-recipes (07:00)
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC, after tool-smoke (06:00) and installer-recipes (07:00)
   workflow_dispatch: {} # allow manual runs
-  # Opt-in per-PR run: add the `run-devnet-smoke` label to a PR to run this
-  # (heavy, world-dependent) gate against that PR's code. Re-add to re-run.
+  # The `run-devnet-smoke` label forces every row on a PR. Re-add to re-run.
   pull_request:
-    types: [labeled]
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
 
+# The label is in the group so that adding an unrelated label can't cancel a run.
+concurrency:
+  group: devnet-smoke-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.label.name }}
+  cancel-in-progress: true
+
 jobs:
+  detect:
+    # A `labeled` event fires for every label, so filter to ours.
+    if: github.event.action != 'labeled' || github.event.label.name == 'run-devnet-smoke'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.devnet }}
+      has_rows: ${{ steps.select.outputs.has_devnet }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: select
+        env:
+          BASE: ${{ github.event.action != 'labeled' && github.event.pull_request.base.sha || '' }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/select_checks.py ${BASE:+"$BASE" "$HEAD"}
+
   devnet:
+    needs: detect
+    if: needs.detect.outputs.has_rows == 'true'
     name: yaci devnet end-to-end (${{ matrix.off_chain }})
-    # Schedule and manual runs always run; PR runs only for our opt-in label
-    # (a `labeled` event fires for every label, so filter to ours).
-    if: github.event_name != 'pull_request' || github.event.label.name == 'run-devnet-smoke'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false # one off-chain breaking must not mask the other
-      matrix:
-        # Each off-chain tool that reaches the devnet over the `.env` seam.
-        off_chain: [meshjs, lucid-evolution, blaze]
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     outputs:
       failed: ${{ steps.failed.outputs.failed }}
     steps:

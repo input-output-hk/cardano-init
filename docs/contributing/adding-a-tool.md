@@ -473,3 +473,11 @@ cargo test
 ```
 
 For a thorough validation, also scaffold a project with your tool combined with tools from other roles and confirm the top-level `just build` and `just test` targets wire up correctly.
+
+**CI checks**: once your template builds green, add a row for it to `.github/smoke-matrix.json`. The row's `tools` list names every registry tool it exercises:
+
+```json
+{ "variant": "mytool", "toolchain": "mytool", "flags": "--off-chain mytool", "tools": ["mytool"] }
+```
+
+A PR that changes `templates/mytool/` or `registry/tools/mytool.toml` then runs that row automatically, and the weekly smoke run picks it up too. If your tool needs a toolchain CI doesn't install yet, add the setup step to `.github/workflows/tool-smoke.yml`.
