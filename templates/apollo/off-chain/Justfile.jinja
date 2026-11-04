@@ -1,0 +1,44 @@
+# Off-chain component (Apollo, Go) — GiftCard
+# Part of {{ project_name }}
+
+# Copy the on-chain blueprint into the giftcard package, where it is embedded
+# into the build (see giftcard/blueprint.go). Without a blueprint the package
+# still builds; it just carries no validators until the on-chain component has
+# been built.
+_bundle:
+    @if [ -f ../{{ blueprint_path }} ]; then \
+        cp -f ../{{ blueprint_path }} giftcard/bundle/plutus.json; \
+    else \
+        rm -f giftcard/bundle/plutus.json; \
+        echo "Warning: no blueprint at ../{{ blueprint_path }}; building without validators."; \
+    fi
+
+# Compile every package (the importable giftcard library and the CLI).
+build: _bundle
+    @go build ./...
+
+# Unit tests, plus the devnet round-trip when INDEXER_URL points at a local
+# devnet. Verbose so skipped tests and their reasons are visible; `-count=1`
+# disables test caching, since results depend on the chain.
+test: _bundle
+    @go test -count=1 -v ./giftcard/...
+
+# Show the embedded blueprint and whether the environment is ready for txs.
+status: _bundle
+    @go run ./cmd/giftcard status
+
+# Create a gift card: mint a token and lock <lovelace> at the script address.
+# Submits to the local endpoint configured in ../.env if there is one, else to
+# Blockfrost (needs BLOCKFROST_PROJECT_ID). Needs MNEMONIC either way — see
+# .env.example.
+create token lovelace: _bundle
+    go run ./cmd/giftcard create {{ "{{token}}" }} {{ "{{lovelace}}" }}
+
+# Redeem the gift card locked at redeem script address <address> (printed by
+# `just create`).
+redeem address: _bundle
+    go run ./cmd/giftcard redeem {{ "{{address}}" }}
+
+clean:
+    @rm -rf bin giftcard/bundle/plutus.json
+    @go clean -testcache

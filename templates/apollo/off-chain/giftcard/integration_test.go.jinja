@@ -1,0 +1,127 @@
+package giftcard_test
+
+import (
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/blinklabs-io/gouroboros/ledger/common"
+
+	"{{ project_name }}/off-chain/config"
+	"{{ project_name }}/off-chain/giftcard"
+)
+
+// End-to-end: a full mint → lock → redeem round-trip against a local Yaci
+// DevKit devnet. It runs only when a devnet is up and a blueprint is bundled:
+//
+//   - INDEXER_URL: written to ../.env by `just -f devnet/Justfile dev`, or
+//     exported by the devnet component's ephemeral `just test`.
+//   - a bundled blueprint: produced by the on-chain `just build`.
+//
+// Otherwise it skips, so `just test` stays green without a devnet. Under
+// CARDANO_INIT_REQUIRE_DEVNET (the end-to-end CI smoke test), a live devnet
+// with no bundled blueprint is a failure instead of a skip.
+
+// A throwaway devnet mnemonic, funded from the faucet. Never a real seed.
+const devnetMnemonic = "test test test test test test test test test test test test " +
+	"test test test test test test test test test test test sauce"
+
+func TestRoundTripOnDevnet(t *testing.T) {
+	for _, f := range config.DefaultEnvFiles {
+		config.LoadDotenv("../" + f) // tests run in giftcard/, one level down
+	}
+	indexer := strings.TrimSpace(os.Getenv("INDEXER_URL"))
+	if indexer == "" {
+		t.Skip("no devnet (INDEXER_URL unset); the devnet component's `just test` runs this against an ephemeral devnet")
+	}
+	if !giftcard.HasBundledBlueprint() {
+		if os.Getenv("CARDANO_INIT_REQUIRE_DEVNET") != "" {
+			t.Fatal("devnet is live but no blueprint is bundled; build the on-chain component first")
+		}
+		t.Skip("no blueprint bundled")
+	}
+	admin := strings.TrimSpace(os.Getenv("YACI_ADMIN_URL"))
+	if admin == "" {
+		admin = "http://localhost:10000"
+	}
+
+	env := config.Env{
+		Network:   "preprod",
+		NetworkID: 0,
+		Provider:  config.Provider{Kind: config.Indexer, URL: indexer, AdminURL: admin},
+		Mnemonic:  devnetMnemonic,
+	}
+	contract, wallet, err := config.Contract(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc, err := config.ChainContext(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fund from the faucet (amounts in ADA): a small UTxO usable as collateral
+	// and a large one to spend. Wait until both are indexed.
+	addr := wallet.Address()
+	for _, ada := range []int{10, 10_000} {
+		if _, err := config.Topup(env, addr.String(), ada); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitFor(t, "faucet UTxOs", func() bool {
+		utxos, err := cc.Utxos(addr)
+		return err == nil && len(utxos) >= 2
+	})
+
+	// Create. The transaction is built from the address alone (no keys), as a
+	// backend would, then signed by the wallet.
+	created, err := contract.Create(addr, "IntegrationGift", 5_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := contract.SignAndSubmit(wallet, created.TxCbor); err != nil {
+		t.Fatal(err)
+	}
+
+	gift := waitForUtxo(t, contract, created.RedeemAddress)
+
+	// Redeem: burn the token and release the locked assets.
+	tx, err := contract.Redeem(addr, *gift)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txHash, err := contract.SignAndSubmit(wallet, tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txHash) != 64 {
+		t.Fatalf("unexpected tx hash %q", txHash)
+	}
+	waitFor(t, "gift-card UTxO to be spent", func() bool {
+		u, err := contract.UtxoAt(created.RedeemAddress)
+		return err == nil && u == nil
+	})
+}
+
+func waitForUtxo(t *testing.T, c *giftcard.Contract, addr string) *common.Utxo {
+	t.Helper()
+	var found *common.Utxo
+	waitFor(t, "gift-card UTxO at "+addr, func() bool {
+		u, err := c.UtxoAt(addr)
+		found = u
+		return err == nil && u != nil
+	})
+	return found
+}
+
+func waitFor(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	for i := 0; i < 90; i++ {
+		if ok() {
+			return
+		}
+		time.Sleep(time.Second)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
