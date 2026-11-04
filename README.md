@@ -201,4 +201,10 @@ cargo fmt         # format
 cargo clippy      # lint
 ```
 
+A pre-commit hook blocks commits that would fail CI's `cargo fmt --check`. Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 A Nix flake is provided. Use `nix develop` for a dev shell with the Rust toolchain, or `nix build .#cardano-init` to build the package.

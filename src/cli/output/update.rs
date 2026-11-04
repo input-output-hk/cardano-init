@@ -131,11 +131,13 @@ fn change_rows(
 ) -> Vec<String> {
     let old_tools = update::slot_tools(old, registry);
     let new_tools = update::slot_tools(new, registry);
+    // Only the wording is dimmed: a styled icon inside a dimmed span would end
+    // the dimming early.
     let verb = |s: &str| {
         if applied {
-            s.to_string()
+            theme::dim(s.to_string()).to_string()
         } else {
-            format!("would {s}")
+            theme::dim(format!("would {s}")).to_string()
         }
     };
     let names = |map: &BTreeMap<String, Vec<String>>, dir: &str| {
@@ -157,9 +159,10 @@ fn change_rows(
             SlotOp::Replace(_) => (
                 theme::warn("~"),
                 format!(
-                    "{} {} → {}",
+                    "{} {} {} {}",
                     verb("replace"),
                     from.join(", "),
+                    theme::dim("→"),
                     to.join(", ")
                 ),
             ),
@@ -172,7 +175,7 @@ fn change_rows(
                 format!("{} {}", verb("remove"), from.join(", ")),
             ),
         };
-        rows.push(format!("{}  {}/  {}", mark, dir, theme::dim(detail)));
+        rows.push(format!("{}  {}/  {}", mark, dir, detail));
     }
     for f in &plan.shared_removals {
         rows.push(format!(
@@ -193,9 +196,10 @@ fn change_rows(
 fn tool_names(ids: &[String], registry: &Registry) -> Vec<String> {
     ids.iter()
         .map(|id| {
-            registry
-                .get(id)
-                .map_or_else(|| id.clone(), |t| t.name.clone())
+            registry.get(id).map_or_else(
+                || id.clone(),
+                |t| format!("{}{}", theme::icon_prefix(t), t.name),
+            )
         })
         .collect()
 }

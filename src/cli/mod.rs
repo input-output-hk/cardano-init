@@ -5,6 +5,7 @@
 mod args;
 mod error;
 pub mod git;
+mod icons;
 pub mod interactive;
 pub mod oneshot;
 pub mod output;
@@ -47,6 +48,7 @@ pub fn run() -> i32 {
     let matches = Cli::command().after_help(HELP_FOOTER).get_matches();
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated");
     let json = cli.json;
+    theme::set_icons(icons::init(cli.icons, json));
 
     if matches!(
         cli.command,
@@ -59,7 +61,7 @@ pub fn run() -> i32 {
         Some(Command::Doctor) => run_doctor(&registry, json),
         Some(Command::List(args)) => DepCatalog::load()
             .map_err(CliError::from)
-            .map(|catalog| output::print_list(&registry, &catalog, json, args.table)),
+            .map(|catalog| output::print_list(&registry, &catalog, json, &args)),
         Some(Command::Add(args)) => update::run_add(&args, &registry, json),
         Some(Command::Remove(args)) => update::run_remove(&args, &registry, json),
         None => run_init(&cli.init, &registry, json),

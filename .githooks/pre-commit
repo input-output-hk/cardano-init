@@ -1,0 +1,19 @@
+#!/bin/sh
+# Block commits that CI's `cargo fmt --all --check` would reject.
+# Enable once per clone: git config core.hooksPath .githooks
+# Skip for a single commit: git commit --no-verify
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "pre-commit: cargo not found; skipping the format check." >&2
+  exit 0
+fi
+
+# Checks the working tree, so unformatted unstaged edits also block.
+unformatted=$(cargo fmt --all -- --check -l 2>/dev/null)
+if [ -n "$unformatted" ]; then
+  echo "pre-commit: these files need formatting:" >&2
+  root=$(git rev-parse --show-toplevel)
+  echo "$unformatted" | sed "s|^$root/||; s|^|  |" >&2
+  echo "Run 'cargo fmt --all', stage the changes, and commit again." >&2
+  exit 1
+fi

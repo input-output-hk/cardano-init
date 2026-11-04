@@ -234,7 +234,11 @@ fn summary_rows(selection: &Selection, registry: &Registry) -> Vec<String> {
         let name = tool.map_or(c.tool_id, |t| t.name.as_str());
         let lang = tool.and_then(|t| t.languages.first());
 
-        let name_cell = theme::accent(format!("{name:<name_w$}"));
+        let name_cell = format!(
+            "{}{}",
+            theme::icon_prefix_or_blank(tool),
+            theme::accent(format!("{name:<name_w$}"))
+        );
         let lang_cell = lang.map_or_else(String::new, |l| theme::dim(format!("· {l}")).to_string());
         let tag = if tool.is_some_and(|t| t.experimental) {
             theme::warn(" [experimental]").to_string()
