@@ -21,7 +21,7 @@ build: _bundle
 # devnet. Verbose so skipped tests and their reasons are visible; `-count=1`
 # disables test caching, since results depend on the chain.
 test: _bundle
-    @go test -count=1 -v ./giftcard/...
+    @go test -count=1 -v ./giftcard/... ./internal/... ./e2e/...
 
 # Show the embedded blueprint and whether the environment is ready for txs.
 status: _bundle
