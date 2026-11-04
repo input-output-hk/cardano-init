@@ -1,6 +1,7 @@
 // Command giftcard runs the GiftCard transactions from the command line. It
 // submits real transactions when a blueprint is bundled and the environment is
-// configured, and prints guidance otherwise.
+// configured, and prints guidance otherwise. Run it from the off-chain
+// directory, where it finds ../.env and .env.local:
 //
 //	go run ./cmd/giftcard status
 //	go run ./cmd/giftcard create <tokenName> <lovelace>
@@ -8,27 +9,31 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 
-	"{{ project_name }}/off-chain/config"
 	"{{ project_name }}/off-chain/giftcard"
+	"{{ project_name }}/off-chain/internal/config"
+	"{{ project_name }}/off-chain/internal/poll"
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := run(ctx, os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
+func run(ctx context.Context, args []string) error {
 	cmd := "status"
 	if len(args) > 0 {
 		cmd, args = args[0], args[1:]
@@ -44,12 +49,12 @@ func run(args []string) error {
 		if err != nil || lovelace <= 0 {
 			return fmt.Errorf("lovelace must be a positive integer, got %q", args[1])
 		}
-		return create(args[0], lovelace)
+		return create(ctx, args[0], lovelace)
 	case "redeem":
 		if len(args) != 1 {
 			return errors.New("usage: redeem <redeemAddress>")
 		}
-		return redeem(args[0])
+		return redeem(ctx, args[0])
 	}
 	return fmt.Errorf("unknown command %q; use: status | create | redeem", cmd)
 }
@@ -66,13 +71,17 @@ func status() error {
 	fmt.Printf("  redeem    (spend): %d bytes\n", len(v.Redeem))
 	fmt.Println()
 
-	env, missing := config.Load()
-	if len(missing) > 0 {
+	env, err := config.Load(".")
+	var missing *config.MissingError
+	if errors.As(err, &missing) {
 		fmt.Println("To submit transactions, set the following (see .env.example):")
-		for _, m := range missing {
+		for _, m := range missing.Settings {
 			fmt.Println("  -", m)
 		}
 		return nil
+	}
+	if err != nil {
+		return err
 	}
 	fmt.Printf("Environment ready (%s, provider: %s).\n", env.Network, env.Provider.Kind)
 	fmt.Println("Run a transaction:")
@@ -81,54 +90,36 @@ func status() error {
 	return nil
 }
 
-func requireEnv() (config.Env, error) {
+func connect() (*config.Client, error) {
 	if !giftcard.HasBundledBlueprint() {
-		return config.Env{}, errors.New("no blueprint bundled; build on-chain first: just -f ../on-chain/Justfile build")
+		return nil, errors.New("no blueprint bundled; build on-chain first: just -f ../on-chain/Justfile build")
 	}
-	env, missing := config.Load()
-	if len(missing) > 0 {
-		return config.Env{}, fmt.Errorf("missing configuration: %s; see .env.example", strings.Join(missing, ", "))
+	env, err := config.Load(".")
+	if err != nil {
+		return nil, err
 	}
-	return env, nil
+	return config.Connect(env)
 }
 
-func create(tokenName string, lovelace int64) error {
-	env, err := requireEnv()
+func create(ctx context.Context, tokenName string, lovelace int64) error {
+	client, err := connect()
 	if err != nil {
 		return err
 	}
-	contract, wallet, err := config.Contract(env)
+	// On a local Yaci devnet, fund the wallet from the faucet first.
+	funded, err := client.FundFromFaucet(ctx)
 	if err != nil {
 		return err
 	}
-	cc, err := config.ChainContext(env)
-	if err != nil {
-		return err
+	if funded {
+		fmt.Println("Funded the wallet from the devnet faucet.")
 	}
 
-	// On a local Yaci devnet, fund the wallet from the faucet: a small UTxO for
-	// collateral and a large one to spend. No-op on other providers.
-	addr := wallet.Address()
-	if topped, err := config.Topup(env, addr.String(), 10); err != nil {
-		return err
-	} else if topped {
-		if _, err := config.Topup(env, addr.String(), 10_000); err != nil {
-			return err
-		}
-		fmt.Printf("Funded %s… from the devnet faucet.\n", addr.String()[:20])
-		for i := 0; i < 60; i++ {
-			if utxos, err := cc.Utxos(addr); err == nil && len(utxos) >= 2 {
-				break
-			}
-			time.Sleep(time.Second)
-		}
-	}
-
-	created, err := contract.Create(addr, tokenName, lovelace)
+	created, err := client.GiftCard.Create(ctx, client.Wallet.Address(), tokenName, lovelace)
 	if err != nil {
 		return err
 	}
-	txHash, err := contract.SignAndSubmit(wallet, created.TxCbor)
+	txHash, err := client.GiftCard.SignAndSubmit(ctx, client.Wallet, created.TxCbor)
 	if err != nil {
 		return err
 	}
@@ -140,35 +131,36 @@ func create(tokenName string, lovelace int64) error {
 	return nil
 }
 
-func redeem(redeemAddress string) error {
-	env, err := requireEnv()
-	if err != nil {
-		return err
-	}
-	contract, wallet, err := config.Contract(env)
+func redeem(ctx context.Context, redeemAddress string) error {
+	client, err := connect()
 	if err != nil {
 		return err
 	}
 
 	// Wait for the create transaction to be indexed.
-	var utxo *common.Utxo
-	for i := 0; i < 60 && utxo == nil; i++ {
-		if utxo, err = contract.UtxoAt(redeemAddress); err != nil {
-			return err
+	waitCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	var gift common.Utxo
+	err = poll.Until(waitCtx, time.Second, func(ctx context.Context) (bool, error) {
+		u, err := client.GiftCard.UtxoAt(ctx, redeemAddress)
+		if errors.Is(err, giftcard.ErrNoGiftCard) {
+			return false, nil
 		}
-		if utxo == nil {
-			time.Sleep(time.Second)
-		}
-	}
-	if utxo == nil {
+		gift = u
+		return err == nil, err
+	})
+	if errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("no gift-card UTxO (output with an inline datum) at %s", redeemAddress)
 	}
-
-	tx, err := contract.Redeem(wallet.Address(), *utxo)
 	if err != nil {
 		return err
 	}
-	txHash, err := contract.SignAndSubmit(wallet, tx)
+
+	tx, err := client.GiftCard.Redeem(ctx, client.Wallet.Address(), gift)
+	if err != nil {
+		return err
+	}
+	txHash, err := client.GiftCard.SignAndSubmit(ctx, client.Wallet, tx)
 	if err != nil {
 		return err
 	}

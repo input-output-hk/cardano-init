@@ -38,12 +38,28 @@ source = "giftcard/contract_test.go"
 dest = "giftcard/contract_test.go"
 
 [[files]]
-source = "giftcard/integration_test.go.jinja"
-dest = "giftcard/integration_test.go"
+source = "giftcard/datum_test.go"
+dest = "giftcard/datum_test.go"
 
 [[files]]
-source = "config/config.go.jinja"
-dest = "config/config.go"
+source = "internal/config/config.go.jinja"
+dest = "internal/config/config.go"
+
+[[files]]
+source = "internal/config/config_test.go"
+dest = "internal/config/config_test.go"
+
+[[files]]
+source = "internal/poll/poll.go"
+dest = "internal/poll/poll.go"
+
+[[files]]
+source = "internal/poll/poll_test.go"
+dest = "internal/poll/poll_test.go"
+
+[[files]]
+source = "e2e/roundtrip_test.go.jinja"
+dest = "e2e/roundtrip_test.go"
 
 [[files]]
 source = "cmd/giftcard/main.go.jinja"

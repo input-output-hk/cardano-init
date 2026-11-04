@@ -1,0 +1,280 @@
+// Package config reads the project's environment and wires up an Apollo
+// chain context, wallet, and GiftCard contract from it.
+//
+// The choice of chain backend follows the shared ../.env, which is the
+// project's connection seam. This code never names the component that wrote
+// it; it only looks at which keys are set:
+//
+//   - YACI_ADMIN_URL, or INDEXER_URL without OGMIOS_URL: a Blockfrost-compatible
+//     indexer (a local Yaci DevKit devnet, or Dingo). No project id needed.
+//   - OGMIOS_URL: Ogmios, with Kupo at INDEXER_URL for UTxO queries.
+//   - DOLOS_GRPC_URL: Dolos over UTxO RPC.
+//   - none of the above: public Blockfrost, which needs BLOCKFROST_PROJECT_ID.
+package config
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	apollo "github.com/Salvionied/apollo/v2"
+	"github.com/Salvionied/apollo/v2/backend"
+	"github.com/Salvionied/apollo/v2/backend/blockfrost"
+	"github.com/Salvionied/apollo/v2/backend/ogmios"
+	"github.com/Salvionied/apollo/v2/backend/utxorpc"
+	"github.com/Salvionied/apollo/v2/constants"
+	"github.com/blinklabs-io/bursa"
+	"github.com/joho/godotenv"
+
+	"{{ project_name }}/off-chain/giftcard"
+	"{{ project_name }}/off-chain/internal/poll"
+)
+
+// ProviderKind names a chain backend.
+type ProviderKind string
+
+// The supported chain backends.
+const (
+	Indexer    ProviderKind = "indexer"    // Blockfrost-compatible local indexer (Yaci, Dingo)
+	Kupmios    ProviderKind = "kupmios"    // Ogmios + Kupo
+	UtxoRPC    ProviderKind = "utxorpc"    // Dolos
+	Blockfrost ProviderKind = "blockfrost" // public Blockfrost
+)
+
+// Provider says how to reach the chain.
+type Provider struct {
+	Kind ProviderKind
+	// URL is the indexer, Blockfrost, Ogmios, or UTxO RPC endpoint.
+	URL string
+	// KupoURL is set for Kupmios.
+	KupoURL string
+	// ProjectID is the Blockfrost project id (public Blockfrost only).
+	ProjectID string
+	// AdminURL is the Yaci DevKit admin API, used for the devnet faucet.
+	AdminURL string
+}
+
+// Env is the resolved configuration.
+type Env struct {
+	// Network is preview, preprod, or mainnet.
+	Network   string
+	NetworkID uint8
+	Provider  Provider
+	Mnemonic  string
+}
+
+// MissingError lists the settings that must be set before transactions can
+// be submitted.
+type MissingError struct {
+	Settings []string
+}
+
+func (e *MissingError) Error() string {
+	return "missing configuration: " + strings.Join(e.Settings, ", ") + " (see .env.example)"
+}
+
+var blockfrostURLs = map[string]string{
+	"preview": constants.BlockfrostBaseUrlPreview,
+	"preprod": constants.BlockfrostBaseUrlPreprod,
+	"mainnet": constants.BlockfrostBaseUrlMainnet,
+}
+
+// EnvFiles are the dotenv files Lookup reads, relative to the off-chain
+// directory, from least to most specific: the shared project .env (network
+// and connection details), then this component's .env and the gitignored
+// .env.local for secrets. A later file overrides an earlier one.
+var EnvFiles = []string{"../.env", ".env", ".env.local"}
+
+// Lookup returns a function that reads a setting: from the process
+// environment if it is set there and not blank, otherwise from EnvFiles
+// under dir. Missing files are skipped.
+func Lookup(dir string) (func(key string) string, error) {
+	vars := map[string]string{}
+	for _, name := range EnvFiles {
+		fileVars, err := godotenv.Read(filepath.Join(dir, name))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", name, err)
+		}
+		for k, v := range fileVars {
+			vars[k] = v
+		}
+	}
+	return func(key string) string {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+		return strings.TrimSpace(vars[key])
+	}, nil
+}
+
+// Load resolves the configuration for the off-chain directory dir. It returns
+// a *MissingError if required settings are not set.
+func Load(dir string) (Env, error) {
+	lookup, err := Lookup(dir)
+	if err != nil {
+		return Env{}, err
+	}
+	return Resolve(lookup)
+}
+
+// Resolve builds the configuration from the settings that get returns. It
+// returns a *MissingError if required settings are not set.
+func Resolve(get func(key string) string) (Env, error) {
+	var missing []string
+
+	network := get("CARDANO_NETWORK")
+	if network == "" {
+		network = "preview"
+	}
+	if _, ok := blockfrostURLs[network]; !ok {
+		missing = append(missing, "CARDANO_NETWORK (one of preview|preprod|mainnet)")
+	}
+	networkID := uint8(0)
+	if network == "mainnet" {
+		networkID = 1
+	}
+
+	indexer, admin := get("INDEXER_URL"), get("YACI_ADMIN_URL")
+	ogmiosURL, dolosURL := get("OGMIOS_URL"), get("DOLOS_GRPC_URL")
+
+	var p Provider
+	switch {
+	case admin != "" || (indexer != "" && ogmiosURL == ""):
+		p = Provider{Kind: Indexer, URL: indexer, AdminURL: admin}
+		if indexer == "" {
+			missing = append(missing, "INDEXER_URL (YACI_ADMIN_URL is set, but the devnet indexer is not)")
+		}
+	case ogmiosURL != "":
+		p = Provider{Kind: Kupmios, URL: ogmiosURL, KupoURL: indexer}
+	case dolosURL != "":
+		p = Provider{Kind: UtxoRPC, URL: dolosURL}
+	default:
+		p = Provider{Kind: Blockfrost, URL: blockfrostURLs[network], ProjectID: get("BLOCKFROST_PROJECT_ID")}
+		if p.ProjectID == "" {
+			missing = append(missing, "BLOCKFROST_PROJECT_ID (or start a local devnet: INDEXER_URL)")
+		}
+	}
+
+	mnemonic := get("MNEMONIC")
+	if mnemonic == "" {
+		missing = append(missing, "MNEMONIC")
+	}
+	if len(missing) > 0 {
+		return Env{}, &MissingError{Settings: missing}
+	}
+	return Env{Network: network, NetworkID: networkID, Provider: p, Mnemonic: mnemonic}, nil
+}
+
+// Client bundles everything needed to run GiftCard transactions.
+type Client struct {
+	Chain    backend.ChainContext
+	Wallet   *apollo.BursaWallet
+	GiftCard *giftcard.Contract
+	faucet   string // Yaci DevKit admin URL; empty off a Yaci devnet
+}
+
+// Connect builds the chain context, the signing wallet (account 0, address 0
+// of MNEMONIC), and a GiftCard contract that uses the bundled blueprint.
+func Connect(env Env) (*Client, error) {
+	cc, err := chainContext(env)
+	if err != nil {
+		return nil, err
+	}
+	w, err := apollo.NewBursaWallet(env.Mnemonic, bursa.WithNetwork(env.Network))
+	if err != nil {
+		return nil, fmt.Errorf("wallet: %w", err)
+	}
+	gc, err := giftcard.New(cc, env.NetworkID)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{Chain: cc, Wallet: w, GiftCard: gc, faucet: env.Provider.AdminURL}, nil
+}
+
+func chainContext(env Env) (backend.ChainContext, error) {
+	p := env.Provider
+	switch p.Kind {
+	case Indexer:
+		// Yaci and Dingo ignore the project id.
+		return blockfrost.NewBlockFrostChainContext(p.URL, env.NetworkID, ""), nil
+	case Kupmios:
+		cc, err := ogmios.NewOgmiosChainContext(ogmios.Config{
+			OgmiosEndpoint: p.URL,
+			KupoEndpoint:   p.KupoURL,
+			NetworkId:      env.NetworkID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("ogmios: %w", err)
+		}
+		return cc, nil
+	case UtxoRPC:
+		return utxorpc.NewUtxoRpcChainContext(p.URL, env.NetworkID, nil), nil
+	case Blockfrost:
+		return blockfrost.NewBlockFrostChainContext(p.URL, env.NetworkID, p.ProjectID), nil
+	}
+	return nil, fmt.Errorf("unknown provider kind %q", p.Kind)
+}
+
+// FundFromFaucet funds the wallet from the Yaci DevKit faucet with two UTxOs,
+// a small one usable as collateral and a large one to spend, and waits until
+// both are indexed. It does nothing and returns false off a Yaci devnet.
+func (c *Client) FundFromFaucet(ctx context.Context) (bool, error) {
+	if c.faucet == "" {
+		return false, nil
+	}
+	addr := c.Wallet.Address()
+	before, err := backend.UtxosContext(ctx, c.Chain, addr)
+	if err != nil {
+		return false, fmt.Errorf("query wallet UTxOs: %w", err)
+	}
+	for _, ada := range []int{10, 10_000} {
+		if err := topup(ctx, c.faucet, addr.String(), ada); err != nil {
+			return false, err
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	err = poll.Until(ctx, time.Second, func(ctx context.Context) (bool, error) {
+		utxos, err := backend.UtxosContext(ctx, c.Chain, addr)
+		return err == nil && len(utxos) >= len(before)+2, nil
+	})
+	if err != nil {
+		return false, fmt.Errorf("wait for faucet UTxOs: %w", err)
+	}
+	return true, nil
+}
+
+func topup(ctx context.Context, adminURL, addr string, ada int) error {
+	body, err := json.Marshal(map[string]any{"address": addr, "adaAmount": ada})
+	if err != nil {
+		return err
+	}
+	url := strings.TrimRight(adminURL, "/") + "/local-cluster/api/addresses/topup"
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("devnet faucet: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode/100 != 2 {
+		return fmt.Errorf("devnet faucet: HTTP %d", res.StatusCode)
+	}
+	return nil
+}
