@@ -179,7 +179,7 @@ Full user docs are published at **[input-output-hk.github.io/cardano-init](https
 
 Internal CI (smoke tests, installer recipes, devnet):
 
-[![Scheduled Smoke](https://github.com/input-output-hk/cardano-init/actions/workflows/scheduled-smoke.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/scheduled-smoke.yml)
+[![Tool Smoke](https://github.com/input-output-hk/cardano-init/actions/workflows/tool-smoke.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/tool-smoke.yml)
 [![Installer Recipes](https://github.com/input-output-hk/cardano-init/actions/workflows/installer-recipes.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/installer-recipes.yml)
 [![Devnet Smoke](https://github.com/input-output-hk/cardano-init/actions/workflows/devnet-smoke.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/devnet-smoke.yml)
 

@@ -3,7 +3,7 @@
 # Catches regressions WE introduce: formatting, lints, and the full test suite
 # (unit, contract-compliance, determinism snapshots). Runs on every push to the
 # default branch and on every pull request. This is distinct from the scheduled
-# maintenance gate (scheduled-smoke.yml), which catches external drift in the
+# maintenance gate (tool-smoke.yml), which catches external drift in the
 # generated projects' real builds.
 
 name: ci

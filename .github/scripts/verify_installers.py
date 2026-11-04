@@ -12,7 +12,7 @@ This is the real-world half of the two-tier installer gate: the PR gate
 and names a known installer. What it CANNOT prove is that the recipe still
 works against the live world — a renamed apt package, a moved aikup npm path, a
 brew formula rename. That is external drift, so it belongs on a schedule, not a
-PR gate (same rationale as scheduled-smoke.yml).
+PR gate (same rationale as tool-smoke.yml).
 
 Usage:
     python3 verify_installers.py <installer-key> [--deps <path>]
