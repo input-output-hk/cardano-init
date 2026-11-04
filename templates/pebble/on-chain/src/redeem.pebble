@@ -1,0 +1,21 @@
+// Spending validator guarding the locked gift.
+//
+// The UTxO can only be spent when the matching gift-card token is burned in the
+// same transaction. Its datum and redeemer are not used: burning the token is
+// the authorisation. With a single spend endpoint the redeemer is not checked,
+// so any redeemer works.
+
+import { mintsOnly } from "./giftcard.pebble";
+
+contract Redeem {
+    param tokenNameData: data;   // token name (ByteString)
+    param policyData: data;      // gift-card policy id (ByteString)
+
+    spend redeem() {
+        const { tx } = context;
+        const tokenName = this.tokenNameData as bytes;
+        const policy = this.policyData as bytes;
+
+        assert mintsOnly( tx, policy, tokenName, -1 ) else "must burn the gift-card token";
+    }
+}

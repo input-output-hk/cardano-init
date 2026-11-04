@@ -299,6 +299,21 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_pebble_meshjs_nix() {
+        // Pebble on-chain + MeshJS off-chain under `--nix`: locks the Pebble
+        // template (per-validator configs + blueprint assembly script) and shows
+        // both tools' `nodejs` collapsing into one top-level shell package.
+        assert_snapshot(
+            "pebble_meshjs_nix",
+            &sel(
+                vec![a(Role::OnChain, "pebble"), a(Role::OffChain, "meshjs")],
+                Network::Preview,
+                true,
+            ),
+        );
+    }
+
+    #[test]
     fn snapshot_aiken_meshjs_nix() {
         assert_snapshot(
             "aiken_meshjs_nix",

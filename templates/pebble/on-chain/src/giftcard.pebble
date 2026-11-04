@@ -1,0 +1,19 @@
+// Gift-card rules shared by both validators and by the tests.
+
+// A policy's part of a mint is valid when it touches exactly one asset name,
+// with exactly the expected quantity (1 to mint, -1 to burn).
+export function isSingleToken( assetCount: int, quantity: int, expected: int ): boolean {
+    return assetCount == 1 && quantity == expected;
+}
+
+// True when `tx` mints exactly `quantity` of `name` under `policy` and no other
+// asset name under that policy. Fails if the policy mints nothing.
+export function mintsOnly( tx: Tx, policy: PolicyId, name: bytes, quantity: int ): boolean {
+    // Count the policy's asset names from the raw mint map (field 4 of the
+    // PlutusV3 TxInfo). Converting `tx.mint` (a Value) to a map compiles to
+    // protocol-version-11 builtins that off-chain script decoders, such as the
+    // one MeshJS uses for applyParamsToScript, cannot read yet.
+    const mint = std.builtins.unConstrData( tx as data ).fields[4] as ValueMap;
+    const Some{ value: tokens } = mint.lookup( policy );
+    return isSingleToken( tokens.length(), tx.mint.amountOf( policy, name ), quantity );
+}

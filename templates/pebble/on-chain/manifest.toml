@@ -1,0 +1,42 @@
+[manifest]
+summary = "Pebble on-chain project implementing the GiftCard mint + redeem validators"
+
+[[files]]
+source = "Justfile.jinja"
+dest = "Justfile"
+
+[[files]]
+source = "package.json.jinja"
+dest = "package.json"
+
+[[files]]
+source = ".gitignore"
+dest = ".gitignore"
+
+[[files]]
+source = "pebble.gift_card.json"
+dest = "pebble.gift_card.json"
+
+[[files]]
+source = "pebble.redeem.json"
+dest = "pebble.redeem.json"
+
+[[files]]
+source = "scripts/blueprint.mjs"
+dest = "scripts/blueprint.mjs"
+
+[[files]]
+source = "src/giftcard.pebble"
+dest = "src/giftcard.pebble"
+
+[[files]]
+source = "src/gift_card.pebble"
+dest = "src/gift_card.pebble"
+
+[[files]]
+source = "src/redeem.pebble"
+dest = "src/redeem.pebble"
+
+[[files]]
+source = "src/giftcard.test.pebble"
+dest = "src/giftcard.test.pebble"

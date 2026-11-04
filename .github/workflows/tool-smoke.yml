@@ -76,6 +76,13 @@ jobs:
         with:
           node-version: 20
 
+      # The Pebble compiler (an npm dev dependency of the template) needs Node 22+.
+      - name: Install Node (Pebble)
+        if: matrix.toolchain == 'pebble'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
       # Scalus templates are Scala 3 / sbt builds: they need a JDK and sbt.
       - name: Install JDK
         if: matrix.toolchain == 'scalus'
