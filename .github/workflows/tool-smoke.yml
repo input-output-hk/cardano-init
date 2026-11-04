@@ -106,11 +106,14 @@ jobs:
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ= loony-tools:pr9m4BkM/5/eSTZlkQyRt57Jz7OMBxNSUiMC4FkcNfk=
             accept-flake-config = true
 
+      # Outside the checkout so the project gets its own git repo: inside one, the
+      # scaffold skips `git init` and Nix can't see the untracked flake.
       - name: Scaffold project in isolation
-        run: cargo run --quiet -- --name smoke-${{ matrix.variant }} ${{ matrix.flags }}
+        working-directory: ${{ runner.temp }}
+        run: cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/Cargo.toml" -- --name smoke-${{ matrix.variant }} ${{ matrix.flags }}
 
       - name: Build & test the generated project
-        working-directory: smoke-${{ matrix.variant }}
+        working-directory: ${{ runner.temp }}/smoke-${{ matrix.variant }}
         # Each component's Justfile installs its own deps (e.g. meshjs `_install`
         # runs `npm install` in off-chain/ on first build), so `just build` is
         # self-sufficient from the project root — no per-tool dep step here.
