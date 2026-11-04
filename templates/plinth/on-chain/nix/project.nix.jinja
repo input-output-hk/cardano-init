@@ -1,29 +1,14 @@
 { inputs, pkgs, lib }:
 
-let
-  cabalProject = pkgs.haskell-nix.cabalProject' (
+pkgs.haskell-nix.cabalProject' {
+  name = "{{ project_name }}";
 
-    { config, pkgs, ... }:
+  compiler-nix-name = lib.mkDefault "ghc966";
 
-    {
-      name = "{{ project_name }}";
+  src = lib.cleanSource ../.;
 
-      compiler-nix-name = lib.mkDefault "ghc966";
+  inputMap = { "https://chap.intersectmbo.org/" = inputs.CHaP; };
 
-      src = lib.cleanSource ../.;
-
-      flake.variants = {
-        ghc966 = {}; # Alias for the default variant
-      };
-
-      inputMap = { "https://chap.intersectmbo.org/" = inputs.CHaP; };
-
-      modules = [{
-        packages = {};
-      }];
-    }
-  );
-
-in
-
-cabalProject
+  # Skip Haddock for every dependency; it roughly doubles the first build.
+  modules = [{ doHaddock = false; }];
+}

@@ -82,7 +82,7 @@ install = [{ brew = "cabal-install" }, { apt = "cabal-install" }, { nix = "cabal
 [ghc]
 binaries = ["ghc"]
 docs = "https://www.haskell.org/ghcup/"
-# Plinth currently targets GHC 9.6.x; ghcup lets you pin that series.
+# Plinth targets GHC 9.6.x and Plutarch GHC 9.8.x; ghcup can install both side by side.
 install = [{ brew = "ghc" }, { apt = "ghc" }, { nix = "haskell.compiler.ghc966" }, { curl = "https://get-ghcup.haskell.org" }]
 support = [
   { name = "Haskell Language Server", url = "https://haskell-language-server.readthedocs.io" },

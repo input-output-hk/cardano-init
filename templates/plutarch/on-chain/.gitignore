@@ -1,0 +1,22 @@
+# Cabal / GHC build artifacts
+dist-newstyle/
+dist/
+*.hi
+*.o
+*.chi
+*.chs.h
+
+# GHC environment files
+.ghc.environment.*
+
+# Local secrets (copy .env.example to .env.local and fill it in)
+.env.local
+
+# IDE
+.idea/
+.vscode/
+
+# Nix
+result
+result-*
+.direnv/

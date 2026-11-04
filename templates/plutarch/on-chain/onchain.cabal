@@ -1,0 +1,67 @@
+cabal-version:   3.0
+name:            onchain
+version:         0.1.0.0
+license:
+build-type:      Simple
+
+common lang
+  default-language:   GHC2021
+  default-extensions:
+    DataKinds
+    DeriveAnyClass
+    DerivingStrategies
+    DerivingVia
+    LambdaCase
+    OverloadedStrings
+    TypeFamilies
+    UndecidableInstances
+    ViewPatterns
+
+  ghc-options:        -Wall
+
+common plutus-deps
+  build-depends:
+    , plutarch             ^>=1.15.0
+    , plutarch-ledger-api  ^>=3.8.0
+    , plutus-core          ==1.71.0.0
+    , plutus-ledger-api
+    , plutus-tx
+
+-- The validators, written in Plutarch, and their compiled scripts.
+library
+  import:          lang, plutus-deps
+  hs-source-dirs:  src
+  build-depends:
+    , base
+    , generics-sop
+    , text
+
+  exposed-modules:
+    GiftCard.MintingPolicy
+    GiftCard.Redeem
+    GiftCard.Scripts
+    GiftCard.Types
+    GiftCard.Utils
+
+-- Serialises the compiled validators into a single CIP-57 blueprint.
+executable gen-blueprint
+  import:         lang, plutus-deps
+  hs-source-dirs: app
+  main-is:        GenBlueprint.hs
+  build-depends:
+    , base
+    , bytestring
+    , containers
+    , onchain
+
+-- Behaviour tests: run the compiled scripts against hand-built script contexts.
+test-suite onchain-test
+  import:         lang, plutus-deps
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is:        Spec.hs
+  build-depends:
+    , base
+    , onchain
+    , tasty
+    , tasty-hunit

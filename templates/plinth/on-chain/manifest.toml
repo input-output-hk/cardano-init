@@ -45,7 +45,7 @@ when = "nix"
 # The committed lock pins haskell.nix + nixpkgs + CHaP + hackage to a
 # mutually-consistent, tested set (matching cabal.project's index-state).
 # Without it the flake resolves haskell.nix at HEAD, which is frequently
-# broken. Vendored verbatim from IntersectMBO/plinth-template.
+# broken. Taken from IntersectMBO/plinth-template (unused inputs pruned).
 [[files]]
 source = "flake.lock"
 dest = "flake.lock"
@@ -69,9 +69,4 @@ when = "nix"
 [[files]]
 source = "nix/shell.nix"
 dest = "nix/shell.nix"
-when = "nix"
-
-[[files]]
-source = "nix/utils.nix"
-dest = "nix/utils.nix"
 when = "nix"
