@@ -7,84 +7,51 @@
 # "v2"), so this can happen with zero commits here and would otherwise go
 # unnoticed until a user hits it.
 #
-# This is DISTINCT from the PR/commit gates (which catch regressions we
-# introduce). It runs the per-tool build smoke tests the docs already require
-# (ARCHITECTURE §11, PRD SM-1), but on a schedule, and opens a tracking issue
-# on failure.
+# It also runs on PRs, limited to the rows the PR affects
+# (.github/scripts/select_checks.py). A tracking issue is opened only when the
+# scheduled run fails.
 
-name: scheduled-smoke
+name: tool-smoke
 
 on:
   schedule:
     - cron: "0 6 * * 1" # every Monday 06:00 UTC
   workflow_dispatch: {} # allow manual runs
+  pull_request:
 
 permissions:
   contents: read
 
+concurrency:
+  group: tool-smoke-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.smoke }}
+      has_rows: ${{ steps.select.outputs.has_smoke }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: select
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/select_checks.py ${BASE:+"$BASE" "$HEAD"}
+
   smoke:
+    needs: detect
+    if: needs.detect.outputs.has_rows == 'true'
     name: ${{ matrix.variant }} build+test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false # one variant breaking must not mask the others
-      matrix:
-        # Only tools that are meant to build green are listed. Remaining
-        # placeholders (blaster, yaci) are intentionally excluded — their `just`
-        # targets only echo, so they have no external dependency to drift. Add a
-        # tool here the moment its template becomes genuinely build-green.
-        #
-        # `variant` is the unique display/dir key; `tool` selects the toolchain
-        # setup below (one tool can appear as several variants — e.g. Scalus
-        # fills on-chain, off-chain, and the fullstack collapse, each a distinct
-        # template that must build green on its own).
-        include:
-          - variant: aiken
-            tool: aiken
-            flags: --on-chain aiken
-          - variant: meshjs
-            tool: meshjs
-            flags: --off-chain meshjs
-          - variant: lucid-evolution
-            tool: lucid-evolution
-            flags: --off-chain lucid-evolution
-          # With an Aiken blueprint, Lucid Evolution's unit tests run the full
-          # gift-card round-trip on its in-memory Emulator (no devnet needed),
-          # so this variant proves the blueprint seam end to end.
-          - variant: aiken-lucid-evolution
-            tool: lucid-evolution
-            aiken: true
-            flags: --on-chain aiken --off-chain lucid-evolution
-          - variant: blaze
-            tool: blaze
-            flags: --off-chain blaze
-          - variant: aiken-blaze
-            tool: blaze
-            aiken: true
-            flags: --on-chain aiken --off-chain blaze
-          - variant: scalus-on-chain
-            tool: scalus
-            flags: --on-chain scalus
-          - variant: scalus-off-chain
-            tool: scalus
-            flags: --off-chain scalus
-          - variant: scalus-fullstack
-            tool: scalus
-            # Sugar for `--on-chain scalus --off-chain scalus`: both roles
-            # collapse into one unified `protocol/` sbt build.
-            flags: --fullstack scalus
-          # Haskell on-chain tools run their `--nix` variant: the component
-          # flake supplies GHC, cabal and the crypto libraries Plutus needs
-          # (blst has no Ubuntu package), mostly prebuilt from cache.iog.io,
-          # and the run also checks the template's pinned flake.lock still works.
-          - variant: plinth
-            tool: haskell
-            flags: --on-chain plinth --nix
-          - variant: plutarch
-            tool: haskell
-            flags: --on-chain plutarch --nix
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     # Haskell variants compile parts of the Plutus stack from source.
-    timeout-minutes: ${{ matrix.tool == 'haskell' && 300 || 60 }}
+    timeout-minutes: ${{ matrix.toolchain == 'haskell' && 300 || 60 }}
     steps:
       - uses: actions/checkout@v5
 
@@ -96,7 +63,7 @@ jobs:
 
       # --- per-tool toolchain (extend as the matrix grows) ---
       - name: Install Aiken
-        if: matrix.tool == 'aiken' || matrix.aiken
+        if: matrix.toolchain == 'aiken' || matrix.aiken
         uses: aiken-lang/setup-aiken@v1
         with:
           #Keep this in lockstep with templates/aiken/on-chain/aiken.toml.jinja.
@@ -104,14 +71,14 @@ jobs:
 
       # The TypeScript off-chain tools all build on Node.
       - name: Install Node
-        if: contains(fromJSON('["meshjs", "lucid-evolution", "blaze"]'), matrix.tool)
+        if: contains(fromJSON('["meshjs", "lucid-evolution", "blaze", "evolution"]'), matrix.toolchain)
         uses: actions/setup-node@v5
         with:
           node-version: 20
 
       # Scalus templates are Scala 3 / sbt builds: they need a JDK and sbt.
       - name: Install JDK
-        if: matrix.tool == 'scalus'
+        if: matrix.toolchain == 'scalus'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -119,19 +86,19 @@ jobs:
           # and build.sbt.jinja's declared JDK baseline.
           java-version: 21
       - name: Install sbt
-        if: matrix.tool == 'scalus'
+        if: matrix.toolchain == 'scalus'
         uses: sbt/setup-sbt@v1
 
       # The haskell.nix store (GHC plus Plutus dependencies) does not fit in
       # the runner's default free space.
       - name: Free disk space
-        if: matrix.tool == 'haskell'
+        if: matrix.toolchain == 'haskell'
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
 
       - name: Install Nix
-        if: matrix.tool == 'haskell'
+        if: matrix.toolchain == 'haskell'
         uses: DeterminateSystems/nix-installer-action@main
         with:
           extra-conf: |
@@ -150,7 +117,7 @@ jobs:
         env:
           # The --nix variants run in the minimal dev shell (toolchain only, no
           # language server or linters, which would build from source).
-          RUN: ${{ matrix.tool == 'haskell' && 'nix develop .#minimal --command' || '' }}
+          RUN: ${{ matrix.toolchain == 'haskell' && 'nix develop .#minimal --command' || '' }}
         run: |
           $RUN just build
           $RUN just test

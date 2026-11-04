@@ -11,7 +11,7 @@
 #   • THIS gate    — proves each recipe actually INSTALLS its binary. Network-
 #                    and world-dependent (a renamed package, a moved install
 #                    script, a formula rename), so it drifts with zero commits
-#                    here — same class of problem as scheduled-smoke.yml, hence
+#                    here — same class of problem as tool-smoke.yml, hence
 #                    a schedule + a tracking issue, never a PR gate.
 #
 # The matrix is drawn from what deps.toml actually uses today. Not yet covered
@@ -33,7 +33,7 @@ name: installer-recipes
 
 on:
   schedule:
-    - cron: "0 7 * * 1" # Mondays 07:00 UTC, one hour after scheduled-smoke
+    - cron: "0 7 * * 1" # Mondays 07:00 UTC, one hour after tool-smoke
   workflow_dispatch: {} # allow manual runs
   # Opt-in per-PR run: add the `run-installer-recipes` label to a PR to run
   # this (world-dependent, expensive) gate against that PR's code. It stays off
