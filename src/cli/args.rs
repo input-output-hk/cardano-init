@@ -2,6 +2,7 @@
 
 use clap::{Parser, Subcommand};
 
+use super::icons::IconsMode;
 use super::oneshot::RoleFlags;
 
 /// Scaffold a new Cardano protocol project.
@@ -14,6 +15,18 @@ pub struct Cli {
     /// Print machine-readable JSON instead of human-readable text (global)
     #[arg(long, global = true)]
     pub json: bool,
+
+    /// Show tool icons (needs a Nerd Font; remembered; env: CARDANO_INIT_ICONS)
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        value_name = "WHEN",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "always"
+    )]
+    pub icons: Option<IconsMode>,
 
     #[command(flatten)]
     pub init: InitArgs,
