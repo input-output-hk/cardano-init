@@ -1,0 +1,19 @@
+name: Set up Nix for Haskell
+description: Free disk space for the haskell.nix store and install Nix with the IOG caches.
+
+runs:
+  using: composite
+  steps:
+    - name: Free disk space
+      shell: bash
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        df -h /
+
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@v23
+      with:
+        extra-conf: |
+          extra-substituters = https://cache.iog.io https://cache.zw3rk.com
+          extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ= loony-tools:pr9m4BkM/5/eSTZlkQyRt57Jz7OMBxNSUiMC4FkcNfk=
+          accept-flake-config = true

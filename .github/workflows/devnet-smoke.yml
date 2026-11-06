@@ -1,24 +1,6 @@
-# End-to-end devnet smoke gate.
-#
-# Purpose: prove the one build-green role that no other job exercises — the
-# Yaci DevKit *devnet* — actually works end to end, and that the devnet↔off-chain
-# `.env` seam connects. Every other gate leaves this role untested:
-#   • tool-smoke.yml intentionally EXCLUDES yaci (its `just` targets that a
-#     no-op runner sees only echo), so nothing builds/tests the devnet role.
-#   • The template degrades gracefully — with no yaci-devkit installed, every
-#     layer skips and exits 0. Green, but proving nothing.
-#
-# This job installs yaci-devkit for real, scaffolds a fullstack project
-# (aiken on-chain → blueprint → each off-chain in the matrix → yaci devnet), and runs the
-# whole thing under CARDANO_INIT_REQUIRE_DEVNET=1, which turns every graceful
-# skip into a hard failure. So a green run here MEANS: the devnet came up, the
-# indexer served the chain, and the off-chain mint→lock→redeem round-trip
-# executed against it — never a vacuous skip.
-#
-# Like tool-smoke/installer-recipes, it depends on the live world (an npm
-# release, a cardano-node download), so it files a tracking issue on scheduled
-# failure. On PRs it runs only the rows the PR affects
-# (.github/scripts/select_checks.py).
+# Proves generated projects work end to end on a Yaci devnet.
+# CARDANO_INIT_REQUIRE_DEVNET=1 turns the template's graceful skips into failures,
+# so a green run can't be vacuous. PRs run only the rows they affect.
 
 name: devnet-smoke
 
@@ -50,6 +32,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - id: select
         env:
           BASE: ${{ github.event.action != 'labeled' && github.event.pull_request.base.sha || '' }}
@@ -59,16 +42,19 @@ jobs:
   devnet:
     needs: detect
     if: needs.detect.outputs.has_rows == 'true'
-    name: yaci devnet end-to-end (${{ matrix.off_chain }})
+    name: yaci devnet end-to-end (${{ matrix.variant }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Haskell variants compile parts of the Plutus stack from source.
+    timeout-minutes: ${{ matrix.toolchain == 'haskell' && 300 || 60 }}
     strategy:
-      fail-fast: false # one off-chain breaking must not mask the other
+      fail-fast: false # one variant breaking must not mask the others
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     outputs:
       failed: ${{ steps.failed.outputs.failed }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -76,20 +62,24 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
 
-      # The off-chain component + the yaci-devkit CLI both run on Node.
       - name: Install Node
         uses: actions/setup-node@v5
         with:
           node-version: 20
 
-      # yaci-cli / yaci-store are JVM services; the devkit needs a JDK on PATH.
+      # yaci-cli and yaci-store are JVM services.
       - name: Install JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
 
+      - name: Install sbt
+        if: matrix.toolchain == 'scalus'
+        uses: sbt/setup-sbt@v1
+
       - name: Install Aiken
+        if: contains(matrix.tools, 'aiken')
         uses: aiken-lang/setup-aiken@v1
         with:
           # Keep this in lockstep with templates/aiken/on-chain/aiken.toml.jinja.
@@ -114,35 +104,37 @@ jobs:
             ~/.yaci-cli/components
           key: yaci-downloads-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.yaci.outputs.version }}
 
-      - name: Scaffold a fullstack project in isolation
-        run: cargo run --quiet -- --name devnet-smoke --on-chain aiken --off-chain ${{ matrix.off_chain }} --devnet yaci
+      - name: Set up Nix for Haskell
+        if: matrix.toolchain == 'haskell'
+        uses: ./.github/actions/setup-haskell-nix
+
+      # Outside the checkout so the project gets its own git repo: inside one, the
+      # scaffold skips `git init` and Nix can't see the untracked flake.
+      - name: Scaffold project in isolation
+        working-directory: ${{ runner.temp }}
+        run: cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/Cargo.toml" -- --name devnet-smoke ${{ matrix.flags }} --devnet yaci
 
       - name: Build & run the end-to-end devnet smoke
-        working-directory: devnet-smoke
-        # CARDANO_INIT_REQUIRE_DEVNET=1 makes every graceful skip a hard failure,
-        # so this cannot pass vacuously. `just build` produces the on-chain
-        # blueprint and installs off-chain deps; `just test` builds the blueprint
-        # first, then the devnet component spins up an ephemeral devnet and runs
-        # its integration test + the off-chain round-trip against it (guaranteed
-        # teardown via trap).
+        working-directory: ${{ runner.temp }}/devnet-smoke
         env:
           CARDANO_INIT_REQUIRE_DEVNET: "1"
+          RUN: ${{ matrix.toolchain == 'haskell' && 'nix develop .#minimal --command' || '' }}
         run: |
-          just build
-          if [ "${{ matrix.off_chain }}" = meshjs ]; then
-            npm --prefix off-chain ls @meshsdk/core @meshsdk/provider @meshsdk/transaction
+          $RUN just build
+          if [ -d off-chain/node_modules/@meshsdk ]; then
+            $RUN npm --prefix off-chain ls @meshsdk/core @meshsdk/provider @meshsdk/transaction
           fi
-          just test
+          $RUN just test
 
       - name: Preserve devnet diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: devnet-diagnostics-${{ matrix.off_chain }}
+          name: devnet-diagnostics-${{ matrix.variant }}
           include-hidden-files: true
           path: |
-            devnet-smoke/devnet/.yaci-devnet.log
-            devnet-smoke/off-chain/package-lock.json
+            ${{ runner.temp }}/devnet-smoke/devnet/.yaci-devnet.log
+            ${{ runner.temp }}/devnet-smoke/off-chain/package-lock.json
           if-no-files-found: ignore
           retention-days: 14
 

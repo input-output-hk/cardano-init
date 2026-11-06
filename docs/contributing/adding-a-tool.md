@@ -474,10 +474,10 @@ cargo test
 
 For a thorough validation, also scaffold a project with your tool combined with tools from other roles and confirm the top-level `just build` and `just test` targets wire up correctly.
 
-**CI checks**: once your template builds green, add a row for it to `.github/smoke-matrix.json`. The row's `tools` list names every registry tool it exercises:
+**CI checks**: add a row for your tool to `.github/smoke-matrix.json`; CI fails if a registry tool has no row. Infrastructure tools are the exception: they are tested in their own repos, so add yours to `NO_CHECK` in `.github/scripts/select_checks.py` instead. If your tool can run against a chain, also add a `devnet` row, which runs `just test` on a live Yaci devnet with `CARDANO_INIT_REQUIRE_DEVNET=1`. The row's `tools` list names the registry tools whose changes trigger it. A slow row can leave out a tool it only uses in passing, as the Haskell devnet rows do with MeshJS:
 
 ```json
-{ "variant": "mytool", "toolchain": "mytool", "flags": "--off-chain mytool", "tools": ["mytool"] }
+{ "variant": "mytool", "toolchain": "node", "flags": "--off-chain mytool", "tools": ["mytool"] }
 ```
 
 A PR that changes `templates/mytool/` or `registry/tools/mytool.toml` then runs that row automatically, and the weekly smoke run picks it up too. If your tool needs a toolchain CI doesn't install yet, add the setup step to `.github/workflows/tool-smoke.yml`.

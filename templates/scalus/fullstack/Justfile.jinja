@@ -17,6 +17,7 @@ build:
     @sbt "runMain app.genBlueprint ../{{ blueprint_path }}"
 
 # Unit tests on the built-in emulator — no blockchain, milliseconds per test.
+# With a Yaci devnet running, the gift-card flow also runs on it.
 test:
     @sbt test
 
