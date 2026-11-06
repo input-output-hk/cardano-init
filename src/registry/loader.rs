@@ -323,9 +323,9 @@ mod tests {
     #[test]
     fn load_tool_count() {
         // aiken, plinth, plutarch, scalus, meshjs, evolution, lucid-evolution, blaze,
-        // tx3, yaci, blaster + infra: kupo, ogmios, dolos, tx-submit-api, cardano-node,
-        // cardano-node-api, dingo
-        assert_eq!(registry().all_tools().len(), 18);
+        // pycardano, tx3, yaci, blaster + infra: kupo, ogmios, dolos, tx-submit-api,
+        // cardano-node, cardano-node-api, dingo
+        assert_eq!(registry().all_tools().len(), 19);
     }
 
     #[test]
@@ -358,6 +358,7 @@ mod tests {
                 "evolution",
                 "lucid-evolution",
                 "meshjs",
+                "pycardano",
                 "scalus",
                 "tx3"
             ]

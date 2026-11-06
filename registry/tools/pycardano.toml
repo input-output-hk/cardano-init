@@ -1,0 +1,27 @@
+[tool]
+id = "pycardano"
+name = "PyCardano"
+description = """\
+A Python library for building and signing Cardano transactions and writing \
+off-chain code for Plutus applications. It provides transaction serialization, \
+wallet and key utilities, and chain-backend integrations — a good fit for \
+Python backends, scripts, and data tooling."""
+website = "https://pycardano.readthedocs.io"
+community = [
+  { name = "GitHub Issues", url = "https://github.com/Python-Cardano/pycardano/issues" },
+]
+languages = ["python"]
+system_deps = ["python"]
+nix_packages = ["python3"]
+# A pyproject.toml alone is ambiguous (any Python project has one); require the
+# PyCardano dependency so foreign projects read as "unrecognized" instead.
+detect = [{ file = "pyproject.toml", contains = "pycardano" }]
+experimental = true
+
+[roles.off-chain]
+template = "pycardano/off-chain"
+
+# The template connects through PyCardano's Blockfrost backend (INDEXER_URL → a
+# local Blockfrost-compatible API such as Yaci Store, else public Blockfrost).
+[compat]
+consumes = ["blockfrost"]
