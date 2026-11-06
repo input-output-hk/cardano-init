@@ -5,7 +5,13 @@ import sys
 import time
 from typing import Callable, TypeVar
 
-from .contract import GiftCardContract, has_blueprint, is_evaluation_failure, load_validators
+from .contract import (
+    GiftCardContract,
+    has_blueprint,
+    is_collateral_shortage,
+    is_evaluation_failure,
+    load_validators,
+)
 from .env import create_context, load_env, topup_on_devnet, wallet_from_mnemonic
 
 T = TypeVar("T")
@@ -31,6 +37,19 @@ def build_with_evaluation_retry(build: Callable[[], T]) -> T:
             print("Script evaluation failed; the provider may still be indexing. Retrying in 10s…")
             time.sleep(10)
     raise AssertionError("unreachable")
+
+
+def build_tx(build: Callable[[], T]) -> T:
+    """Build a tx, reporting problems the user can fix without a traceback."""
+    try:
+        return build_with_evaluation_retry(build)
+    except ValueError as error:
+        if is_collateral_shortage(error):
+            raise SystemExit(
+                f"Not enough collateral: {error}. Script transactions need wallet UTxOs "
+                "above 2 ADA that add up to that amount, so send more ADA to the wallet."
+            )
+        raise SystemExit(str(error))
 
 
 def status() -> None:
@@ -81,9 +100,7 @@ def create(token_name: str, lovelace: str) -> None:
                 break
             time.sleep(1)
 
-    creation = build_with_evaluation_retry(
-        lambda: contract.create_gift_card(token_name, int(lovelace), wallet)
-    )
+    creation = build_tx(lambda: contract.create_gift_card(token_name, int(lovelace), wallet))
     contract.context.submit_tx(creation.tx)
 
     print(f'Gift card "{token_name}" created.')
@@ -107,7 +124,7 @@ def redeem(redeem_address: str) -> None:
             "Check that the create tx is confirmed, then retry."
         )
 
-    tx = build_with_evaluation_retry(lambda: contract.redeem_gift_card(gift_card_utxo, wallet))
+    tx = build_tx(lambda: contract.redeem_gift_card(gift_card_utxo, wallet))
     contract.context.submit_tx(tx)
 
     print("Gift card redeemed; assets released to your wallet.")

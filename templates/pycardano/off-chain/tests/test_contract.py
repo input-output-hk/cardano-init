@@ -1,4 +1,5 @@
 import json
+import re
 import threading
 from dataclasses import replace
 from fractions import Fraction
@@ -23,10 +24,11 @@ from pycardano import (
     Value,
 )
 
-from giftcard.__main__ import create as create_command
+from giftcard.__main__ import build_tx, create as create_command
 from giftcard.contract import (
     GiftCardContract,
     GiftCardDatum,
+    GiftCardValidators,
     OutputReference,
     find_validator,
     get_gift_card_validators,
@@ -312,6 +314,9 @@ JUNK_DATUMS = {
     "oversized_seed": lambda real: RawCBOR(
         cbor2.dumps(cbor2.CBORTag(121, [bytes(100), 0, real.token_name]))
     ),
+    "oversized_token_name": lambda real: RawCBOR(
+        cbor2.dumps(cbor2.CBORTag(121, [real.seed_tx_hash, 0, bytes(100)]))
+    ),
 }
 
 
@@ -349,6 +354,48 @@ def test_redeem_rejects_a_utxo_that_is_not_a_gift_card(context, wallet):
     _, locked = _locked_gift_card(contract, wallet)
     with pytest.raises(ValueError, match="not a gift card"):
         contract.redeem_gift_card(_utxo(_output_like(locked, RawCBOR(b"\xff")), 1), wallet)
+
+
+@needs_blueprint
+def test_a_corrupt_blueprint_is_reported_not_mistaken_for_no_gift_card(context, wallet):
+    creation, locked = _locked_gift_card(GiftCardContract(context), wallet)
+    context.utxos_by_address[str(creation.redeem_address)] = [_utxo(locked, 1)]
+    corrupt = GiftCardContract(context, GiftCardValidators(gift_card="4101", redeem="4101"))
+    with pytest.raises(ValueError, match="Truncated"):
+        corrupt.find_gift_card_utxo(creation.redeem_address)
+
+
+@needs_blueprint
+def test_create_rejects_an_amount_below_the_minimum(context, wallet):
+    with pytest.raises(ValueError, match="at least"):
+        GiftCardContract(context).create_gift_card("gift", 1, wallet)
+
+
+@needs_blueprint
+def test_create_accepts_exactly_the_minimum(context, wallet):
+    contract = GiftCardContract(context)
+    with pytest.raises(ValueError, match=r"at least (\d+)") as rejected:
+        contract.create_gift_card("gift", 1, wallet)
+    minimum = int(re.search(r"at least (\d+)", str(rejected.value)).group(1))
+    assert contract.create_gift_card("gift", minimum, wallet).tx
+
+
+@needs_blueprint
+def test_too_little_collateral_gets_a_clear_message(context, wallet):
+    context.utxos_by_address[str(wallet.address)] = [
+        UTxO(TransactionInput(TransactionId(bytes(32)), 0), TransactionOutput(wallet.address, Value(3_000_000)))
+    ]
+    contract = GiftCardContract(context)
+    with pytest.raises(SystemExit, match="collateral"):
+        build_tx(lambda: contract.create_gift_card("gift", 1_500_000, wallet))
+
+
+def test_other_build_errors_keep_their_own_message():
+    def fail():
+        raise ValueError("No UTxOs found in wallet")
+
+    with pytest.raises(SystemExit, match="^No UTxOs found in wallet$"):
+        build_tx(fail)
 
 
 @needs_blueprint

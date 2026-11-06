@@ -21,6 +21,7 @@ from pycardano import (
     Unit,
     UTxO,
     Value,
+    min_lovelace,
     plutus_script_hash,
 )
 
@@ -42,6 +43,11 @@ def is_evaluation_failure(error: Exception) -> bool:
     Yaci Store with a 400 (`ApiError`), both carrying this Ogmios result.
     """
     return "EvaluationFailure" in str(error)
+
+
+def is_collateral_shortage(error: Exception) -> bool:
+    """Whether a build failed because the wallet can't cover a script tx's collateral."""
+    return "Minimum collateral amount" in str(error)
 
 
 @dataclass
@@ -191,12 +197,15 @@ class GiftCardContract:
         builder.add_input_address(wallet.address)
         builder.mint = token
         builder.add_minting_script(scripts.gift_card_script, Redeemer(Mint()))
+        datum = GiftCardDatum(seed.transaction_id, seed.output_index, name)
+        minimum = min_lovelace(
+            self.context,
+            output=TransactionOutput(scripts.redeem_address, Value(0, token), datum=datum),
+        )
+        if lovelace < minimum:
+            raise ValueError(f"The gift card must lock at least {minimum} lovelace.")
         builder.add_output(
-            TransactionOutput(
-                scripts.redeem_address,
-                Value(lovelace, token),
-                datum=GiftCardDatum(seed.transaction_id, seed.output_index, name),
-            )
+            TransactionOutput(scripts.redeem_address, Value(lovelace, token), datum=datum)
         )
         return GiftCardCreation(
             tx=builder.build_and_sign(
@@ -224,9 +233,9 @@ class GiftCardContract:
             cbor = datum.cbor if isinstance(datum, RawCBOR) else datum.to_cbor()
             parsed = GiftCardDatum.from_cbor(cbor)
             seed = OutputReference(parsed.seed_tx_hash, parsed.seed_output_index)
-            scripts = self.get_scripts(parsed.token_name, seed)
         except Exception:
             return None
+        scripts = self.get_scripts(parsed.token_name, seed)
         if utxo.output.address != scripts.redeem_address:
             return None
         if not _token(scripts.policy_id, parsed.token_name, 1) <= utxo.output.amount.multi_asset:
