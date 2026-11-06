@@ -7,8 +7,10 @@ import scalus.utils.await
 
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
+import java.time.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.*
+import scala.util.Try
 
 /** Creates and redeems a gift card on a live Yaci devnet. Skipped when none is running. */
 class TransactionsDevnetTest extends AnyFunSuite {
@@ -18,6 +20,7 @@ class TransactionsDevnetTest extends AnyFunSuite {
 
     test("a gift card can be created and redeemed on the devnet") {
         assume(adminUrl.isDefined, "no Yaci devnet is running")
+        assume(requireDevnet || reachable(adminUrl.get), "the Yaci devnet in .env is not reachable")
         assume(requireDevnet || GiftCardScripts.blueprintExists(), "build an on-chain component first")
         val appCtx = AppCtx.yaciDevKit("Gift Card")
         val txBuilder = Transactions(appCtx, GiftCardScripts.fromFile())
@@ -44,6 +47,11 @@ class TransactionsDevnetTest extends AnyFunSuite {
             val utxos = appCtx.provider.findUtxos(redeemAddress).await(30.seconds)
             Either.cond(utxos.toOption.forall(_.isEmpty), (), "still locked")
         }
+    }
+
+    private def reachable(url: String): Boolean = {
+        val request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(5)).build()
+        Try(HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding())).isSuccess
     }
 
     private def topup(address: String, ada: Int): Unit = {
