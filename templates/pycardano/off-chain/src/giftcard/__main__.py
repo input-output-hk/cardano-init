@@ -11,6 +11,7 @@ from .env import create_context, load_env, topup_on_devnet, wallet_from_mnemonic
 T = TypeVar("T")
 
 REDEEM_WAIT_SECONDS = 180
+MAX_TOKEN_NAME_BYTES = 32
 NO_BLUEPRINT = "No blueprint found. Build the on-chain component first: just -f ../on-chain/Justfile build"
 
 
@@ -64,6 +65,11 @@ def _require_env():
 
 
 def create(token_name: str, lovelace: str) -> None:
+    if len(token_name.encode()) > MAX_TOKEN_NAME_BYTES:
+        raise SystemExit(f"Token name must be at most {MAX_TOKEN_NAME_BYTES} bytes.")
+    if not lovelace.isdecimal() or int(lovelace) == 0:
+        raise SystemExit(f'Lovelace must be a positive whole number, got "{lovelace}".')
+
     env, contract, wallet = _require_env()
 
     # A fresh devnet wallet needs funds and a separate UTxO usable as collateral.
@@ -76,12 +82,12 @@ def create(token_name: str, lovelace: str) -> None:
             time.sleep(1)
 
     creation = build_with_evaluation_retry(
-        lambda: contract.create_gift_card(token_name, int(lovelace), wallet.address)
+        lambda: contract.create_gift_card(token_name, int(lovelace), wallet)
     )
-    tx_hash = contract.sign_and_submit(creation.tx, [wallet.signing_key])
+    contract.context.submit_tx(creation.tx)
 
     print(f'Gift card "{token_name}" created.')
-    print(f"  tx:      {tx_hash}")
+    print(f"  tx:      {creation.tx.id}")
     print(f"  address: {creation.redeem_address}")
     print("Once it is confirmed on chain, redeem it with:")
     print(f"  just redeem {creation.redeem_address}")
@@ -101,13 +107,11 @@ def redeem(redeem_address: str) -> None:
             "Check that the create tx is confirmed, then retry."
         )
 
-    tx = build_with_evaluation_retry(
-        lambda: contract.redeem_gift_card(gift_card_utxo, wallet.address)
-    )
-    tx_hash = contract.sign_and_submit(tx, [wallet.signing_key])
+    tx = build_with_evaluation_retry(lambda: contract.redeem_gift_card(gift_card_utxo, wallet))
+    contract.context.submit_tx(tx)
 
     print("Gift card redeemed; assets released to your wallet.")
-    print(f"  tx: {tx_hash}")
+    print(f"  tx: {tx.id}")
 
 
 def main() -> None:

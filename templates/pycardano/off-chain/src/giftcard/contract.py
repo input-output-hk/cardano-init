@@ -3,18 +3,16 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 from pycardano import (
     Address,
     ChainContext,
-    ExtendedSigningKey,
     MultiAsset,
-    NonEmptyOrderedSet,
-    PaymentSigningKey,
     PlutusData,
     PlutusV3Script,
     RawCBOR,
+    RawPlutusData,
     Redeemer,
     ScriptHash,
     Transaction,
@@ -23,10 +21,10 @@ from pycardano import (
     Unit,
     UTxO,
     Value,
-    VerificationKeyWitness,
     plutus_script_hash,
 )
 
+from .env import Wallet
 from .flat import apply_params
 
 # src/giftcard/contract.py → the project root that holds blueprint/.
@@ -35,8 +33,6 @@ DEFAULT_BLUEPRINT_PATH = Path(__file__).resolve().parents[3] / "blueprint" / "pl
 # PyCardano's default (10,000 slots past the tip) is beyond what a short-epoch
 # devnet's node can convert to time, which fails script evaluation.
 TTL_SLOTS = 300
-
-SigningKey = Union[PaymentSigningKey, ExtendedSigningKey]
 
 
 def is_evaluation_failure(error: Exception) -> bool:
@@ -118,13 +114,6 @@ class GiftCardDatum(PlutusData):
     token_name: bytes
 
 
-def _bytes_param(value: bytes) -> bytes:
-    if len(value) > 64:
-        raise ValueError("Byte-string parameters are limited to 64 bytes")
-    prefix = bytes([0x40 | len(value)]) if len(value) < 24 else bytes([0x58, len(value)])
-    return prefix + value
-
-
 @dataclass
 class GiftCardScripts:
     """The parameterised scripts and derived identifiers for one gift card."""
@@ -133,18 +122,21 @@ class GiftCardScripts:
     policy_id: ScriptHash
     redeem_script: PlutusV3Script
     redeem_address: Address
-    token_name: bytes
 
 
 @dataclass
 class GiftCardCreation:
-    """The result of `create_gift_card`. `tx` is unsigned."""
+    """The result of `create_gift_card`. `tx` is signed, ready to submit."""
 
     tx: Transaction
     redeem_address: Address
     policy_id: ScriptHash
     token_name: bytes
     seed: OutputReference
+
+
+def _token(policy_id: ScriptHash, token_name: bytes, quantity: int) -> MultiAsset:
+    return MultiAsset.from_primitive({policy_id.payload: {token_name: quantity}})
 
 
 class GiftCardContract:
@@ -158,15 +150,17 @@ class GiftCardContract:
         self._gift_card_code = bytes.fromhex(validators.gift_card)
         self._redeem_code = bytes.fromhex(validators.redeem)
 
-    def _scripts_for(self, token_name: bytes, seed: OutputReference) -> GiftCardScripts:
+    def get_scripts(self, token_name: bytes, seed: OutputReference) -> GiftCardScripts:
+        """Derive a gift card's scripts and identifiers. Touches no network."""
+        name_param = RawPlutusData(token_name).to_cbor()
         gift_card_script = PlutusV3Script(
-            apply_params(self._gift_card_code, [_bytes_param(token_name), seed.to_cbor()])
+            apply_params(self._gift_card_code, [name_param, seed.to_cbor()])
         )
         policy_id = plutus_script_hash(gift_card_script)
         redeem_script = PlutusV3Script(
             apply_params(
                 self._redeem_code,
-                [_bytes_param(token_name), _bytes_param(policy_id.payload)],
+                [name_param, RawPlutusData(policy_id.payload).to_cbor()],
             )
         )
         return GiftCardScripts(
@@ -176,24 +170,11 @@ class GiftCardContract:
             redeem_address=Address(
                 plutus_script_hash(redeem_script), network=self.context.network
             ),
-            token_name=token_name,
         )
 
-    def get_scripts(self, token_name: str, seed: OutputReference) -> GiftCardScripts:
-        """Derive a gift card's scripts and identifiers. Touches no network."""
-        return self._scripts_for(token_name.encode(), seed)
-
-    def _unsigned_tx(self, builder: TransactionBuilder, change_address: Address) -> Transaction:
-        body = builder.build(
-            change_address=change_address, merge_change=True, auto_ttl_offset=TTL_SLOTS
-        )
-        return Transaction(body, builder.build_witness_set(True))
-
-    def create_gift_card(
-        self, token_name: str, lovelace: int, wallet_address: Address
-    ) -> GiftCardCreation:
-        """Build an unsigned tx that mints the token and locks `lovelace` with it."""
-        utxos = self.context.utxos(wallet_address)
+    def create_gift_card(self, token_name: str, lovelace: int, wallet: Wallet) -> GiftCardCreation:
+        """Build a signed tx that mints the token and locks `lovelace` with it."""
+        utxos = self.context.utxos(wallet.address)
         if not utxos:
             raise ValueError("No UTxOs found in wallet")
         # A pure-ADA seed keeps the one-shot input from dragging tokens along.
@@ -202,12 +183,12 @@ class GiftCardContract:
             seed_utxo.input.transaction_id.payload, seed_utxo.input.index
         )
         name = token_name.encode()
-        scripts = self._scripts_for(name, seed)
-        token = MultiAsset.from_primitive({scripts.policy_id.payload: {name: 1}})
+        scripts = self.get_scripts(name, seed)
+        token = _token(scripts.policy_id, name, 1)
 
         builder = TransactionBuilder(self.context)
         builder.add_input(seed_utxo)
-        builder.add_input_address(wallet_address)
+        builder.add_input_address(wallet.address)
         builder.mint = token
         builder.add_minting_script(scripts.gift_card_script, Redeemer(Mint()))
         builder.add_output(
@@ -218,66 +199,63 @@ class GiftCardContract:
             )
         )
         return GiftCardCreation(
-            tx=self._unsigned_tx(builder, wallet_address),
+            tx=builder.build_and_sign(
+                [wallet.signing_key],
+                change_address=wallet.address,
+                merge_change=True,
+                auto_ttl_offset=TTL_SLOTS,
+            ),
             redeem_address=scripts.redeem_address,
             policy_id=scripts.policy_id,
             token_name=name,
             seed=seed,
         )
 
-    def find_gift_card_utxo(self, redeem_address: Union[Address, str]) -> Optional[UTxO]:
-        """Find the gift-card UTxO at a redeem address: the one with an inline datum."""
-        utxos = self.context.utxos(redeem_address)
-        return next((u for u in utxos if u.output.datum is not None), None)
+    def _read_gift_card(self, utxo: UTxO) -> Optional[Tuple[GiftCardDatum, GiftCardScripts]]:
+        """The UTxO's datum and scripts, or None if it isn't a genuine gift card.
 
-    def redeem_gift_card(self, gift_card_utxo: UTxO, wallet_address: Address) -> Transaction:
-        """Build an unsigned tx that burns the token and releases the locked assets."""
-        datum = gift_card_utxo.output.datum
+        Anyone can send anything to a script address, so a UTxO counts only if its
+        datum derives this address and it holds the token that datum's policy mints.
+        """
+        datum = utxo.output.datum
         if datum is None:
-            raise ValueError("Gift-card UTxO has no inline datum.")
-        cbor = datum.cbor if isinstance(datum, RawCBOR) else datum.to_cbor()
-        parsed = GiftCardDatum.from_cbor(cbor)
-        seed = OutputReference(parsed.seed_tx_hash, parsed.seed_output_index)
-        scripts = self._scripts_for(parsed.token_name, seed)
+            return None
+        try:
+            cbor = datum.cbor if isinstance(datum, RawCBOR) else datum.to_cbor()
+            parsed = GiftCardDatum.from_cbor(cbor)
+            seed = OutputReference(parsed.seed_tx_hash, parsed.seed_output_index)
+            scripts = self.get_scripts(parsed.token_name, seed)
+        except Exception:
+            return None
+        if utxo.output.address != scripts.redeem_address:
+            return None
+        if not _token(scripts.policy_id, parsed.token_name, 1) <= utxo.output.amount.multi_asset:
+            return None
+        return parsed, scripts
+
+    def find_gift_card_utxo(self, redeem_address: Union[Address, str]) -> Optional[UTxO]:
+        """Find the gift-card UTxO at a redeem address, ignoring anything else there."""
+        utxos = self.context.utxos(redeem_address)
+        return next((u for u in utxos if self._read_gift_card(u)), None)
+
+    def redeem_gift_card(self, gift_card_utxo: UTxO, wallet: Wallet) -> Transaction:
+        """Build a signed tx that burns the token and releases the locked assets."""
+        gift_card = self._read_gift_card(gift_card_utxo)
+        if gift_card is None:
+            raise ValueError("This UTxO is not a gift card.")
+        datum, scripts = gift_card
 
         builder = TransactionBuilder(self.context)
         # The redeem validator ignores its redeemer: burning the token is the auth.
         builder.add_script_input(
             gift_card_utxo, script=scripts.redeem_script, redeemer=Redeemer(Unit())
         )
-        builder.add_input_address(wallet_address)
-        builder.mint = MultiAsset.from_primitive(
-            {scripts.policy_id.payload: {parsed.token_name: -1}}
-        )
+        builder.add_input_address(wallet.address)
+        builder.mint = _token(scripts.policy_id, datum.token_name, -1)
         builder.add_minting_script(scripts.gift_card_script, Redeemer(Burn()))
-        return self._unsigned_tx(builder, wallet_address)
-
-    def sign_and_submit(self, tx: Transaction, signing_keys: Sequence[SigningKey]) -> str:
-        """Sign an unsigned transaction and submit it. Returns the tx hash."""
-        tx_hash = tx.transaction_body.hash()
-        witnesses: List[VerificationKeyWitness] = [
-            VerificationKeyWitness(key.to_verification_key(), key.sign(tx_hash))
-            for key in signing_keys
-        ]
-        tx.transaction_witness_set.vkey_witnesses = NonEmptyOrderedSet(witnesses)
-        self.context.submit_tx(tx)
-        return str(tx.id)
-
-
-__all__ = [
-    "Burn",
-    "DEFAULT_BLUEPRINT_PATH",
-    "GiftCardContract",
-    "GiftCardCreation",
-    "GiftCardDatum",
-    "GiftCardScripts",
-    "GiftCardValidators",
-    "TTL_SLOTS",
-    "Mint",
-    "OutputReference",
-    "find_validator",
-    "get_gift_card_validators",
-    "has_blueprint",
-    "is_evaluation_failure",
-    "load_validators",
-]
+        return builder.build_and_sign(
+            [wallet.signing_key],
+            change_address=wallet.address,
+            merge_change=True,
+            auto_ttl_offset=TTL_SLOTS,
+        )

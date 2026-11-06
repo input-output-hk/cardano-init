@@ -1,9 +1,11 @@
 import json
 import threading
+from dataclasses import replace
 from fractions import Fraction
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import cbor2
 import pytest
 from pycardano import (
     Address,
@@ -13,6 +15,7 @@ from pycardano import (
     GenesisParameters,
     Network,
     ProtocolParameters,
+    RawCBOR,
     TransactionId,
     TransactionInput,
     TransactionOutput,
@@ -20,6 +23,7 @@ from pycardano import (
     Value,
 )
 
+from giftcard.__main__ import create as create_command
 from giftcard.contract import (
     GiftCardContract,
     GiftCardDatum,
@@ -222,7 +226,7 @@ def test_local_context_uses_the_url_as_given_and_sees_every_utxo(yaci_like_serve
 
 @needs_blueprint
 def test_derives_scripts_from_the_blueprint(context):
-    scripts = GiftCardContract(context).get_scripts("hello world", SEED)
+    scripts = GiftCardContract(context).get_scripts(b"hello world", SEED)
     assert len(scripts.policy_id.payload) == 28
     assert str(scripts.redeem_address).startswith("addr_test")
     assert scripts.redeem_address.payment_part.payload != scripts.policy_id.payload
@@ -233,14 +237,14 @@ def test_seed_changes_the_policy(context):
     contract = GiftCardContract(context)
     other_seed = OutputReference(bytes(32), 1)
     assert (
-        contract.get_scripts("gift", SEED).policy_id
-        != contract.get_scripts("gift", other_seed).policy_id
+        contract.get_scripts(b"gift", SEED).policy_id
+        != contract.get_scripts(b"gift", other_seed).policy_id
     )
 
 
 @needs_blueprint
 def test_create_spends_the_seed_and_locks_the_token(context, wallet):
-    creation = GiftCardContract(context).create_gift_card("gift", 5_000_000, wallet.address)
+    creation = GiftCardContract(context).create_gift_card("gift", 5_000_000, wallet)
     body = creation.tx.transaction_body
 
     seed = TransactionInput(TransactionId(creation.seed.transaction_id), creation.seed.output_index)
@@ -254,19 +258,20 @@ def test_create_spends_the_seed_and_locks_the_token(context, wallet):
     assert locked.amount.multi_asset[creation.policy_id][GIFT] == 1
     assert isinstance(locked.datum, GiftCardDatum)
     assert locked.datum.token_name == b"gift"
+    assert creation.tx.transaction_witness_set.vkey_witnesses
 
 
 @needs_blueprint
 def test_create_without_funds_fails(context, wallet):
     context.utxos_by_address.clear()
     with pytest.raises(ValueError, match="No UTxOs"):
-        GiftCardContract(context).create_gift_card("gift", 5_000_000, wallet.address)
+        GiftCardContract(context).create_gift_card("gift", 5_000_000, wallet)
 
 
 @needs_blueprint
 def test_redeem_burns_the_token_rebuilt_from_the_datum(context, wallet):
     contract = GiftCardContract(context)
-    creation = contract.create_gift_card("gift", 5_000_000, wallet.address)
+    creation = contract.create_gift_card("gift", 5_000_000, wallet)
     body = creation.tx.transaction_body
     index, locked = next(
         (i, o) for i, o in enumerate(body.outputs) if o.address == creation.redeem_address
@@ -276,10 +281,74 @@ def test_redeem_burns_the_token_rebuilt_from_the_datum(context, wallet):
 
     assert contract.find_gift_card_utxo(creation.redeem_address) == gift_card_utxo
 
-    redeem_body = contract.redeem_gift_card(gift_card_utxo, wallet.address).transaction_body
+    redeem_body = contract.redeem_gift_card(gift_card_utxo, wallet).transaction_body
     assert gift_card_utxo.input in redeem_body.inputs
     assert redeem_body.mint[creation.policy_id][GIFT] == -1
     assert not any(o.address == creation.redeem_address for o in redeem_body.outputs)
+
+
+def _locked_gift_card(contract, wallet):
+    creation = contract.create_gift_card("gift", 5_000_000, wallet)
+    outputs = creation.tx.transaction_body.outputs
+    locked = next(o for o in outputs if o.address == creation.redeem_address)
+    return creation, locked
+
+
+def _utxo(output, id_byte):
+    return UTxO(TransactionInput(TransactionId(bytes([id_byte]) * 32), 0), output)
+
+
+def _output_like(locked, datum):
+    return TransactionOutput(locked.address, Value(2_000_000), datum=datum)
+
+
+JUNK_DATUMS = {
+    "not_cbor": lambda real: RawCBOR(b"\xff"),
+    "wrong_shape": lambda real: RawCBOR(cbor2.dumps(42)),
+    "right_datum_no_token": lambda real: RawCBOR(real.to_cbor()),
+    "other_seed": lambda real: replace(real, seed_output_index=real.seed_output_index + 1),
+    "wrong_field_types": lambda real: replace(real, token_name=7),
+    "too_few_fields": lambda real: RawCBOR(cbor2.dumps(cbor2.CBORTag(121, [b"a"]))),
+    "oversized_seed": lambda real: RawCBOR(
+        cbor2.dumps(cbor2.CBORTag(121, [bytes(100), 0, real.token_name]))
+    ),
+}
+
+
+@needs_blueprint
+@pytest.mark.parametrize("junk", JUNK_DATUMS.values(), ids=JUNK_DATUMS.keys())
+def test_find_skips_whatever_else_was_sent_to_the_script(context, wallet, junk):
+    contract = GiftCardContract(context)
+    creation, locked = _locked_gift_card(contract, wallet)
+    decoy = _utxo(_output_like(locked, junk(locked.datum)), 1)
+    real = _utxo(locked, 2)
+
+    context.utxos_by_address[str(creation.redeem_address)] = [decoy]
+    assert contract.find_gift_card_utxo(creation.redeem_address) is None
+
+    context.utxos_by_address[str(creation.redeem_address)] = [decoy, real]
+    assert contract.find_gift_card_utxo(creation.redeem_address) == real
+
+
+@needs_blueprint
+def test_find_reads_an_inline_datum_as_providers_return_it(context, wallet):
+    contract = GiftCardContract(context)
+    creation, locked = _locked_gift_card(contract, wallet)
+    raw = TransactionOutput(locked.address, locked.amount, datum=RawCBOR(locked.datum.to_cbor()))
+    utxo = _utxo(raw, 1)
+    context.utxos_by_address[str(creation.redeem_address)] = [utxo]
+
+    assert contract.find_gift_card_utxo(creation.redeem_address) == utxo
+    body = contract.redeem_gift_card(utxo, wallet).transaction_body
+    assert body.mint[creation.policy_id][GIFT] == -1
+
+
+@needs_blueprint
+def test_redeem_rejects_a_utxo_that_is_not_a_gift_card(context, wallet):
+    contract = GiftCardContract(context)
+    _, locked = _locked_gift_card(contract, wallet)
+    with pytest.raises(ValueError, match="not a gift card"):
+        contract.redeem_gift_card(_utxo(_output_like(locked, RawCBOR(b"\xff")), 1), wallet)
 
 
 @needs_blueprint
@@ -287,6 +356,21 @@ def test_blueprint_validators_are_present():
     validators = load_validators()
     assert validators.gift_card
     assert validators.redeem
+
+
+@pytest.mark.parametrize(
+    "token_name, lovelace, message",
+    [
+        ("gift", "abc", "whole number"),
+        ("gift", "-1", "whole number"),
+        ("gift", "0", "whole number"),
+        ("gift", "1.5", "whole number"),
+        ("x" * 33, "5000000", "32 bytes"),
+    ],
+)
+def test_create_command_rejects_bad_input(token_name, lovelace, message):
+    with pytest.raises(SystemExit, match=message):
+        create_command(token_name, lovelace)
 
 
 def test_wallet_address_matches_network():

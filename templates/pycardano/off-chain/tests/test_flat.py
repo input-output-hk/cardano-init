@@ -1,10 +1,18 @@
 import pytest
 
-from giftcard.contract import OutputReference, _bytes_param
+from pycardano import RawPlutusData
+
+from giftcard.contract import OutputReference
 from giftcard.flat import apply_params
 
 # (program 1.1.0 (lam x x)), CBOR-wrapped as in a blueprint's compiledCode.
 IDENTITY = bytes.fromhex("46010100200101")
+
+
+def _bytes_param(value):
+    return RawPlutusData(value).to_cbor()
+
+
 CAFE = _bytes_param(bytes.fromhex("cafe"))
 SEED = OutputReference(bytes.fromhex("00" * 31 + "ab"), 3).to_cbor()
 

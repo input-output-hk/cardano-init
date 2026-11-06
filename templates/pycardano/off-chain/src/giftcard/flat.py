@@ -12,6 +12,8 @@ See the Plutus Core specification, appendix "Flat serialisation".
 
 from typing import List, Sequence
 
+import cbor2
+
 _LIST_TYPE, _PAIR_TYPE, _APPLY_TYPE, _DATA_TYPE = 5, 6, 7, 8
 _INTEGER_TYPE, _BYTESTRING_TYPE, _STRING_TYPE, _UNIT_TYPE, _BOOL_TYPE = 0, 1, 2, 3, 4
 
@@ -153,26 +155,8 @@ def _unwrap(compiled_code: bytes) -> bytes:
     """Strip the CBOR byte-string wrapping(s) around a Flat program."""
     data = compiled_code
     while data and data[0] >> 5 == 2:
-        additional = data[0] & 0x1F
-        if additional < 24:
-            header = 1
-        elif additional <= 27:
-            header = 1 + (1 << (additional - 24))
-        else:
-            raise ValueError("Unsupported CBOR byte string in compiled code")
-        data = data[header:]
+        data = cbor2.loads(data)
     return data
-
-
-def _wrap(program: bytes) -> bytes:
-    size = len(program)
-    if size < 24:
-        return bytes([0x40 | size]) + program
-    if size < 0x100:
-        return bytes([0x58, size]) + program
-    if size < 0x10000:
-        return bytes([0x59]) + size.to_bytes(2, "big") + program
-    return bytes([0x5A]) + size.to_bytes(4, "big") + program
 
 
 def apply_params(compiled_code: bytes, params: Sequence[bytes]) -> bytes:
@@ -196,4 +180,4 @@ def apply_params(compiled_code: bytes, params: Sequence[bytes]) -> bytes:
     for param in params:
         bits = _append_data_constant(bits, param)
     bits = _with_filler(bits)
-    return _wrap(int(bits, 2).to_bytes(len(bits) // 8, "big"))
+    return cbor2.dumps(int(bits, 2).to_bytes(len(bits) // 8, "big"))

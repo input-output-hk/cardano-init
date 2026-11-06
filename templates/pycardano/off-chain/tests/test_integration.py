@@ -88,9 +88,9 @@ def devnet():
 
 def create(contract, wallet, token_name):
     creation = build_when_indexed(
-        lambda: contract.create_gift_card(token_name, 5_000_000, wallet.address)
+        lambda: contract.create_gift_card(token_name, 5_000_000, wallet)
     )
-    contract.sign_and_submit(creation.tx, [wallet.signing_key])
+    contract.context.submit_tx(creation.tx)
     utxo = wait_for(lambda: contract.find_gift_card_utxo(creation.redeem_address))
     assert utxo is not None, "the create tx should produce a gift-card UTxO"
     return creation, utxo
@@ -101,8 +101,8 @@ def test_mints_locks_and_redeems_a_gift_card(devnet):
     creation, utxo = create(contract, wallet, "IntegrationGift")
     assert utxo.output.amount.multi_asset[creation.policy_id][AssetName(b"IntegrationGift")] == 1
 
-    tx = build_when_indexed(lambda: contract.redeem_gift_card(utxo, wallet.address))
-    contract.sign_and_submit(tx, [wallet.signing_key])
+    tx = build_when_indexed(lambda: contract.redeem_gift_card(utxo, wallet))
+    contract.context.submit_tx(tx)
 
     assert wait_for(lambda: contract.find_gift_card_utxo(creation.redeem_address) is None)
     assert not any(
@@ -114,7 +114,7 @@ def test_mints_locks_and_redeems_a_gift_card(devnet):
 def test_spending_without_burning_is_rejected(devnet):
     contract, wallet = devnet
     creation, utxo = create(contract, wallet, "UnburnedGift")
-    scripts = contract.get_scripts("UnburnedGift", creation.seed)
+    scripts = contract.get_scripts(b"UnburnedGift", creation.seed)
 
     def spend_without_burning():
         builder = TransactionBuilder(contract.context)
