@@ -14,6 +14,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MATRIX_FILE = ROOT / ".github" / "smoke-matrix.json"
 
+# Blaster has no binary to run yet. Infrastructure tools are tested in their own repos.
+NO_CHECK = {
+    "blaster",
+    "cardano-node",
+    "cardano-node-api",
+    "dingo",
+    "dolos",
+    "kupo",
+    "ogmios",
+    "tx-submit-api",
+}
+
 # Generated from the templates, so template PRs regenerating them stay scoped.
 NOT_SHARED = ("src/scaffold/snapshots/",)
 SHARED = (
@@ -47,6 +59,14 @@ def select(paths, matrix):
     }
 
 
+def coverage_errors(matrix):
+    registered = {path.stem for path in (ROOT / "registry" / "tools").glob("*.toml")}
+    covered = {tool for rows in matrix.values() for row in rows for tool in row["tools"]}
+    errors = [f"unknown tool in smoke-matrix.json: {t}" for t in sorted(covered - registered)]
+    errors += [f"no check in smoke-matrix.json for: {t}" for t in sorted(registered - covered - NO_CHECK)]
+    return errors
+
+
 def changed_paths(base, head):
     # --no-renames: moving a file out of a tool's directory still affects it.
     diff = ["git", "diff", "--no-renames", "--name-only", f"{base}...{head}"]
@@ -55,10 +75,9 @@ def changed_paths(base, head):
 
 def main():
     matrix = json.loads(MATRIX_FILE.read_text())
-    tools = {tool for rows in matrix.values() for row in rows for tool in row["tools"]}
-    unknown = [t for t in sorted(tools) if not (ROOT / "registry" / "tools" / f"{t}.toml").exists()]
-    if unknown:
-        sys.exit(f"smoke-matrix.json names unknown tools: {unknown}")
+    errors = coverage_errors(matrix)
+    if errors:
+        sys.exit("\n".join(errors))
     selected = select(changed_paths(*sys.argv[1:3]), matrix) if sys.argv[1:] else matrix
 
     lines = []

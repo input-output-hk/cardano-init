@@ -1,22 +1,30 @@
 {
   "smoke": [
-    { "variant": "aiken", "toolchain": "aiken", "flags": "--on-chain aiken", "tools": ["aiken"] },
-    { "variant": "meshjs", "toolchain": "meshjs", "flags": "--off-chain meshjs", "tools": ["meshjs"] },
-    { "variant": "lucid-evolution", "toolchain": "lucid-evolution", "flags": "--off-chain lucid-evolution", "tools": ["lucid-evolution"] },
-    { "variant": "aiken-lucid-evolution", "toolchain": "lucid-evolution", "aiken": true, "flags": "--on-chain aiken --off-chain lucid-evolution", "tools": ["aiken", "lucid-evolution"] },
-    { "variant": "blaze", "toolchain": "blaze", "flags": "--off-chain blaze", "tools": ["blaze"] },
-    { "variant": "aiken-blaze", "toolchain": "blaze", "aiken": true, "flags": "--on-chain aiken --off-chain blaze", "tools": ["aiken", "blaze"] },
-    { "variant": "evolution", "toolchain": "evolution", "flags": "--off-chain evolution", "tools": ["evolution"] },
-    { "variant": "aiken-evolution", "toolchain": "evolution", "aiken": true, "flags": "--on-chain aiken --off-chain evolution", "tools": ["aiken", "evolution"] },
+    { "variant": "aiken", "flags": "--on-chain aiken", "tools": ["aiken"] },
+    { "variant": "meshjs", "toolchain": "node", "flags": "--off-chain meshjs", "tools": ["meshjs"] },
+    { "variant": "aiken-meshjs", "toolchain": "node", "flags": "--on-chain aiken --off-chain meshjs", "tools": ["aiken", "meshjs"] },
+    { "variant": "lucid-evolution", "toolchain": "node", "flags": "--off-chain lucid-evolution", "tools": ["lucid-evolution"] },
+    { "variant": "aiken-lucid-evolution", "toolchain": "node", "flags": "--on-chain aiken --off-chain lucid-evolution", "tools": ["aiken", "lucid-evolution"] },
+    { "variant": "blaze", "toolchain": "node", "flags": "--off-chain blaze", "tools": ["blaze"] },
+    { "variant": "aiken-blaze", "toolchain": "node", "flags": "--on-chain aiken --off-chain blaze", "tools": ["aiken", "blaze"] },
+    { "variant": "evolution", "toolchain": "node", "flags": "--off-chain evolution", "tools": ["evolution"] },
+    { "variant": "aiken-evolution", "toolchain": "node", "flags": "--on-chain aiken --off-chain evolution", "tools": ["aiken", "evolution"] },
+    { "variant": "aiken-tx3", "toolchain": "tx3", "flags": "--on-chain aiken --off-chain tx3 --allow-experimental", "tools": ["aiken", "tx3"] },
     { "variant": "scalus-on-chain", "toolchain": "scalus", "flags": "--on-chain scalus", "tools": ["scalus"] },
     { "variant": "scalus-off-chain", "toolchain": "scalus", "flags": "--off-chain scalus", "tools": ["scalus"] },
+    { "variant": "aiken-scalus", "toolchain": "scalus", "flags": "--on-chain aiken --off-chain scalus", "tools": ["aiken", "scalus"] },
     { "variant": "scalus-fullstack", "toolchain": "scalus", "flags": "--fullstack scalus", "tools": ["scalus"] },
     { "variant": "plinth", "toolchain": "haskell", "flags": "--on-chain plinth --nix", "tools": ["plinth"] },
     { "variant": "plutarch", "toolchain": "haskell", "flags": "--on-chain plutarch --nix", "tools": ["plutarch"] }
   ],
   "devnet": [
-    { "off_chain": "meshjs", "tools": ["aiken", "meshjs", "yaci"] },
-    { "off_chain": "lucid-evolution", "tools": ["aiken", "lucid-evolution", "yaci"] },
-    { "off_chain": "blaze", "tools": ["aiken", "blaze", "yaci"] }
+    { "variant": "aiken-meshjs", "flags": "--on-chain aiken --off-chain meshjs", "tools": ["aiken", "meshjs", "yaci"] },
+    { "variant": "aiken-lucid-evolution", "flags": "--on-chain aiken --off-chain lucid-evolution", "tools": ["aiken", "lucid-evolution", "yaci"] },
+    { "variant": "aiken-blaze", "flags": "--on-chain aiken --off-chain blaze", "tools": ["aiken", "blaze", "yaci"] },
+    { "variant": "aiken-evolution", "flags": "--on-chain aiken --off-chain evolution", "tools": ["aiken", "evolution", "yaci"] },
+    { "variant": "aiken-scalus", "toolchain": "scalus", "flags": "--on-chain aiken --off-chain scalus", "tools": ["aiken", "scalus", "yaci"] },
+    { "variant": "scalus-fullstack", "toolchain": "scalus", "flags": "--fullstack scalus", "tools": ["scalus", "yaci"] },
+    { "variant": "plinth-meshjs", "toolchain": "haskell", "flags": "--on-chain plinth --off-chain meshjs --nix", "tools": ["plinth"] },
+    { "variant": "plutarch-meshjs", "toolchain": "haskell", "flags": "--on-chain plutarch --off-chain meshjs --nix", "tools": ["plutarch"] }
   ]
 }

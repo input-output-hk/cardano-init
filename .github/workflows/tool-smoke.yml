@@ -1,15 +1,6 @@
-# Scheduled maintenance gate.
-#
-# Purpose: detect when a *generated project* stops building/testing because of
-# EXTERNAL drift — a Cardano hardfork, a breaking upstream tool release, or an
-# unmaintained dependency — even though nothing in this repo changed. The
-# templates pin floating version ranges (e.g. meshjs "^1.7.0", aiken stdlib
-# "v2"), so this can happen with zero commits here and would otherwise go
-# unnoticed until a user hits it.
-#
-# It also runs on PRs, limited to the rows the PR affects
-# (.github/scripts/select_checks.py). A tracking issue is opened only when the
-# scheduled run fails.
+# Checks each tool's generated project builds and passes its tests. Weekly runs
+# catch external drift (hardforks, upstream releases), since templates pin floating
+# version ranges. PRs run only the rows they affect.
 
 name: tool-smoke
 
@@ -36,6 +27,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - id: select
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
@@ -54,6 +46,8 @@ jobs:
     timeout-minutes: ${{ matrix.toolchain == 'haskell' && 300 || 60 }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -61,22 +55,19 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
 
-      # --- per-tool toolchain (extend as the matrix grows) ---
       - name: Install Aiken
-        if: matrix.toolchain == 'aiken' || matrix.aiken
+        if: contains(matrix.tools, 'aiken')
         uses: aiken-lang/setup-aiken@v1
         with:
-          #Keep this in lockstep with templates/aiken/on-chain/aiken.toml.jinja.
+          # Keep this in lockstep with templates/aiken/on-chain/aiken.toml.jinja.
           version: v1.1.21
 
-      # The TypeScript off-chain tools all build on Node.
       - name: Install Node
-        if: contains(fromJSON('["meshjs", "lucid-evolution", "blaze", "evolution"]'), matrix.toolchain)
+        if: matrix.toolchain == 'node' || matrix.toolchain == 'tx3'
         uses: actions/setup-node@v5
         with:
           node-version: 20
 
-      # Scalus templates are Scala 3 / sbt builds: they need a JDK and sbt.
       - name: Install JDK
         if: matrix.toolchain == 'scalus'
         uses: actions/setup-java@v4
@@ -89,22 +80,19 @@ jobs:
         if: matrix.toolchain == 'scalus'
         uses: sbt/setup-sbt@v1
 
-      # The haskell.nix store (GHC plus Plutus dependencies) does not fit in
-      # the runner's default free space.
-      - name: Free disk space
-        if: matrix.toolchain == 'haskell'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
+      - name: Install tx3up
+        if: matrix.toolchain == 'tx3'
+        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/tx3-lang/tx3up/releases/latest/download/tx3up-installer.sh | sh
 
-      - name: Install Nix
+      - name: Install the Tx3 toolchain
+        if: matrix.toolchain == 'tx3'
+        run: |
+          tx3up install
+          echo "$HOME/.tx3/stable/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Nix for Haskell
         if: matrix.toolchain == 'haskell'
-        uses: DeterminateSystems/nix-installer-action@main
-        with:
-          extra-conf: |
-            extra-substituters = https://cache.iog.io https://cache.zw3rk.com
-            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ= loony-tools:pr9m4BkM/5/eSTZlkQyRt57Jz7OMBxNSUiMC4FkcNfk=
-            accept-flake-config = true
+        uses: ./.github/actions/setup-haskell-nix
 
       # Outside the checkout so the project gets its own git repo: inside one, the
       # scaffold skips `git init` and Nix can't see the untracked flake.
@@ -114,9 +102,6 @@ jobs:
 
       - name: Build & test the generated project
         working-directory: ${{ runner.temp }}/smoke-${{ matrix.variant }}
-        # Each component's Justfile installs its own deps (e.g. meshjs `_install`
-        # runs `npm install` in off-chain/ on first build), so `just build` is
-        # self-sufficient from the project root — no per-tool dep step here.
         env:
           # The --nix variants run in the minimal dev shell (toolchain only, no
           # language server or linters, which would build from source).

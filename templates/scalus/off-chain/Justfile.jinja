@@ -20,6 +20,7 @@ build:
 # Emulator tests of the create/redeem flow — no blockchain, milliseconds per
 # test. They parameterise the blueprint's validators, so they run only once an
 # on-chain component has produced ../{{ blueprint_path }} (skipped otherwise).
+# With a Yaci devnet running, the flow also runs on it.
 test:
     @sbt test
 
