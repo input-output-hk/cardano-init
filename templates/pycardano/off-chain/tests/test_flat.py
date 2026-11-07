@@ -1,5 +1,5 @@
+import cbor2
 import pytest
-
 from pycardano import RawPlutusData
 
 from giftcard.contract import OutputReference
@@ -73,6 +73,24 @@ EVERY_TERM = bytes.fromhex(
 def test_walks_every_kind_of_term_and_constant(params, expected):
     encoded = [_bytes_param(bytes.fromhex(p)) for p in params]
     assert apply_params(EVERY_TERM, encoded).hex() == expected
+
+
+def _program(term_bits):
+    bits = "00000001" "00000001" "00000000" + term_bits
+    bits += "0" * (7 - len(bits) % 8) + "1"
+    return cbor2.dumps(int(bits, 2).to_bytes(len(bits) // 8, "big"))
+
+
+def test_walks_builtins_it_has_no_name_for():
+    # (program 1.1.0 (builtin 88)): `uplc` 1.3.3 stops at builtin 86.
+    program = _program("0111" "1011000")
+    assert apply_params(apply_params(program, [CAFE]), [CAFE]) == apply_params(program, [CAFE, CAFE])
+
+
+def test_applies_params_to_the_deepest_script_a_tx_can_hold():
+    # 16 KB of nested lambdas around a variable: far past Python's recursion limit.
+    deep = _program("0010" * 32_760 + "0000" "00000001")
+    assert len(apply_params(deep, [CAFE])) > len(deep)
 
 
 def test_accepts_a_doubly_wrapped_program():

@@ -11,8 +11,8 @@ community = [
   { name = "GitHub Issues", url = "https://github.com/Python-Cardano/pycardano/issues" },
 ]
 languages = ["python"]
-system_deps = ["python"]
-nix_packages = ["python3"]
+system_deps = ["uv"]
+nix_packages = ["uv", "python3"]
 detect = [{ file = "pyproject.toml", contains = "pycardano" }]
 experimental = true
 

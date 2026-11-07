@@ -38,8 +38,20 @@ source = "src/giftcard/flat.py"
 dest = "src/giftcard/flat.py"
 
 [[files]]
+source = "tests/conftest.py"
+dest = "tests/conftest.py"
+
+[[files]]
+source = "tests/test_cli.py"
+dest = "tests/test_cli.py"
+
+[[files]]
 source = "tests/test_contract.py"
 dest = "tests/test_contract.py"
+
+[[files]]
+source = "tests/test_env.py"
+dest = "tests/test_env.py"
 
 [[files]]
 source = "tests/test_flat.py"

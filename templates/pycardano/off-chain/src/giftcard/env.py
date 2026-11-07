@@ -1,10 +1,10 @@
 """Configuration from the environment, and the provider + wallet it describes."""
 
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
 
 import requests
 from blockfrost import ApiUrls, BlockFrostApi
@@ -32,6 +32,12 @@ DEFAULT_ENV_FILES = (
 )
 
 
+class ConfigError(Exception):
+    def __init__(self, missing: list[str]):
+        super().__init__(f"Missing configuration: {', '.join(missing)}")
+        self.missing = missing
+
+
 @dataclass(frozen=True)
 class GiftCardEnv:
     """How to reach the chain, decided by the shared ../.env connection seam.
@@ -52,12 +58,10 @@ class GiftCardEnv:
         return Network.MAINNET if self.network == "mainnet" else Network.TESTNET
 
 
-def load_env(
-    files: Iterable[Path] = DEFAULT_ENV_FILES,
-) -> Tuple[Optional[GiftCardEnv], List[str]]:
+def load_env(files: Iterable[Path] = DEFAULT_ENV_FILES) -> GiftCardEnv:
     """Read the dotenv files without overriding what is already set.
 
-    Returns the configuration, or None and the list of what is missing.
+    Raises `ConfigError`, listing what is missing, if the result is incomplete.
     """
     for path in files:
         load_dotenv(path, override=False)
@@ -78,17 +82,14 @@ def load_env(
     if not mnemonic:
         missing.append("MNEMONIC")
     if missing:
-        return None, missing
+        raise ConfigError(missing)
 
-    return (
-        GiftCardEnv(
-            network=network,
-            mnemonic=mnemonic,
-            indexer_url=indexer_url,
-            yaci_admin_url=read("YACI_ADMIN_URL").rstrip("/"),
-            blockfrost_project_id=project_id,
-        ),
-        [],
+    return GiftCardEnv(
+        network=network,
+        mnemonic=mnemonic,
+        indexer_url=indexer_url,
+        yaci_admin_url=read("YACI_ADMIN_URL").rstrip("/"),
+        blockfrost_project_id=project_id,
     )
 
 

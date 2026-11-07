@@ -1,34 +1,28 @@
 # Off-chain component (PyCardano) — GiftCard
 # Part of {{ project_name }}
 
-# Create the virtualenv and install dependencies only when needed. Delete .venv
-# (or `just clean`) to force a fresh install. pip is upgraded first because the
-# one bundled with older Pythons can't do editable pyproject-only installs.
-_install:
-    @if [ ! -f .venv/.installed ] || [ pyproject.toml -nt .venv/.installed ]; then python3 -m venv .venv && .venv/bin/python -m pip install --quiet --disable-pip-version-check --upgrade pip && .venv/bin/python -m pip install --quiet --disable-pip-version-check -e '.[dev]' && touch .venv/.installed; fi
-
-build: _install
+build:
     @test -f ../{{ blueprint_path }} || echo "Warning: no blueprint found; build the on-chain component before submitting transactions."
-    @.venv/bin/python -m compileall -q src tests
+    @uv run python -m compileall -q src tests
 
-test: _install
-    @.venv/bin/python -m pytest -q
+test:
+    @uv run pytest -q
 
 # Show the loaded blueprint and whether the env is ready for txs.
-status: _install
-    @.venv/bin/python -m giftcard status
+status:
+    @uv run giftcard status
 
 # Create a gift card: mint a token and lock <lovelace> at the script address.
 # Submits to the local devnet if one is running (INDEXER_URL in ../.env), else
 # to Blockfrost (needs BLOCKFROST_PROJECT_ID). Needs MNEMONIC either way — see
 # .env.example.
-create token lovelace: _install
-    @.venv/bin/python -m giftcard create {{ "{{token}}" }} {{ "{{lovelace}}" }}
+create token lovelace:
+    @uv run giftcard create {{ "{{token}}" }} {{ "{{lovelace}}" }}
 
 # Redeem the gift card locked at redeem script address <address> (printed by
 # `just create`).
-redeem address: _install
-    @.venv/bin/python -m giftcard redeem {{ "{{address}}" }}
+redeem address:
+    @uv run giftcard redeem {{ "{{address}}" }}
 
 clean:
     @rm -rf .venv .pytest_cache build src/*.egg-info

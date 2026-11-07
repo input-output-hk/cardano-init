@@ -24,12 +24,12 @@ binaries = ["node"]
 docs = "https://nodejs.org/en/download"
 install = [{ brew = "node" }, { apt = "nodejs" }, { winget = "OpenJS.NodeJS" }, { nix = "nodejs" }]
 
-# `python3-venv` pulls in python3, and the templates need its `venv` module, which
-# Debian and Ubuntu package separately. No winget: it installs `python`, not `python3`.
-[python]
-binaries = ["python3"]
-docs = "https://www.python.org/downloads/"
-install = [{ brew = "python" }, { apt = "python3-venv" }, { nix = "python3" }]
+# uv also downloads the Python version a project needs. No apt: it isn't in the
+# stock Debian and Ubuntu repositories.
+[uv]
+binaries = ["uv"]
+docs = "https://docs.astral.sh/uv/getting-started/installation/"
+install = [{ brew = "uv" }, { winget = "astral-sh.uv" }, { nix = "uv" }, { curl = "https://astral.sh/uv/install.sh" }]
 support = [
   { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=ms-python.python" },
   { name = "Pyright (language server)", url = "https://github.com/microsoft/pyright" },

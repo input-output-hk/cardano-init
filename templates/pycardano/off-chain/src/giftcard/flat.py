@@ -1,16 +1,17 @@
 """Apply parameters to a compiled UPLC script.
 
 PyCardano has no equivalent of `applyParamsToScript`, and the one Python library
-that does (`uplc`) needs native BLS and secp256k1 builds. Applying parameters
-only requires copying the program's term behind the new `apply` tags, which this
-module does by walking the Flat encoding without decoding it. The copy can't be
-verbatim: Flat byte-aligns byte strings, so shifting the term changes their
+that does (`uplc` 1.3.3) rejects builtins newer than the ones it knows, such as
+number 88, which Scalus emits. Applying parameters only requires copying the
+program's term behind the new `apply` tags, which this module does by walking the
+Flat encoding without decoding it, so it needs no list of builtins. The copy can't
+be verbatim: Flat byte-aligns byte strings, so shifting the term changes their
 padding.
 
 See the Plutus Core specification, appendix "Flat serialisation".
 """
 
-from typing import List, Sequence
+from collections.abc import Sequence
 
 import cbor2
 
@@ -28,7 +29,7 @@ class _TermCopier:
         self.bits = "".join(f"{byte:08b}" for byte in program)
         self.pos = 0
         self.copied_to = 0
-        self.output: List[str] = []
+        self.output: list[str] = []
         self.output_size = 0
 
     def take(self, count: int) -> int:
@@ -70,7 +71,7 @@ class _TermCopier:
                 return
             self.pos += length * 8
 
-    def read_type(self, tags: List[int]) -> tuple:
+    def read_type(self, tags: list[int]) -> tuple:
         tag = tags.pop(0)
         if tag != _APPLY_TYPE:
             return (tag,)

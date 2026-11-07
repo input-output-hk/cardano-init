@@ -68,11 +68,9 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Python
-        if: matrix.toolchain == 'python'
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: Install uv
+        if: contains(matrix.tools, 'pycardano')
+        uses: astral-sh/setup-uv@v10.3.3
 
       - name: Install JDK
         if: matrix.toolchain == 'scalus'

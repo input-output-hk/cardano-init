@@ -1,42 +1,25 @@
-"""CLI: `python -m giftcard [status | create <name> <lovelace> | redeem <address>]`."""
+"""CLI: `giftcard [status | create <tokenName> <lovelace> | redeem <redeemAddress>]`."""
 
+import argparse
 import logging
-import sys
 import time
-from typing import Callable, TypeVar
+from collections.abc import Callable, Sequence
+from typing import TypeVar
 
 from .contract import (
     GiftCardContract,
+    build_with_evaluation_retry,
     has_blueprint,
     is_collateral_shortage,
-    is_evaluation_failure,
     load_validators,
 )
-from .env import create_context, load_env, topup_on_devnet, wallet_from_mnemonic
+from .env import ConfigError, create_context, load_env, topup_on_devnet, wallet_from_mnemonic
 
 T = TypeVar("T")
 
 REDEEM_WAIT_SECONDS = 180
 MAX_TOKEN_NAME_BYTES = 32
 NO_BLUEPRINT = "No blueprint found. Build the on-chain component first: just -f ../on-chain/Justfile build"
-
-
-def build_with_evaluation_retry(build: Callable[[], T]) -> T:
-    """Retry while the provider's script evaluator catches up.
-
-    A provider can report a tx as confirmed seconds before its evaluator knows the
-    new outputs, so spending them right away briefly fails evaluation.
-    """
-    attempts = 6
-    for attempt in range(1, attempts + 1):
-        try:
-            return build()
-        except Exception as error:
-            if attempt == attempts or not is_evaluation_failure(error):
-                raise
-            print("Script evaluation failed; the provider may still be indexing. Retrying in 10s…")
-            time.sleep(10)
-    raise AssertionError("unreachable")
 
 
 def build_tx(build: Callable[[], T]) -> T:
@@ -62,33 +45,30 @@ def status() -> None:
     print(f"  redeem    (spend): {len(validators.redeem)} hex chars")
     print()
 
-    env, missing = load_env()
-    if env is None:
+    try:
+        load_env()
+    except ConfigError as error:
         print("To submit transactions, set the following (see .env.example):")
-        for key in missing:
+        for key in error.missing:
             print(f"  - {key}")
-    else:
-        print("Environment ready. Run a transaction:")
-        print("  just create <tokenName> <lovelace>")
-        print("  just redeem <redeemAddress>")
+        return
+    print("Environment ready. Run a transaction:")
+    print("  just create <tokenName> <lovelace>")
+    print("  just redeem <redeemAddress>")
 
 
 def _require_env():
     if not has_blueprint():
         raise SystemExit(NO_BLUEPRINT)
-    env, missing = load_env()
-    if env is None:
-        raise SystemExit(f"Missing required configuration: {', '.join(missing)}. See .env.example.")
+    try:
+        env = load_env()
+    except ConfigError as error:
+        raise SystemExit(f"{error}. See .env.example.")
     wallet = wallet_from_mnemonic(env.mnemonic, env.cardano_network)
     return env, GiftCardContract(create_context(env)), wallet
 
 
-def create(token_name: str, lovelace: str) -> None:
-    if len(token_name.encode()) > MAX_TOKEN_NAME_BYTES:
-        raise SystemExit(f"Token name must be at most {MAX_TOKEN_NAME_BYTES} bytes.")
-    if not lovelace.isdecimal() or int(lovelace) == 0:
-        raise SystemExit(f'Lovelace must be a positive whole number, got "{lovelace}".')
-
+def create(token_name: str, lovelace: int) -> None:
     env, contract, wallet = _require_env()
 
     # A fresh devnet wallet needs funds and a separate UTxO usable as collateral.
@@ -100,7 +80,7 @@ def create(token_name: str, lovelace: str) -> None:
                 break
             time.sleep(1)
 
-    creation = build_tx(lambda: contract.create_gift_card(token_name, int(lovelace), wallet))
+    creation = build_tx(lambda: contract.create_gift_card(token_name, lovelace, wallet))
     contract.context.submit_tx(creation.tx)
 
     print(f'Gift card "{token_name}" created.')
@@ -131,20 +111,48 @@ def redeem(redeem_address: str) -> None:
     print(f"  tx: {tx.id}")
 
 
-def main() -> None:
+def _token_name(value: str) -> str:
+    if len(value.encode()) > MAX_TOKEN_NAME_BYTES:
+        raise argparse.ArgumentTypeError(f"must be at most {MAX_TOKEN_NAME_BYTES} bytes")
+    return value
+
+
+def _lovelace(value: str) -> int:
+    try:
+        amount = int(value)
+    except ValueError:
+        amount = 0
+    if amount <= 0:
+        raise argparse.ArgumentTypeError(f'must be a positive whole number, got "{value}"')
+    return amount
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="giftcard", description="Create and redeem gift cards.")
+    commands = parser.add_subparsers(dest="command")
+
+    commands.add_parser("status", help="show the blueprint and whether the env is ready (default)")
+
+    create_command = commands.add_parser("create", help="mint a token and lock lovelace with it")
+    create_command.add_argument("token_name", type=_token_name, help="name of the gift card token")
+    create_command.add_argument("lovelace", type=_lovelace, help="amount to lock")
+
+    redeem_command = commands.add_parser("redeem", help="burn the token and release what it locks")
+    redeem_command.add_argument("redeem_address", help="address printed by the create command")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    args = _parser().parse_args(argv)
     # PyCardano logs its whole builder state whenever a build fails, including the
     # failures that `build_with_evaluation_retry` expects.
     logging.getLogger("PyCardano").setLevel(logging.CRITICAL)
-    args = sys.argv[1:]
-    command = args[0] if args else "status"
-    if command == "status":
-        status()
-    elif command == "create" and len(args) == 3:
-        create(args[1], args[2])
-    elif command == "redeem" and len(args) == 2:
-        redeem(args[1])
+    if args.command == "create":
+        create(args.token_name, args.lovelace)
+    elif args.command == "redeem":
+        redeem(args.redeem_address)
     else:
-        raise SystemExit("usage: status | create <tokenName> <lovelace> | redeem <redeemAddress>")
+        status()
 
 
 if __name__ == "__main__":

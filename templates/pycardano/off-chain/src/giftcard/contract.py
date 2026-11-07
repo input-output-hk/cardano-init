@@ -1,9 +1,12 @@
 """Bindings for the GiftCard contract, built on PyCardano."""
 
 import json
+import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, TypeVar
 
 from pycardano import (
     Address,
@@ -28,6 +31,10 @@ from pycardano import (
 from .env import Wallet
 from .flat import apply_params
 
+T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
+
 # src/giftcard/contract.py → the project root that holds blueprint/.
 DEFAULT_BLUEPRINT_PATH = Path(__file__).resolve().parents[3] / "blueprint" / "plutus.json"
 
@@ -50,6 +57,29 @@ def is_collateral_shortage(error: Exception) -> bool:
     return "Minimum collateral amount" in str(error)
 
 
+def build_with_evaluation_retry(
+    build: Callable[[], T], attempts: int = 10, delay_seconds: float = 5
+) -> T:
+    """Retry while the provider's script evaluator catches up.
+
+    A provider can report a tx as confirmed seconds before its evaluator knows the
+    new outputs, so spending them right away briefly fails evaluation.
+    """
+    for _ in range(attempts - 1):
+        try:
+            return build()
+        except Exception as error:
+            if not is_evaluation_failure(error):
+                raise
+            logger.warning(
+                "Script evaluation failed; the provider may still be indexing. "
+                "Retrying in %ss…",
+                delay_seconds,
+            )
+            time.sleep(delay_seconds)
+    return build()
+
+
 @dataclass
 class GiftCardValidators:
     """Compiled code (blueprint hex) of the two GiftCard validators."""
@@ -58,7 +88,7 @@ class GiftCardValidators:
     redeem: str
 
 
-def find_validator(blueprint: Dict[str, Any], suffix: str) -> str:
+def find_validator(blueprint: dict[str, Any], suffix: str) -> str:
     """Find a validator by its `<validator>.<purpose>` title suffix.
 
     On-chain tools prefix titles with their module name, so the prefix is free.
@@ -71,7 +101,7 @@ def find_validator(blueprint: Dict[str, Any], suffix: str) -> str:
     raise ValueError(f'Validator "{suffix}" not found in blueprint. Available: {known}')
 
 
-def get_gift_card_validators(blueprint: Dict[str, Any]) -> GiftCardValidators:
+def get_gift_card_validators(blueprint: dict[str, Any]) -> GiftCardValidators:
     return GiftCardValidators(
         gift_card=find_validator(blueprint, "gift_card.mint"),
         redeem=find_validator(blueprint, "redeem.spend"),
@@ -145,11 +175,21 @@ def _token(policy_id: ScriptHash, token_name: bytes, quantity: int) -> MultiAsse
     return MultiAsset.from_primitive({policy_id.payload: {token_name: quantity}})
 
 
+def _locked_output(
+    scripts: GiftCardScripts, token_name: bytes, seed: OutputReference, lovelace: int
+) -> TransactionOutput:
+    return TransactionOutput(
+        scripts.redeem_address,
+        Value(lovelace, _token(scripts.policy_id, token_name, 1)),
+        datum=GiftCardDatum(seed.transaction_id, seed.output_index, token_name),
+    )
+
+
 class GiftCardContract:
     def __init__(
         self,
         context: ChainContext,
-        validators: Optional[GiftCardValidators] = None,
+        validators: GiftCardValidators | None = None,
     ):
         self.context = context
         validators = validators or load_validators()
@@ -178,6 +218,13 @@ class GiftCardContract:
             ),
         )
 
+    def min_lock_lovelace(self, token_name: bytes, seed: OutputReference) -> int:
+        """The least a gift card can lock: its output's minimum UTxO value."""
+        scripts = self.get_scripts(token_name, seed)
+        return min_lovelace(
+            self.context, output=_locked_output(scripts, token_name, seed, 0)
+        )
+
     def create_gift_card(self, token_name: str, lovelace: int, wallet: Wallet) -> GiftCardCreation:
         """Build a signed tx that mints the token and locks `lovelace` with it."""
         utxos = self.context.utxos(wallet.address)
@@ -190,23 +237,17 @@ class GiftCardContract:
         )
         name = token_name.encode()
         scripts = self.get_scripts(name, seed)
-        token = _token(scripts.policy_id, name, 1)
+
+        minimum = self.min_lock_lovelace(name, seed)
+        if lovelace < minimum:
+            raise ValueError(f"The gift card must lock at least {minimum} lovelace.")
 
         builder = TransactionBuilder(self.context)
         builder.add_input(seed_utxo)
         builder.add_input_address(wallet.address)
-        builder.mint = token
+        builder.mint = _token(scripts.policy_id, name, 1)
         builder.add_minting_script(scripts.gift_card_script, Redeemer(Mint()))
-        datum = GiftCardDatum(seed.transaction_id, seed.output_index, name)
-        minimum = min_lovelace(
-            self.context,
-            output=TransactionOutput(scripts.redeem_address, Value(0, token), datum=datum),
-        )
-        if lovelace < minimum:
-            raise ValueError(f"The gift card must lock at least {minimum} lovelace.")
-        builder.add_output(
-            TransactionOutput(scripts.redeem_address, Value(lovelace, token), datum=datum)
-        )
+        builder.add_output(_locked_output(scripts, name, seed, lovelace))
         return GiftCardCreation(
             tx=builder.build_and_sign(
                 [wallet.signing_key],
@@ -220,7 +261,7 @@ class GiftCardContract:
             seed=seed,
         )
 
-    def _read_gift_card(self, utxo: UTxO) -> Optional[Tuple[GiftCardDatum, GiftCardScripts]]:
+    def _read_gift_card(self, utxo: UTxO) -> tuple[GiftCardDatum, GiftCardScripts] | None:
         """The UTxO's datum and scripts, or None if it isn't a genuine gift card.
 
         Anyone can send anything to a script address, so a UTxO counts only if its
@@ -242,7 +283,7 @@ class GiftCardContract:
             return None
         return parsed, scripts
 
-    def find_gift_card_utxo(self, redeem_address: Union[Address, str]) -> Optional[UTxO]:
+    def find_gift_card_utxo(self, redeem_address: Address | str) -> UTxO | None:
         """Find the gift-card UTxO at a redeem address, ignoring anything else there."""
         utxos = self.context.utxos(redeem_address)
         return next((u for u in utxos if self._read_gift_card(u)), None)

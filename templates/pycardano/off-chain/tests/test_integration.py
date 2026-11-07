@@ -2,19 +2,20 @@
 
 Runs only with a devnet (INDEXER_URL, written to ../.env by the devnet's `just
 dev` or exported by its `just test`) and a built blueprint; otherwise it skips,
-so `just test` stays green with no devnet.
+so `just test` stays green with no devnet. Select it with `pytest -m integration`.
 """
 
 import os
 import time
 
 import pytest
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 from pycardano import AssetName, Redeemer, TransactionBuilder, Unit
 
 from giftcard.contract import (
     TTL_SLOTS,
     GiftCardContract,
+    build_with_evaluation_retry,
     has_blueprint,
     is_evaluation_failure,
 )
@@ -26,12 +27,7 @@ from giftcard.env import (
     wallet_from_mnemonic,
 )
 
-for path in DEFAULT_ENV_FILES:
-    load_dotenv(path, override=False)
-
-INDEXER_URL = os.environ.get("INDEXER_URL", "").strip().rstrip("/")
-ADMIN_URL = os.environ.get("YACI_ADMIN_URL", "http://localhost:10000").strip().rstrip("/")
-REQUIRE_DEVNET = os.environ.get("CARDANO_INIT_REQUIRE_DEVNET", "").strip() != ""
+pytestmark = pytest.mark.integration
 
 # A throwaway devnet mnemonic, funded from the faucet. Never a real seed.
 MNEMONIC = "test " * 23 + "sauce"
@@ -48,33 +44,39 @@ def wait_for(find, timeout=TIMEOUT_SECONDS):
     return find()
 
 
-def build_when_indexed(build):
-    """The evaluator can lag the indexer briefly, so retry a build that fails it."""
-    for _ in range(10):
-        try:
-            return build()
-        except Exception as error:
-            if not is_evaluation_failure(error):
-                raise
-            time.sleep(3)
-    return build()
+def _url(settings, key, default=""):
+    return (settings.get(key) or default).strip().rstrip("/")
+
+
+@pytest.fixture(scope="module")
+def settings():
+    """The dotenv files under the real environment, leaving `os.environ` untouched."""
+    merged = {}
+    for path in reversed(DEFAULT_ENV_FILES):
+        merged.update(dotenv_values(path))
+    merged.update(os.environ)
+    return merged
 
 
 # Under CARDANO_INIT_REQUIRE_DEVNET, a live devnet with no blueprint is a real
 # breakage. The top-level `just test` also runs this suite with no devnet first;
 # that skip is expected.
-def test_blueprint_is_built_when_a_devnet_is_required():
-    if not REQUIRE_DEVNET or not INDEXER_URL:
+def test_blueprint_is_built_when_a_devnet_is_required(settings):
+    if not _url(settings, "CARDANO_INIT_REQUIRE_DEVNET") or not _url(settings, "INDEXER_URL"):
         pytest.skip("no devnet is live")
     assert has_blueprint(), "Devnet is live but no blueprint: build the on-chain component first."
 
 
 @pytest.fixture(scope="module")
-def devnet():
-    if not INDEXER_URL or not has_blueprint():
+def devnet(settings):
+    indexer_url = _url(settings, "INDEXER_URL")
+    if not indexer_url or not has_blueprint():
         pytest.skip("needs a devnet (INDEXER_URL) and a built blueprint")
     env = GiftCardEnv(
-        network="preprod", mnemonic=MNEMONIC, indexer_url=INDEXER_URL, yaci_admin_url=ADMIN_URL
+        network="preprod",
+        mnemonic=MNEMONIC,
+        indexer_url=indexer_url,
+        yaci_admin_url=_url(settings, "YACI_ADMIN_URL", "http://localhost:10000"),
     )
     context = create_context(env)
     wallet = wallet_from_mnemonic(MNEMONIC, env.cardano_network)
@@ -87,7 +89,7 @@ def devnet():
 
 
 def create(contract, wallet, token_name):
-    creation = build_when_indexed(
+    creation = build_with_evaluation_retry(
         lambda: contract.create_gift_card(token_name, 5_000_000, wallet)
     )
     contract.context.submit_tx(creation.tx)
@@ -101,7 +103,7 @@ def test_mints_locks_and_redeems_a_gift_card(devnet):
     creation, utxo = create(contract, wallet, "IntegrationGift")
     assert utxo.output.amount.multi_asset[creation.policy_id][AssetName(b"IntegrationGift")] == 1
 
-    tx = build_when_indexed(lambda: contract.redeem_gift_card(utxo, wallet))
+    tx = build_with_evaluation_retry(lambda: contract.redeem_gift_card(utxo, wallet))
     contract.context.submit_tx(tx)
 
     assert wait_for(lambda: contract.find_gift_card_utxo(creation.redeem_address) is None)
