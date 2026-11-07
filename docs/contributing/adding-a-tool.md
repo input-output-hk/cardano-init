@@ -107,7 +107,7 @@ The seams today:
 
 | Seam | Wire protocol | Served by | Consumed by |
 |---|---|---|---|
-| `blockfrost` | Blockfrost-compatible REST | Yaci, Dingo | Blaze, Evolution, Lucid Evolution, Mesh, Scalus |
+| `blockfrost` | Blockfrost-compatible REST | Yaci, Dingo | Blaze, Evolution, Lucid Evolution, Mesh, PyCardano, Scalus |
 | `u5c` | UTxORPC (gRPC) | Dolos | Mesh |
 | `trp` | Tx3 Transaction Resolve Protocol | (self-hosted; Dolos/Demeter) | Tx3 |
 | `ogmios` | Ogmios JSON-RPC | Ogmios | Blaze, Evolution, Lucid Evolution, Mesh |

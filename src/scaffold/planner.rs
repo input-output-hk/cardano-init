@@ -556,6 +556,30 @@ mod tests {
     }
 
     #[test]
+    fn pycardano_off_chain_entries() {
+        assert_plan_contains(
+            &selection(vec![a(Role::OffChain, "pycardano")]),
+            &[
+                "off-chain/pyproject.toml",
+                "off-chain/Justfile",
+                "off-chain/.env.example",
+                "off-chain/.gitignore",
+                "off-chain/src/giftcard/__init__.py",
+                "off-chain/src/giftcard/__main__.py",
+                "off-chain/src/giftcard/contract.py",
+                "off-chain/src/giftcard/env.py",
+                "off-chain/src/giftcard/flat.py",
+                "off-chain/tests/conftest.py",
+                "off-chain/tests/test_cli.py",
+                "off-chain/tests/test_contract.py",
+                "off-chain/tests/test_env.py",
+                "off-chain/tests/test_flat.py",
+                "off-chain/tests/test_integration.py",
+            ],
+        );
+    }
+
+    #[test]
     fn plan_order_is_canonical_regardless_of_input_order() {
         let forward = selection(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
         let reversed = selection(vec![a(Role::OffChain, "meshjs"), a(Role::OnChain, "aiken")]);

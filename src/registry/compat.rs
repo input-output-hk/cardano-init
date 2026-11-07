@@ -288,6 +288,26 @@ mod tests {
     }
 
     #[test]
+    fn pycardano_with_yaci_is_compatible() {
+        let reg = registry();
+        let sel = vec![a(Role::OffChain, "pycardano"), a(Role::Devnet, "yaci")];
+        assert!(check(&sel, &reg).is_none());
+    }
+
+    #[test]
+    fn pycardano_with_kupmios_is_incompatible() {
+        let reg = registry();
+        // The template only uses PyCardano's Blockfrost backend.
+        let sel = vec![
+            a(Role::OffChain, "pycardano"),
+            a(Role::Infrastructure, "kupo"),
+            a(Role::Infrastructure, "ogmios"),
+        ];
+        let inc = check(&sel, &reg).expect("pycardano + kupmios should be incompatible");
+        assert_eq!(inc.off_chain_id, "pycardano");
+    }
+
+    #[test]
     fn tx3_with_yaci_is_incompatible() {
         let reg = registry();
         let sel = vec![a(Role::OffChain, "tx3"), a(Role::Devnet, "yaci")];
