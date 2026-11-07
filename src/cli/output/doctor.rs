@@ -154,7 +154,11 @@ fn print_components(scan: &ScanResult, report: &Report, registry: &Registry) {
         table.add_row(vec![
             mark,
             format!("{}:", comp.kind),
-            theme::accent(name).to_string(),
+            format!(
+                "{}{}",
+                theme::icon_prefix_or_blank(tool),
+                theme::accent(name)
+            ),
             note,
         ]);
     }

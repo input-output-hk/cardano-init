@@ -11,6 +11,14 @@ cardano-init help [COMMAND]       # print help
 
 Every command accepts the global `--json` flag (default: human-readable output). See [For coding agents](agents.md) for the JSON output.
 
+Every command also accepts the global `--icons[=WHEN]` flag. It shows an icon before each tool name: the tool's language, or a terminal for tools you run (infrastructure, devnet). Icons need [Nerd Font](https://www.nerdfonts.com) symbols in your terminal. `WHEN` is one of:
+
+- `auto` (default): on in terminals that include Nerd Font symbols (Ghostty, WezTerm, kitty), when output goes to the terminal. Inside tmux or zellij the terminal can't be recognized, so use `always` there.
+- `always` (what plain `--icons` means): on, even when output is piped.
+- `never`: off.
+
+The CLI remembers the last value you passed, so you only need the flag once. The `CARDANO_INIT_ICONS` environment variable takes the same values and overrides the remembered one. Icons never appear in `--json` output.
+
 ## Create a project
 
 ```bash
@@ -37,6 +45,7 @@ With `--name`, the command runs in **one-shot** mode and never prompts. Without 
 | `--dry-run` | `--dryrun` | Show what would be generated without writing to disk. |
 | `--ignore-warning` | `--ignore-warnings` | Scaffold a combination the [compatibility check](how-it-works.md#compatibility-checks) flags as incompatible. |
 | `--json` | | Print machine-readable JSON instead of human-readable text. |
+| `--icons[=WHEN]` | | Show an icon before each tool name: `auto` (default), `always` or `never`. Remembered between runs. |
 | `--help` / `--version` | `-h` / `-V` | Print help / version. |
 
 Short flags and aliases behave exactly like the long flag. Errors and JSON output always use the long name. If the project directory already exists and is not empty, the command stops with `dir_exists`.
