@@ -70,6 +70,9 @@ pub struct DepRecipe {
     pub install: Vec<InstallMethod>,
     pub support: Vec<SupportLink>,
     pub version: VersionProbe,
+    /// A command to run after upgrading, chained onto every upgrade command
+    /// (e.g. refreshing components the dep downloaded itself).
+    pub after_upgrade: Option<String>,
 }
 
 /// All dep recipes, keyed by dep id.
@@ -88,6 +91,7 @@ struct DepRecipeToml {
     support: Vec<SupportLink>,
     #[serde(default)]
     version: VersionProbe,
+    after_upgrade: Option<String>,
 }
 
 impl DepRecipeToml {
@@ -103,6 +107,7 @@ impl DepRecipeToml {
             install,
             support: self.support,
             version: self.version,
+            after_upgrade: self.after_upgrade,
         })
     }
 }

@@ -264,6 +264,11 @@ fn dep_status(req: &Requirement, catalog: &DepCatalog, env: &Environment) -> Dep
         // Which installer put it there is unknown, so offer every method's
         // upgrade, available ones first, rather than one recommended plan.
         status.alternatives = alt_methods(recipe, None, env, Installer::upgrade_command);
+        if let Some(after) = &recipe.after_upgrade {
+            for alt in &mut status.alternatives {
+                alt.command = format!("{} && {after}", alt.command);
+            }
+        }
         status.docs = Some(recipe.docs.clone());
     }
     status
@@ -520,9 +525,10 @@ mod tests {
         assert!(report.all_required_present);
         assert!(!report.all_required_satisfied);
         assert!(yaci.plan.is_empty());
+        // The upgrade also refreshes the components the old CLI downloaded.
         assert_eq!(
             yaci.alternatives[0].command,
-            "npm install -g @bloxbean/yaci-devkit@latest"
+            "npm install -g @bloxbean/yaci-devkit@latest && yaci-devkit download --overwrite"
         );
         assert!(yaci.alternatives[0].available);
         assert!(yaci.docs.is_some());

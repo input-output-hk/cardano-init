@@ -10,6 +10,8 @@
 #             version it prints. Override with `{ args = [...] }`, or
 #             `{ npm = "<package>" }` to read the package.json behind the
 #             binary without running it.
+#   after_upgrade  optional command chained onto every upgrade command, for
+#             deps that download their own components.
 #
 # Installer keys are validated against the closed `Installer` enum in
 # src/doctor/installers.rs at load (unknown installer → load error). Recipes are
@@ -104,6 +106,9 @@ binaries = ["yaci-devkit"]
 docs = "https://devkit.yaci.xyz"
 install = [{ npm = "@bloxbean/yaci-devkit" }]
 version = { npm = "@bloxbean/yaci-devkit" }
+# The CLI caches cardano-node, yaci-store, etc. under ~/.yaci-cli and keeps
+# them across upgrades; a newer CLI with the old node fails to start a devnet.
+after_upgrade = "yaci-devkit download --overwrite"
 
 # --- installer-provider deps (reached via installer `bootstrap` lists) ---
 
