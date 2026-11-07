@@ -40,10 +40,13 @@ dev:
     yaci-devkit up --enable-yaci-store
 
 # A devnet leaves nothing to build. `clean` stops a devnet if one is still
-# running (the npm CLI has no `down` command, so we stop its process tree —
-# scoped to ~/.yaci-cli, a no-op when nothing is running) and clears the
-# connection details it published to ../.env.
+# running and clears the connection details it published to ../.env. The npm
+# CLI has no `down` command: stop yaci-cli first (via the PID file the
+# `yaci-devkit` wrapper writes, only if that PID is still yaci-cli) so it
+# can't restart the node, then its components, which run from ~/.yaci-cli.
+# A no-op when nothing is running.
 clean:
+    @pid_file="$HOME/.yaci-cli/yaci-cli.pid"; if [ -f "$pid_file" ]; then pid="$(cat "$pid_file")"; if ps -p "$pid" -o comm= 2>/dev/null | grep -q yaci-cli; then kill "$pid"; fi; rm -f "$pid_file"; fi
     @pkill -f "$HOME/.yaci-cli/" 2>/dev/null || true
     @node scripts/set-env.mjs --clear
     @echo "Cleared the devnet connection details from ../.env."
