@@ -136,6 +136,29 @@ impl Installer {
             Installer::PowerShell => format!("powershell -c \"irm {arg} | iex\""),
         }
     }
+
+    /// Render the command that upgrades an installed dep to the latest
+    /// version. Installers whose install command already fetches the latest
+    /// (re-running an installer script, `go install …@latest`, `cargo install`,
+    /// `aikup install`) reuse it.
+    pub fn upgrade_command(self, arg: &str) -> String {
+        match self {
+            Installer::Brew => format!("brew upgrade {arg}"),
+            Installer::Apt => format!("sudo apt install --only-upgrade -y {arg}"),
+            Installer::Dnf => format!("sudo dnf upgrade -y {arg}"),
+            Installer::Winget => format!("winget upgrade {arg}"),
+            Installer::Nix => format!("nix profile upgrade {arg}"),
+            Installer::Npm => format!("npm install -g {arg}@latest"),
+            Installer::Pacman
+            | Installer::Go
+            | Installer::Cargo
+            | Installer::Aikup
+            | Installer::CardanoUp
+            | Installer::Tx3up
+            | Installer::Curl
+            | Installer::PowerShell => self.command(arg),
+        }
+    }
 }
 
 impl fmt::Display for Installer {
@@ -199,5 +222,19 @@ mod tests {
         // Empty aikup arg renders bare `aikup install` (latest), no trailing space.
         assert_eq!(Installer::Aikup.command(""), "aikup install");
         assert_eq!(Installer::Aikup.command("v1.1.0"), "aikup install v1.1.0");
+    }
+
+    #[test]
+    fn upgrade_command_templates() {
+        assert_eq!(Installer::Brew.upgrade_command("node"), "brew upgrade node");
+        assert_eq!(
+            Installer::Npm.upgrade_command("@bloxbean/yaci-devkit"),
+            "npm install -g @bloxbean/yaci-devkit@latest"
+        );
+        // An installer script always installs the latest: re-run it.
+        assert_eq!(
+            Installer::Curl.upgrade_command("https://sh.rustup.rs"),
+            Installer::Curl.command("https://sh.rustup.rs")
+        );
     }
 }

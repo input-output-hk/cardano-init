@@ -21,12 +21,13 @@ description = """\
 One to three sentences. What does this tool do, and when should \
 someone choose it over alternatives?"""
 website     = "https://mytool.dev"
-community   = [                        # Optional: official help channels, shown by `doctor` and `list`
+community   = [                        # Optional: official help channels, shown by `doctor --links` and `list`
   { name = "Discord", url = "https://discord.gg/…" },
   { name = "GitHub Discussions", url = "https://github.com/acme/mytool/discussions" },
 ]
 languages   = ["typescript"]           # Languages the generated project uses
 system_deps = ["mytool-cli"]           # What the user needs installed (drives `doctor`; each id needs a registry/deps.toml entry)
+min_versions = { mytool-cli = "2.1" }  # Optional: the oldest version of a system_dep your template works with (see below)
 nix_packages = ["mytool"]              # Nix package name(s), if available (omit if none)
 # nix_self_contained = true            # optional; set if the template ships its own component flake (keeps nix_packages out of the top-level shell — see The manifest)
 detect      = ["mytool.config.js"]     # How `doctor` recognizes this tool in a scanned project (see below)
@@ -44,7 +45,20 @@ detect = [{ file = "package.json", contains = "mytool" }]  # generic filename �
 
 Only tools that declare a role are tested against that role's directory, so signatures only need to disambiguate *within* a role. A directory that matches nothing is reported as "unrecognized" — `doctor` checks dependencies, it does not validate that the component builds (that's `just test`).
 
-**Supporting tools.** In the dep's `registry/deps.toml` entry, you can add an optional `support` list pointing users at your language's editor tooling (VS Code / Neovim extensions, a language server, a playground). `cardano-init doctor` lists these for every detected tool, and `cardano-init list` shows them under each tool that depends on this dep:
+**Minimum versions.** If your template needs a feature that older releases of a dep lack, set `min_versions` for that dep. Use the oldest version you know works, and say why in a one-line comment. Keys must be in `system_deps`; values are dotted numbers (`"0.12.0"`, `"9.8"`). `doctor` then reads the installed version and flags anything older, with the upgrade command. A floor is per tool: when two selected tools need the same dep, the higher floor wins.
+
+`doctor` reads the version by running the dep's binary with `--version` and taking the first dotted version it prints. If that doesn't work for your dep, set `version` in its `registry/deps.toml` entry:
+
+```toml
+[cardano-up]
+version = { args = ["version"] }               # the binary takes another argument
+[yaci-devkit]
+version = { npm = "@bloxbean/yaci-devkit" }    # read the npm package.json, don't run the binary
+```
+
+Use `npm` when running the binary has side effects (`yaci-devkit --version` starts the CLI, which stops a running devnet). When `doctor` can't read a version, it treats the dep as satisfied rather than block on something it can't check.
+
+**Supporting tools.** In the dep's `registry/deps.toml` entry, you can add an optional `support` list pointing users at your language's editor tooling (VS Code / Neovim extensions, a language server, a playground). `cardano-init doctor --links` lists these for every detected tool, and `cardano-init list` shows them under each tool that depends on this dep:
 
 ```toml
 [mytool-cli]

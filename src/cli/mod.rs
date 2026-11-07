@@ -56,7 +56,7 @@ pub fn run() -> i32 {
     }
 
     let result = match cli.command {
-        Some(Command::Doctor) => run_doctor(&registry, json),
+        Some(Command::Doctor(args)) => run_doctor(&registry, json, args.links),
         Some(Command::List(args)) => DepCatalog::load()
             .map_err(CliError::from)
             .map(|catalog| output::print_list(&registry, &catalog, json, args.table)),
@@ -75,25 +75,6 @@ pub fn run() -> i32 {
 fn fail(err: &CliError, json: bool) -> i32 {
     output::print_error(err, json);
     err.exit_code()
-}
-
-/// The required dependencies for a set of tool ids: the base dep `just` plus
-/// each tool's `system_deps` (the resolver dedups/sorts).
-///
-/// The scan reports the aggregated infra component under
-/// [`doctor::INFRA_DRIVER_ID`]; it needs the union of every infra tool's deps.
-fn required_deps<'a>(tool_ids: impl Iterator<Item = &'a str>, registry: &Registry) -> Vec<String> {
-    let mut deps = vec![doctor::BASE_DEP.to_string()];
-    for id in tool_ids {
-        if id == doctor::INFRA_DRIVER_ID {
-            for tool in registry.tools_for_role(Role::Infrastructure) {
-                deps.extend(tool.system_deps.iter().cloned());
-            }
-        } else if let Some(tool) = registry.get(id) {
-            deps.extend(tool.system_deps.iter().cloned());
-        }
-    }
-    deps
 }
 
 /// Run `work` behind a transient spinner on stderr. Only for human, attended
@@ -120,14 +101,15 @@ fn with_spinner<T>(message: &str, json: bool, work: impl FnOnce() -> T) -> T {
 
 /// `doctor`: scan the current directory for generated components, then report
 /// dependency status and install plans.
-fn run_doctor(registry: &Registry, json: bool) -> Result<(), CliError> {
+fn run_doctor(registry: &Registry, json: bool, links: bool) -> Result<(), CliError> {
     let catalog = DepCatalog::load()?;
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let scan = probe::scan_project(&cwd, registry);
 
-    let required = required_deps(scan.components.iter().map(|c| c.tool_id.as_str()), registry);
+    let required =
+        doctor::requirements(scan.components.iter().map(|c| c.tool_id.as_str()), registry);
     let (env, report, tooling) = with_spinner("Probing environment…", json, || {
-        let env = probe::detect_environment(&catalog);
+        let env = probe::detect_environment(&catalog, &required);
         let report = doctor::resolve_all(&required, &catalog, &env);
         let tooling = if scan.components.is_empty() && scan.unrecognized.is_empty() {
             doctor::present_tooling(&catalog, registry, &env)
@@ -142,7 +124,7 @@ fn run_doctor(registry: &Registry, json: bool) -> Result<(), CliError> {
         (env, report, tooling)
     });
 
-    output::print_doctor(&scan, &report, &env, &tooling, registry, json);
+    output::print_doctor(&scan, &report, &env, &tooling, registry, json, links);
     Ok(())
 }
 
@@ -269,11 +251,11 @@ fn resolve_selection_deps(
     registry: &Registry,
 ) -> Result<doctor::Report, CliError> {
     let catalog = DepCatalog::load()?;
-    let required = required_deps(
+    let required = doctor::requirements(
         selection.assignments.iter().map(|a| a.tool_id.as_str()),
         registry,
     );
-    let env = probe::detect_environment(&catalog);
+    let env = probe::detect_environment(&catalog, &required);
     Ok(doctor::resolve_all(&required, &catalog, &env))
 }
 
@@ -420,32 +402,5 @@ mod tests {
         let registry = Registry::load().unwrap();
         let res = run_init(&tx3_devnet_args("yaci", true), &registry, true);
         assert!(res.is_ok(), "expected Ok, got {res:?}");
-    }
-
-    #[test]
-    fn required_deps_unions_just_with_tool_deps() {
-        let registry = Registry::load().unwrap();
-        // aiken → ["aiken"], meshjs → ["node"]; plus the base dep "just".
-        let deps = required_deps(["aiken", "meshjs"].into_iter(), &registry);
-        assert!(deps.contains(&"just".to_string()));
-        assert!(deps.contains(&"aiken".to_string()));
-        assert!(deps.contains(&"node".to_string()));
-    }
-
-    #[test]
-    fn required_deps_for_yaci_includes_its_cli() {
-        let registry = Registry::load().unwrap();
-        let deps = required_deps(["yaci"].into_iter(), &registry);
-        assert!(deps.contains(&"yaci-devkit".to_string()));
-        assert!(deps.contains(&"node".to_string()));
-    }
-
-    #[test]
-    fn required_deps_resolves_infra_driver_to_union() {
-        let registry = Registry::load().unwrap();
-        let deps = required_deps([doctor::INFRA_DRIVER_ID].into_iter(), &registry);
-        assert!(deps.contains(&"just".to_string()));
-        assert!(deps.contains(&"docker".to_string()));
-        assert!(deps.contains(&"cardano-up".to_string()));
     }
 }

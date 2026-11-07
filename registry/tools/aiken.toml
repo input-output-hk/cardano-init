@@ -14,6 +14,8 @@ community = [
 ]
 languages = ["aiken"]
 system_deps = ["aiken"]
+# Matches the compiler pinned in the template's aiken.toml.
+min_versions = { aiken = "1.1.23" }
 nix_packages = ["aiken"]
 detect = ["aiken.toml"]
 
