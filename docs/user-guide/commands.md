@@ -57,13 +57,18 @@ cardano-init list --json   # machine-readable catalog
 
 ## `doctor`
 
-Run `doctor` inside a generated project. It finds the project's components, checks that the toolchains they need are installed, and prints the install command for each one that is missing. It also lists the supporting tools (editor extensions, language servers) and the community channels for those components.
+Run `doctor` inside a generated project. It finds the project's components, checks that the toolchains they need are installed and recent enough, and prints the install command for each one that is missing and the upgrade command for each one that is too old. Add `--links` to also list the editor extensions, language servers, and community channels for the project's tools.
 
 ```bash
 cd my-protocol
 cardano-init doctor
+cardano-init doctor --links
 cardano-init doctor --json
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--links` | Also show the project's supporting tools and help channels (human output only). |
 
 ## `add`
 

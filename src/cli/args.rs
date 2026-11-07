@@ -23,7 +23,7 @@ pub struct Cli {
 pub enum Command {
     /// Check that the dependencies this project needs are installed, and
     /// advise how to install any that are missing
-    Doctor,
+    Doctor(DoctorArgs),
 
     /// List the available roles and tools (use --json for agents)
     List(ListArgs),
@@ -34,6 +34,15 @@ pub enum Command {
     /// Remove a role (or an infrastructure provider) from the project in the
     /// current directory
     Remove(RemoveArgs),
+}
+
+/// Arguments for `doctor`.
+#[derive(clap::Args, Debug, Default)]
+pub struct DoctorArgs {
+    /// Also show the editor tooling and help channels for this project's
+    /// tools (human output only; `--json` is unaffected)
+    #[arg(long)]
+    pub links: bool,
 }
 
 /// Arguments for `list`.

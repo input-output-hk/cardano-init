@@ -1,13 +1,13 @@
 //! The `doctor` presenter and the dependency advice block that the generating
 //! commands also print after scaffolding.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use comfy_table::ContentArrangement;
 use serde_json::json;
 
 use super::emit_json_ok;
-use super::layout::{borderless_table, print_panel, print_rule, print_table};
+use super::layout::{borderless_table, print_dim_rule, print_panel, print_table};
 use crate::cli::theme;
 use crate::doctor::installers::Installer;
 use crate::doctor::probe::{Environment, ScanResult};
@@ -16,7 +16,9 @@ use crate::registry::loader::Registry;
 use crate::registry::types::Link;
 
 /// Print the standalone `doctor` report: environment, detected components, and
-/// dependency status with install advice.
+/// dependency status with install advice. The project's editor tooling and
+/// help channels are shown only with `links`; otherwise one line offers them
+/// (`--json` always carries the tooling as `deps[].support`).
 pub fn print_doctor(
     scan: &ScanResult,
     report: &Report,
@@ -24,6 +26,7 @@ pub fn print_doctor(
     tooling: &[String],
     registry: &Registry,
     json: bool,
+    links: bool,
 ) {
     let installers = detected_installers(env);
     let project_detected = !(scan.components.is_empty() && scan.unrecognized.is_empty());
@@ -31,6 +34,7 @@ pub fn print_doctor(
     if json {
         emit_json_ok(&json!({
             "all_required_present": report.all_required_present,
+            "all_required_satisfied": report.all_required_satisfied,
             "environment": { "os": env.os, "installers": installers, "tooling": tooling },
             "project_detected": project_detected,
             "components": scan.components,
@@ -54,24 +58,30 @@ pub fn print_doctor(
         print_no_project_hint();
     }
 
-    if project_detected || !report.all_required_present {
+    if project_detected || !report.all_required_satisfied {
         print_dep_advice(report);
     }
     if project_detected {
-        print_link_table(
-            "Supporting tools",
-            report
-                .deps
-                .iter()
-                .map(|dep| (dep.id.as_str(), dep.support.as_slice())),
-        );
-        print_link_table(
-            "Get help",
-            scan.components
-                .iter()
-                .filter_map(|comp| registry.get(&comp.tool_id))
-                .map(|tool| (tool.name.as_str(), tool.community.as_slice())),
-        );
+        let support = report
+            .deps
+            .iter()
+            .map(|dep| (dep.id.as_str(), dep.support.as_slice()));
+        let community = scan
+            .components
+            .iter()
+            .filter_map(|comp| registry.get(&comp.tool_id))
+            .map(|tool| (tool.name.as_str(), tool.community.as_slice()));
+        if links {
+            print_link_table("Supporting tools", support);
+            print_link_table("Get help", community);
+        } else if support.chain(community).any(|(_, links)| !links.is_empty()) {
+            println!();
+            println!(
+                "  {} {}",
+                theme::dim("Editor tooling and help channels for this project:"),
+                theme::command("cardano-init doctor --links")
+            );
+        }
     }
     println!();
 }
@@ -119,36 +129,44 @@ fn environment_rows(env: &Environment, installers: &[&str], tooling: &[String]) 
 }
 
 /// One row per detected component, marked by whether the tool's required
-/// dependencies are present (not merely whether it was detected), plus one row
-/// per unrecognized directory.
+/// dependencies are present and new enough (not merely whether it was
+/// detected), plus one row per unrecognized directory.
 fn print_components(scan: &ScanResult, report: &Report, registry: &Registry) {
-    let present: HashSet<&str> = report
-        .deps
-        .iter()
-        .filter(|d| d.present)
-        .map(|d| d.id.as_str())
-        .collect();
+    let deps: HashMap<&str, &DepStatus> = report.deps.iter().map(|d| (d.id.as_str(), d)).collect();
 
     let mut table = borderless_table();
     for comp in &scan.components {
         let tool = registry.get(&comp.tool_id);
         let name = tool.map_or(comp.tool_id.as_str(), |t| t.name.as_str());
-        let missing: Vec<&str> = tool
+        let tool_deps: Vec<&DepStatus> = tool
             .map(|t| {
                 t.system_deps
                     .iter()
-                    .map(String::as_str)
-                    .filter(|d| !present.contains(d))
+                    .filter_map(|d| deps.get(d.as_str()).copied())
                     .collect()
             })
             .unwrap_or_default();
+        let missing: Vec<&str> = tool_deps
+            .iter()
+            .filter(|d| !d.present)
+            .map(|d| d.id.as_str())
+            .collect();
+        // The versions are in the advice below; here just flag it.
+        let outdated = tool_deps.iter().any(|d| d.outdated);
 
-        let (mark, note) = if missing.is_empty() {
+        let problems: Vec<String> = [
+            (!missing.is_empty()).then(|| format!("missing: {}", missing.join(", "))),
+            outdated.then(|| "outdated".to_string()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let (mark, note) = if problems.is_empty() {
             (theme::ok().to_string(), String::new())
         } else {
             (
                 theme::caution().to_string(),
-                theme::warn(format!("missing: {}", missing.join(", "))).to_string(),
+                theme::warn(problems.join("; ")).to_string(),
             )
         };
         table.add_row(vec![
@@ -185,7 +203,8 @@ fn print_no_project_hint() {
 }
 
 /// A titled `owner  name  url` table, with each owner named on its first link
-/// only. Prints nothing when there are no links.
+/// only, all dimmed: reference material, secondary to the dependency status.
+/// Prints nothing when there are no links.
 fn print_link_table<'a>(title: &str, groups: impl Iterator<Item = (&'a str, &'a [Link])>) {
     let mut table = borderless_table();
     table.set_content_arrangement(ContentArrangement::Disabled);
@@ -193,9 +212,9 @@ fn print_link_table<'a>(title: &str, groups: impl Iterator<Item = (&'a str, &'a 
         for (i, link) in links.iter().enumerate() {
             let label = if i == 0 { owner } else { "" };
             table.add_row(vec![
-                theme::strong(label).to_string(),
-                link.name.clone(),
-                theme::link(&link.url).to_string(),
+                theme::dim(label).to_string(),
+                theme::dim(&link.name).to_string(),
+                theme::dim(theme::link(&link.url)).to_string(),
             ]);
         }
     }
@@ -203,15 +222,15 @@ fn print_link_table<'a>(title: &str, groups: impl Iterator<Item = (&'a str, &'a 
         return;
     }
     println!();
-    print_rule(title);
+    print_dim_rule(title);
     print_table(table, theme::PAD);
 }
 
-/// Print the dependency status badge and, when required deps are missing, how
-/// to install each of them.
+/// Print the dependency status badge and, when required deps are missing or
+/// too old, how to install or upgrade each of them.
 pub(super) fn print_dep_advice(report: &Report) {
     println!();
-    if report.all_required_present {
+    if report.all_required_satisfied {
         println!(
             "  {}  all required dependencies present",
             theme::badge_ok("DEPS OK")
@@ -219,28 +238,34 @@ pub(super) fn print_dep_advice(report: &Report) {
         return;
     }
 
-    println!(
-        "  {}  install the required dependencies below",
-        theme::badge_warn("DEPS MISSING")
-    );
-    for dep in report.missing_required() {
-        print_missing_dep(dep);
+    let (badge, lead_in) = if report.all_required_present {
+        ("DEPS OUTDATED", "upgrade the dependencies below")
+    } else if report.deps.iter().any(|d| d.outdated) {
+        ("DEPS MISSING", "install or upgrade the dependencies below")
+    } else {
+        ("DEPS MISSING", "install the required dependencies below")
+    };
+    println!("  {}  {lead_in}", theme::badge_warn(badge));
+    for dep in report.unsatisfied_required() {
+        print_unsatisfied_dep(dep);
     }
 }
 
 /// Indent for a dependency's detail lines, one level under its header.
 const DEP_INDENT: &str = "      ";
 
-/// One missing dependency: a header, an aligned `command  status` table (the
-/// recommended path, then the alternatives), and the docs link.
-fn print_missing_dep(dep: &DepStatus) {
+/// One missing or outdated dependency: a header, an aligned `command  status`
+/// table (the recommended path, then the alternatives), and the docs link.
+fn print_unsatisfied_dep(dep: &DepStatus) {
     println!();
 
     let has_methods = !dep.plan.is_empty() || !dep.alternatives.is_empty();
-    let lead_in = if has_methods {
-        "not installed — install with any of:"
-    } else {
-        "not installed — no automatic install method for this system"
+    let lead_in = match (dep.outdated, &dep.version, &dep.min_version) {
+        (true, Some(version), Some(min)) => {
+            format!("{version} installed, needs {min} or newer — upgrade with any of:")
+        }
+        _ if has_methods => "not installed — install with any of:".to_string(),
+        _ => "not installed — no automatic install method for this system".to_string(),
     };
     println!(
         "  {} {}  {}",

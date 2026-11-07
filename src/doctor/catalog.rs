@@ -39,6 +39,26 @@ pub struct InstallMethod {
 
 pub use crate::registry::types::Link as SupportLink;
 
+/// How to read an installed dep's version (tech-spec §9.7). Only run for deps
+/// a selected tool sets a minimum version for.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VersionProbe {
+    /// Run the dep's binary with these args and take the first dotted version
+    /// in its output. The default is `--version`.
+    Args(Vec<String>),
+    /// Read `version` from this npm package's `package.json` behind the
+    /// binary, without running it. For CLIs whose `--version` has side effects
+    /// (`yaci-devkit --version` boots the CLI and kills a running devnet).
+    Npm(String),
+}
+
+impl Default for VersionProbe {
+    fn default() -> Self {
+        VersionProbe::Args(vec!["--version".to_string()])
+    }
+}
+
 /// A per-dependency recipe.
 #[derive(Debug, Clone)]
 pub struct DepRecipe {
@@ -49,6 +69,10 @@ pub struct DepRecipe {
     /// Install methods in preference order.
     pub install: Vec<InstallMethod>,
     pub support: Vec<SupportLink>,
+    pub version: VersionProbe,
+    /// A command to run after upgrading, chained onto every upgrade command
+    /// (e.g. refreshing components the dep downloaded itself).
+    pub after_upgrade: Option<String>,
 }
 
 /// All dep recipes, keyed by dep id.
@@ -65,6 +89,9 @@ struct DepRecipeToml {
     install: Vec<HashMap<String, String>>,
     #[serde(default)]
     support: Vec<SupportLink>,
+    #[serde(default)]
+    version: VersionProbe,
+    after_upgrade: Option<String>,
 }
 
 impl DepRecipeToml {
@@ -79,6 +106,8 @@ impl DepRecipeToml {
             docs: self.docs,
             install,
             support: self.support,
+            version: self.version,
+            after_upgrade: self.after_upgrade,
         })
     }
 }
@@ -191,6 +220,31 @@ install = [{ brew = "foo" }]
                 );
             }
         }
+    }
+
+    #[test]
+    fn version_probe_defaults_to_dash_dash_version() {
+        let toml = r#"
+[foo]
+binaries = ["foo"]
+docs = "https://example.com"
+install = [{ brew = "foo" }]
+"#;
+        let cat = DepCatalog::from_str(toml).unwrap();
+        assert_eq!(cat.get("foo").unwrap().version, VersionProbe::default());
+    }
+
+    #[test]
+    fn version_probe_overrides() {
+        let cat = DepCatalog::load().unwrap();
+        assert_eq!(
+            cat.get("yaci-devkit").unwrap().version,
+            VersionProbe::Npm("@bloxbean/yaci-devkit".to_string())
+        );
+        assert_eq!(
+            cat.get("cardano-up").unwrap().version,
+            VersionProbe::Args(vec!["version".to_string()])
+        );
     }
 
     #[test]

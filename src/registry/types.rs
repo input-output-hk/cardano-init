@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use super::version::Version;
 use crate::contract;
 
 /// The functional roles a tool can fill within a Cardano protocol project.
@@ -202,6 +203,9 @@ pub struct ToolDef {
     pub languages: Vec<String>,
     /// Dependency ids this tool requires; each has a `registry/deps.toml` entry.
     pub system_deps: Vec<String>,
+    /// The lowest version of a `system_deps` entry this tool's template works
+    /// with (tech-spec §9.7). Keys are validated against `system_deps` at load.
+    pub min_versions: BTreeMap<String, Version>,
     pub nix_packages: Vec<String>,
     /// The tool ships its own component-local Nix flake. Its `nix_packages` are
     /// then not added to the top-level shell as nixpkgs attrs (a plain `mkShell`

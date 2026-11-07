@@ -12,7 +12,7 @@
 | **0** | **DX.02**: Specs + POC | **31 Aug 2026** | A working, could-be-final tool showing **all five roles**, with specs/architecture/integration strategy, shown to the community + key players for feedback. |
 | **1** | **DX.05**: RC ready | **30 Nov 2026** | Public **Release Candidate**: reduced-stack CLI that builds green, **docs**, a dependency **install** command (nice-to-have), hardened CI/CD + tests. |
 | **2** | Post-RC / GA | TBD (post-Nov) | Stabilize RC → GA, widen the stack, promote auto-install to supported. |
-| **3** | Later | Unscheduled | Plugin hooks, min-version checks, community-driven scope. |
+| **3** | Later | Unscheduled | Plugin hooks, community-driven scope. |
 
 Deliverables below are tracked as checklists (`[ ]` = not yet done).
 
@@ -109,7 +109,6 @@ Direction (unscheduled; shaped by RC feedback):
 ## Phase 3: Later (unscheduled)
 
 - **Plugin/lifecycle hooks** for tools (e.g. post-scaffold actions), reserved by the architecture, not yet needed.
-- **Min-version constraints** in the doctor (version detection, not just presence).
 - New roles, if a real need emerges (a deliberate code change, ARCHITECTURE §3.1).
 
 ---

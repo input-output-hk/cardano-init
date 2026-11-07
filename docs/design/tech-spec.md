@@ -506,7 +506,7 @@ A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) 
 }}
 ```
 
-`list` renders from a shared model (`registry::view`: `role_views()` / `tool_views()`). The human output has two forms: the default (a Roles table plus a per-tool block), and a compact **`--table`** view — a full-grid matrix with one column per role (in `Role::ALL` order), each role's tools stacked and experimental ones tagged `🧪`. `--table` is a human-presentation flag only; it has no effect under `--json` (the JSON already carries the same data). `roles[].multiple` is `true` only for infrastructure (`Role::multiple`). `tools[].fullstack` is `true` when the tool declares a `[fullstack]` template (i.e. `--fullstack <tool>` is valid); it is an additive field (no `schema_version` bump). `fullstack` is a capability, **not** a role — it never appears in `tools[].roles` or in the `roles` array. `tools[].experimental` is `true` for tools that are unstable and/or not yet build-green (§3.2.1); selecting one needs `--allow-experimental` — also additive. `tools[].community` lists the tool's official help channels (Discord, GitHub Discussions, …) as `{ name, url }`, from the optional `community` field in the tool's TOML; empty when none (additive). The default human `list` prints them as a `Community:` line in each tool block; the standalone `doctor` shows these for each detected component under a "Get help" heading. `tools[].support` lists the tool's supporting tools (editor extensions, language servers, playgrounds): the `support` links of every dep in its `system_deps` (§9), deduplicated by URL; empty when none (additive). The human `list` prints them as a `Tooling:` line.
+`list` renders from a shared model (`registry::view`: `role_views()` / `tool_views()`). The human output has two forms: the default (a Roles table plus a per-tool block), and a compact **`--table`** view — a full-grid matrix with one column per role (in `Role::ALL` order), each role's tools stacked and experimental ones tagged `🧪`. `--table` is a human-presentation flag only; it has no effect under `--json` (the JSON already carries the same data). `roles[].multiple` is `true` only for infrastructure (`Role::multiple`). `tools[].fullstack` is `true` when the tool declares a `[fullstack]` template (i.e. `--fullstack <tool>` is valid); it is an additive field (no `schema_version` bump). `fullstack` is a capability, **not** a role — it never appears in `tools[].roles` or in the `roles` array. `tools[].experimental` is `true` for tools that are unstable and/or not yet build-green (§3.2.1); selecting one needs `--allow-experimental` — also additive. `tools[].community` lists the tool's official help channels (Discord, GitHub Discussions, …) as `{ name, url }`, from the optional `community` field in the tool's TOML; empty when none (additive). The default human `list` prints them as a `Community:` line in each tool block; `doctor --links` shows them for each detected component under a "Get help" heading. `tools[].support` lists the tool's supporting tools (editor extensions, language servers, playgrounds): the `support` links of every dep in its `system_deps` (§9), deduplicated by URL; empty when none (additive). The human `list` prints them as a `Tooling:` line.
 
 ---
 
@@ -514,12 +514,12 @@ A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) 
 
 Implemented for DX.02: the standalone `cardano-init doctor` command plus check-and-advise after generation. Both run the same pure resolver (§9.4) over the same catalog (§9.2).
 
-**Scope — what the doctor *is*.** A **dependency checker and advisor**: it determines which required dependencies are present and, for missing ones, prints an OS-aware, ordered install plan (never just "go install it"). v1 prints the plan; v2 (DX.05) executes it with consent (same data, same resolver).
+**Scope — what the doctor *is*.** A **dependency checker and advisor**: it determines which required dependencies are present and recent enough and, for missing ones, prints an OS-aware, ordered install plan (never just "go install it"); for outdated ones, the upgrade commands (§9.7). v1 prints the plan; v2 (DX.05) executes it with consent (same data, same resolver).
 
 **Out of scope — what the doctor is *not*.**
 - **A project validator.** The doctor does not verify that a component actually builds, type-checks, or is otherwise viable — that is the job of each component's `just build` / `just test` (the interface contract requires those to work standalone, §7). A directory that *looks* like a tool (matching signatures, §9.6) but isn't wired up correctly will still pass the doctor; it will fail `just test`. Keeping these separate avoids duplicating the build system's job in a fragile heuristic.
 - **Alternative runtimes / package managers.** Each template fixes its toolchain (e.g. the MeshJS/Yaci components invoke `npm`/`node`/`npx` directly in their Justfiles), so `node` is the honest required dep. The doctor reflects what the template needs; it does not offer to satisfy that with `bun`/`deno`/etc. Making a component runtime-agnostic is a template decision, not a doctor feature (and cuts against the fixed-convention philosophy, ARCHITECTURE §3.1).
-- **Version constraints.** Presence only in v1 (§9.3); minimum-version checks are a later item (ROADMAP Phase 3).
+- **Exact or upper version bounds.** The doctor checks minimum versions only (§9.7). A template that needs an exact toolchain (e.g. Plutarch's GHC 9.8.x) enforces it in its own `build`.
 
 ### 9.1 Dependency sets (required vs recommended)
 
@@ -528,6 +528,7 @@ Pure functions of the selection. Two tiers:
 ```
 required_deps    = {"just"}                                  // universal task runner
                  ∪ (tool.system_deps for each selected tool) // unioned, deduped
+                   each with its highest min_versions floor  // §9.7
 recommended_deps = {}                                        // see note
 ```
 
@@ -602,7 +603,8 @@ install=[ {brew="process-compose"}, {go="github.com/f1bonacc1/process-compose@la
 ```
 
 ```rust
-struct DepRecipe { binaries: Vec<String>, docs: String, install: Vec<(Installer, String)>, support: Vec<SupportLink> } // ordered
+struct DepRecipe { binaries: Vec<String>, docs: String, install: Vec<(Installer, String)>, support: Vec<SupportLink>, version: VersionProbe } // ordered
+enum VersionProbe { Args(Vec<String>) /* default ["--version"] */, Npm(String) }   // §9.7
 struct SupportLink { name: String, url: String }   // optional `support` list; defaults to empty
 type DepCatalog = HashMap<String, DepRecipe>;   // dep id → recipe (loaded from registry/deps.toml)
 ```
@@ -612,11 +614,11 @@ Installers (logic, closed vocab) are code; recipes (which installer + arg per de
 ### 9.3 Environment (impure probe)
 
 ```rust
-struct Environment { os: Os, installers: HashSet<Installer> /* detected present */ }
+struct Environment { os: Os, installers: HashSet<Installer> /* detected present */, present_binaries: HashSet<String>, versions: HashMap<DepId, Version> }
 enum Os { Linux, MacOs, Windows, Other }
 ```
 
-`probe.rs` detects the OS and which installers are present (installer available if one of its `detect` binaries is on `PATH`). A **dep** is present if one of its `binaries` is on `PATH`. No execution, no version (v1).
+`probe.rs` detects the OS and which installers are present (installer available if one of its `detect` binaries is on `PATH`). A **dep** is present if one of its `binaries` is on `PATH`. The only process the probe runs is a dep's version probe, and only for required deps with a floor (§9.7).
 
 ### 9.4 Resolver (pure, recursive) & Report
 
@@ -646,8 +648,12 @@ The two passes are what make a directly-usable installer win over bootstrapping 
 ```json
 { "schema_version": 1, "ok": true, "data": {
   "all_required_present": false,
+  "all_required_satisfied": false,
   "deps": [
-    { "id": "node",  "required": true,  "present": true },
+    { "id": "node",  "required": true,  "present": true, "version": "24.21.0", "min_version": "18" },
+    { "id": "yaci-devkit", "required": true, "present": true, "version": "0.10.6", "min_version": "0.12.0", "outdated": true,
+      "alternatives": [ { "installer": "npm", "command": "npm install -g @bloxbean/yaci-devkit@latest", "available": true } ],
+      "docs": "https://devkit.yaci.xyz" },
     { "id": "aiken", "required": true,  "present": false,
       "plan": [ { "installer": "npm",   "command": "npm install -g @aiken-lang/aikup" },
                 { "installer": "aikup", "command": "aikup install" } ],
@@ -662,8 +668,9 @@ The two passes are what make a directly-usable installer win over bootstrapping 
 
 - `plan` = the ordered, possibly multi-step install sequence the resolver produced **for this host** (empty when present; omitted/empty with only `docs` when unresolved).
 - `alternatives` (additive) = the recipe's *other* install methods, so the user can pick a different installer. Each is `{ installer, command, available }` where `available` = that installer is present on this host now. Ordered available-first, then those needing their installer installed; the method already used by `plan` is excluded. Omitted when the dep is present or the recipe offers no other method. The presenter lists available ones as plain commands and tags the rest `requires <installer>`.
-- `required` distinguishes tiers; `all_required_present` ignores recommended deps. The presenter shows missing required deps prominently and recommended ones as a soft note with `reason`. `docs` is always available so advice is never empty (FR-20).
-- `support` (additive) = the recipe's supporting tools (editor extensions, language servers, inspectors) as `{ name, url }`. Unlike `docs`, it is reported **whether or not** the dep is present (editor tooling matters after install too); omitted when the recipe declares none. It's advice only: never installed or probed. The standalone `doctor` lists it under a "Supporting tools" heading, and `list` shows it per tool (§8); generation-time advice does not.
+- `version` / `min_version` / `outdated` (additive, §9.7): `min_version` is the floor when any selected tool sets one; `version` is the installed version when it was read; `outdated` (omitted when false) means present but below the floor. An outdated dep has no `plan`; its `alternatives` are every recipe method's **upgrade** command (which installer put it there is unknown), plus `docs`.
+- `required` distinguishes tiers; `all_required_present` (on `PATH`, any version) and `all_required_satisfied` (present and not outdated) ignore recommended deps. The `DEPS OK` badge follows `all_required_satisfied`. The presenter shows missing required deps prominently and recommended ones as a soft note with `reason`. `docs` is always available so advice is never empty (FR-20).
+- `support` (additive) = the recipe's supporting tools (editor extensions, language servers, inspectors) as `{ name, url }`. Unlike `docs`, it is reported **whether or not** the dep is present (editor tooling matters after install too); omitted when the recipe declares none. It's advice only: never installed or probed. The human `doctor` keeps to dependency status: only with `--links` (a human-output flag, like `list --table`) does it print the project's supporting tools under a "Supporting tools" heading and its components' help channels under "Get help". Without it, when there are any, it ends with one line offering `cardano-init doctor --links`. `list` shows them per tool (§8); generation-time advice does not.
 - Doctor output is **host-dependent by design** (it reflects detected installers) and is **not** part of the byte-identical generation contract (§11). v1 prints the plan; v2 executes it (same data, same resolver).
 
 ### 9.5 Referential integrity (tests)
@@ -672,6 +679,8 @@ The two passes are what make a directly-usable installer win over bootstrapping 
 - Every installer named in any recipe is an `Installer` enum variant (also enforced at load).
 - Every dep id in any installer's `bootstrap` list has a recipe entry.
 - The dep graph resolves without infinite recursion (the resolver's cycle guard is exercised by a test).
+- Every `min_versions` key is one of the tool's `system_deps`, and every value parses as a version (enforced at load).
+- The Aiken floor equals the compiler pinned in the template's `aiken.toml`.
 
 ### 9.6 Project scan & tool detection (standalone `doctor`)
 
@@ -700,6 +709,26 @@ detect = [{ file = "package.json", contains = "@meshsdk" }]
 ```
 
 The `contains` form is what keeps detection **honest without overreaching** (per the scope note above): a from-scratch JS project (e.g. Next.js) has a `package.json`, but without `@meshsdk` it is *not* identified as MeshJS — it falls into the "unrecognized" bucket. This sharpens the label and the structure check; it does **not** attempt to prove the component is viable (still `just test`'s job). Signatures are tool-author data (no Rust), consistent with the registry's extensibility promise.
+
+### 9.7 Minimum versions
+
+A tool declares the oldest version of a `system_deps` entry its template works with; the doctor reads the installed version and flags anything older. Floors are **per tool** because they are template facts and differ between tools sharing a dep (Plinth needs GHC 9.6, Plutarch 9.8). How to *read* a version is a property of the dep, so it lives in its recipe.
+
+```toml
+# registry/tools/yaci.toml
+system_deps  = ["node", "yaci-devkit"]
+min_versions = { node = "18", yaci-devkit = "0.12.0" }
+
+# registry/deps.toml
+[yaci-devkit]
+version = { npm = "@bloxbean/yaci-devkit" }   # default: { args = ["--version"] }
+```
+
+- **Floors.** `min_versions` keys must be in `system_deps` and values must be dotted numbers (`"0.12.0"`, `"9.8"`); both are load errors otherwise. The base dep's floor is the code constant `BASE_DEP_MIN_VERSION` next to `BASE_DEP` (`just` ≥ 1.37.0: the generated Justfiles use its terminal escape constants). When several selected tools set a floor for the same dep, the **highest** wins (`doctor::requirements`).
+- **Probing (impure, `probe.rs`).** Only required deps that have a floor and are present are probed, in parallel. `Args` runs the first present binary with those args (5 s timeout, stdin closed) and takes the first dotted version (`major.minor[.patch…]`) from stdout + stderr: `aiken v1.1.24+bacbeb3` → `1.1.24`, `go1.26.10` → `1.26.10`. `Npm` never runs the binary: it reads `version` from the named package's `package.json`, found by walking up from the binary's resolved path (or next to the bin dir for shims). Use it when running the binary has side effects: `yaci-devkit --version` boots the CLI, which kills a running devnet.
+- **Comparison.** Component-wise, missing components read as zero (`9.8` = `9.8.0`); pre-release and build suffixes are dropped (`0.12.0-beta5` reads as `0.12.0`).
+- **Unknown is not a failure.** When no version can be read (no output match, timeout, a `go install` build reporting `devel`), the dep counts as satisfied and `version` is omitted. The doctor never blocks on what it can't verify.
+- **Upgrade advice.** A recipe's optional `after_upgrade` command is chained onto every upgrade command, for deps that download their own components (`yaci-devkit download --overwrite`: the CLI keeps the cardano-node it downloaded under `~/.yaci-cli` across upgrades, and a newer CLI fails to start a devnet with the old node). `Installer::upgrade_command` renders e.g. `brew upgrade {arg}`, `npm install -g {arg}@latest`, `sudo apt install --only-upgrade -y {arg}`; installers whose install command already fetches the latest (installer scripts, `go install …@latest`, `cargo install`, `aikup install`) reuse it.
 
 ---
 

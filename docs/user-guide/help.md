@@ -8,7 +8,7 @@ The [Cardano Developer Portal](https://developers.cardano.org/) has a hands-on o
 
 Each language has supporting tools: editor extensions (VS Code, Neovim, Zed, Emacs, JetBrains), language servers, and online playgrounds.
 
-- `cardano-init doctor` lists the ones that match the stack in your project, under *Supporting tools* (`deps[].support` in JSON).
+- `cardano-init doctor --links` lists the ones that match the stack in your project, under *Supporting tools* (`deps[].support` in `doctor --json`).
 - `cardano-init list` shows them for every tool, on a *Tooling* line (`tools[].support` in JSON).
 
 The links are stored in the `support` field of [`registry/deps.toml`](https://github.com/input-output-hk/cardano-init/blob/main/registry/deps.toml), and come from each tool's own documentation.
@@ -25,7 +25,7 @@ The [Builder Tools](https://developers.cardano.org/tools/) page on the Developer
 
 Every tool in the registry records its official community channels, usually a Discord server, sometimes GitHub Discussions or a forum. They are the channels that each project links from its own website or repository.
 
-- `cardano-init doctor` shows them for the components in your project, under *Get help*.
-- `cardano-init list` shows them for every tool (`tools[].community` in JSON).
+- `cardano-init doctor --links` shows them for the components in your project, under *Get help*.
+- `cardano-init list` shows them for every tool, on a *Community* line (`tools[].community` in JSON).
 
 For questions about Cardano in general, the [Cardano Developer Portal](https://developers.cardano.org/) links to the developer Discord, the Cardano Forum, and Cardano Stack Exchange.

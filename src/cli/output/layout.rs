@@ -94,14 +94,24 @@ pub(super) fn panel_lines(
 
 /// Print a bold section label followed by a dim horizontal rule.
 pub(super) fn print_rule(label: &str) {
-    const WIDTH: usize = 44;
-    let dashes = WIDTH.saturating_sub(console::measure_text_width(label) + 1);
     println!(
         "{}{} {}",
         theme::PAD,
         theme::strong(label),
-        theme::dim("─".repeat(dashes)),
+        rule_dashes(label)
     );
+}
+
+/// A section rule whose label is dimmed too, for secondary sections.
+pub(super) fn print_dim_rule(label: &str) {
+    println!("{}{} {}", theme::PAD, theme::dim(label), rule_dashes(label));
+}
+
+/// The dashes that pad a rule's `label` to a fixed width.
+fn rule_dashes(label: &str) -> console::StyledObject<String> {
+    const WIDTH: usize = 44;
+    let dashes = WIDTH.saturating_sub(console::measure_text_width(label) + 1);
+    theme::dim("─".repeat(dashes))
 }
 
 /// Wrap `text` to `width` columns on word boundaries.
