@@ -1,0 +1,23 @@
+[tool]
+id = "pycardano"
+name = "PyCardano"
+description = """\
+A Python library for building and signing Cardano transactions and writing \
+off-chain code for Plutus applications. It provides transaction serialization, \
+wallet and key utilities, and chain-backend integrations — a good fit for \
+Python backends, scripts, and data tooling."""
+website = "https://pycardano.readthedocs.io"
+community = [
+  { name = "GitHub Issues", url = "https://github.com/Python-Cardano/pycardano/issues" },
+]
+languages = ["python"]
+system_deps = ["uv"]
+nix_packages = ["uv", "python3"]
+detect = [{ file = "pyproject.toml", contains = "pycardano" }]
+experimental = true
+
+[roles.off-chain]
+template = "pycardano/off-chain"
+
+[compat]
+consumes = ["blockfrost"]

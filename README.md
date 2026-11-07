@@ -157,7 +157,7 @@ Tools currently in the registry (✅ available · ⬜ planned· 🧪 experimenta
 | ⬜ Pebble | ✅ Lucid Evolution | | ✅ Cardano Node | |
 | ⬜ Opshin | ✅ Blaze | | ✅ Cardano Node API | |
 | | ⬜ Elm Cardano | | ✅ Dingo | |
-| | ⬜ PyCardano | | | |
+| | 🧪 PyCardano | | | |
 
 
 You can also check locally with `cardano-init list --table`.
