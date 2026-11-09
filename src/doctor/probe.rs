@@ -527,7 +527,7 @@ mod tests {
 
         let result = scan_project(root, &registry());
         assert_eq!(result.components.len(), 1);
-        assert_eq!(result.components[0].tool_id, "lucid-evolution");
+        assert_eq!(result.components[0].tool_id, "lucid");
         assert!(result.unrecognized.is_empty());
     }
 

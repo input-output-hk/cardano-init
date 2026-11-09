@@ -1,4 +1,5 @@
-//! The `list` presenter: the role/tool catalog as text, a role matrix, or JSON.
+//! The `list` and `table` presenters: the role/tool catalog as text, a role
+//! matrix, or JSON.
 
 use std::fmt::Write;
 
@@ -6,7 +7,6 @@ use serde_json::json;
 
 use super::emit_json_ok;
 use super::layout::{print_rule, wrap};
-use crate::cli::args::ListArgs;
 use crate::cli::theme;
 use crate::doctor::catalog::DepCatalog;
 use crate::registry::loader::Registry;
@@ -14,33 +14,10 @@ use crate::registry::types::{Link, Role, ToolDef};
 use crate::registry::view;
 
 /// Print the registry for `cardano-init list`: the tech spec §8 payload with
-/// `json`, a role × tool matrix with `--table`, else the full catalog.
-pub fn print_list(registry: &Registry, catalog: &DepCatalog, json: bool, args: &ListArgs) {
+/// `json`, else the full catalog.
+pub fn print_list(registry: &Registry, catalog: &DepCatalog, json: bool) {
     if json {
-        #[derive(serde::Serialize)]
-        struct ListTool {
-            #[serde(flatten)]
-            view: view::ToolView,
-            support: Vec<Link>,
-        }
-        let tools: Vec<ListTool> = view::tool_views(registry)
-            .into_iter()
-            .map(|v| {
-                let support = registry
-                    .get(&v.id)
-                    .map_or_else(Vec::new, |t| tool_support_links(t, catalog));
-                ListTool { view: v, support }
-            })
-            .collect();
-        emit_json_ok(&json!({
-            "roles": view::role_views(),
-            "tools": tools,
-        }));
-        return;
-    }
-
-    if args.table {
-        print_list_table(registry);
+        emit_list_json(registry, catalog);
         return;
     }
 
@@ -66,6 +43,39 @@ pub fn print_list(registry: &Registry, catalog: &DepCatalog, json: bool, args: &
         print!("{block}");
     }
     println!();
+}
+
+/// Print `cardano-init table`: a role × tool matrix, or with `json` the same
+/// payload as `list --json` (it already carries the matrix's data).
+pub fn print_table(registry: &Registry, catalog: &DepCatalog, json: bool) {
+    if json {
+        emit_list_json(registry, catalog);
+    } else {
+        print_tool_table(registry);
+    }
+}
+
+/// The tech spec §8 `list` payload: roles, and tools with their support links.
+fn emit_list_json(registry: &Registry, catalog: &DepCatalog) {
+    #[derive(serde::Serialize)]
+    struct ListTool {
+        #[serde(flatten)]
+        view: view::ToolView,
+        support: Vec<Link>,
+    }
+    let tools: Vec<ListTool> = view::tool_views(registry)
+        .into_iter()
+        .map(|v| {
+            let support = registry
+                .get(&v.id)
+                .map_or_else(Vec::new, |t| tool_support_links(t, catalog));
+            ListTool { view: v, support }
+        })
+        .collect();
+    emit_json_ok(&json!({
+        "roles": view::role_views(),
+        "tools": tools,
+    }));
 }
 
 /// A role's section heading: `On-chain ────── on-chain/`, noting when the role
@@ -191,10 +201,11 @@ fn write_links(out: &mut String, label: &str, links: &[Link], name_w: usize) {
     }
 }
 
-/// Per-role columns for the `list --table` matrix, in `Role::ALL` order: each
-/// role's tool names, name-sorted, with experimental tools tagged and, with
+/// Per-role columns for the `table` matrix, in `Role::ALL` order: each role's
+/// tools, name-sorted, as `Name (id)` (the id is what the role flags take),
+/// with experimental (`🧪`) and fullstack (`🧩`) tools tagged and, with
 /// `icons`, prefixed by the tool's icon.
-fn list_matrix_columns(registry: &Registry, icons: bool) -> Vec<(String, Vec<String>)> {
+fn table_columns(registry: &Registry, icons: bool) -> Vec<(String, Vec<String>)> {
     Role::ALL
         .iter()
         .map(|&role| {
@@ -203,12 +214,15 @@ fn list_matrix_columns(registry: &Registry, icons: bool) -> Vec<(String, Vec<Str
             let cells = tools
                 .iter()
                 .map(|t| {
-                    let mut cell = t.name.clone();
+                    let mut cell = format!("{} {}", t.name, theme::dim(format!("({})", t.id)));
                     if icons {
                         cell = format!("{}{cell}", theme::icon_cell(t));
                     }
                     if t.experimental {
                         cell.push_str(" 🧪");
+                    }
+                    if t.fullstack.is_some() {
+                        cell.push_str(" 🧩");
                     }
                     cell
                 })
@@ -218,19 +232,40 @@ fn list_matrix_columns(registry: &Registry, icons: bool) -> Vec<(String, Vec<Str
         .collect()
 }
 
-/// `list --table`: one framed column per role, tools stacked down each column.
-fn print_list_table(registry: &Registry) {
-    let columns = list_matrix_columns(registry, theme::icons_enabled());
+/// The usage example under the `table` matrix.
+const TABLE_EXAMPLE: &str =
+    "cardano-init --name my-app --on-chain aiken --off-chain meshjs --devnet yaci";
+
+/// `table`: one framed column per role, tools stacked down each column.
+fn print_tool_table(registry: &Registry) {
+    let columns = table_columns(registry, theme::icons_enabled());
     let depth = columns.iter().map(|(_, c)| c.len()).max().unwrap_or(0);
 
     let mut table = comfy_table::Table::new();
     table
         .load_preset(comfy_table::presets::UTF8_FULL)
+        .apply_modifier(comfy_table::modifiers::UTF8_ROUND_CORNERS)
         .set_content_arrangement(comfy_table::ContentArrangement::Dynamic);
+    // Centred two-line headers: the role in bold over the flag that fills it,
+    // noting when the flag can be repeated.
     table.set_header(
-        columns
+        Role::ALL
             .iter()
-            .map(|(header, _)| theme::accent(header).to_string())
+            .zip(&columns)
+            .map(|(&role, (header, _))| {
+                let flag = crate::cli::role_flag(role);
+                let flag = if role.multiple() {
+                    format!("{flag} (repeatable)")
+                } else {
+                    flag.to_string()
+                };
+                comfy_table::Cell::new(format!(
+                    "{}\n{}",
+                    theme::accent_strong(header),
+                    theme::dim(flag)
+                ))
+                .set_alignment(comfy_table::CellAlignment::Center)
+            })
             .collect::<Vec<_>>(),
     );
     for i in 0..depth {
@@ -249,11 +284,14 @@ fn print_list_table(registry: &Registry) {
         println!("{}{}", theme::PAD, line);
     }
     println!();
-    println!(
-        "{}{}",
-        theme::PAD,
-        theme::dim("🧪 experimental — needs --allow-experimental")
-    );
+    for note in [
+        "🧪 experimental — needs --allow-experimental",
+        "🧩 fullstack — --fullstack fills on-chain and off-chain as one protocol/ component",
+    ] {
+        println!("{}{}", theme::PAD, theme::dim(note));
+    }
+    println!();
+    println!("{}{} {}", theme::PAD, theme::dim("e.g."), TABLE_EXAMPLE);
     println!();
 }
 
@@ -301,10 +339,37 @@ mod tests {
         assert!(tool_support_links(meshjs, &catalog).is_empty());
     }
 
+    /// Drop terminal styling so cells compare as plain text.
+    fn plain(cols: Vec<(String, Vec<String>)>) -> Vec<(String, Vec<String>)> {
+        cols.into_iter()
+            .map(|(h, cells)| {
+                let cells = cells
+                    .iter()
+                    .map(|c| console::strip_ansi_codes(c).into_owned())
+                    .collect();
+                (h, cells)
+            })
+            .collect()
+    }
+
     #[test]
-    fn list_matrix_columns_group_tools_by_role_and_tag_experimental() {
+    fn table_example_uses_real_tool_ids() {
         let reg = Registry::load().unwrap();
-        let cols = list_matrix_columns(&reg, false);
+        let words: Vec<&str> = TABLE_EXAMPLE.split_whitespace().collect();
+        for pair in words.windows(2) {
+            if Role::ALL
+                .iter()
+                .any(|&r| crate::cli::role_flag(r) == pair[0])
+            {
+                assert!(reg.get(pair[1]).is_some(), "unknown tool id '{}'", pair[1]);
+            }
+        }
+    }
+
+    #[test]
+    fn table_columns_group_tools_by_role_and_tag_experimental() {
+        let reg = Registry::load().unwrap();
+        let cols = plain(table_columns(&reg, false));
 
         let headers: Vec<&str> = cols.iter().map(|(h, _)| h.as_str()).collect();
         assert_eq!(
@@ -321,13 +386,18 @@ mod tests {
         let col = |name: &str| -> &Vec<String> { &cols.iter().find(|(h, _)| h == name).unwrap().1 };
 
         // A tool filling two roles appears in both columns (e.g. Scalus).
-        assert!(col("On-chain").iter().any(|t| t == "Scalus"));
-        assert!(col("Off-chain").iter().any(|t| t == "Scalus"));
+        // It is also tagged as fullstack.
+        assert!(col("On-chain").iter().any(|t| t == "Scalus (scalus) 🧩"));
+        assert!(col("Off-chain").iter().any(|t| t == "Scalus (scalus) 🧩"));
 
         // Experimental tools are tagged; stable ones are not.
-        assert!(col("Off-chain").iter().any(|t| t == "Tx3 🧪"));
-        assert!(col("Formal methods").iter().any(|t| t == "Blaster 🧪"));
-        assert!(col("On-chain").iter().any(|t| t == "Aiken"));
+        assert!(col("Off-chain").iter().any(|t| t == "Tx3 (tx3) 🧪"));
+        assert!(
+            col("Formal methods")
+                .iter()
+                .any(|t| t == "Blaster (blaster) 🧪")
+        );
+        assert!(col("On-chain").iter().any(|t| t == "Aiken (aiken)"));
 
         // Cells are name-sorted within a column.
         let infra = col("Infrastructure");
@@ -337,19 +407,19 @@ mod tests {
     }
 
     #[test]
-    fn list_matrix_columns_prefix_icons_when_asked() {
+    fn table_columns_prefix_icons_when_asked() {
         let reg = Registry::load().unwrap();
-        let cols = list_matrix_columns(&reg, true);
+        let cols = plain(table_columns(&reg, true));
         let col = |name: &str| -> &Vec<String> { &cols.iter().find(|(h, _)| h == name).unwrap().1 };
         let haskell = theme::language_icon("haskell").unwrap();
         let term = theme::terminal_icon().to_string();
 
         // Code tools get their primary language's icon.
-        assert!(col("On-chain").contains(&format!("{haskell} Plinth")));
-        assert!(col("Formal methods").contains(&"∀ Blaster 🧪".to_string()));
+        assert!(col("On-chain").contains(&format!("{haskell} Plinth (plinth)")));
+        assert!(col("Formal methods").contains(&"∀ Blaster (blaster) 🧪".to_string()));
         // Tools you run get a terminal, whatever their language.
         assert!(col("Infrastructure").iter().all(|t| t.starts_with(&term)));
-        assert!(col("Devnet").contains(&format!("{term} Yaci DevKit")));
-        assert!(col("Off-chain").contains(&"3 Tx3 🧪".to_string()));
+        assert!(col("Devnet").contains(&format!("{term} Yaci DevKit (yaci)")));
+        assert!(col("Off-chain").contains(&"3 Tx3 (tx3) 🧪".to_string()));
     }
 }

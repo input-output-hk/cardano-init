@@ -17,10 +17,10 @@ This table can be out of date. `list` shows the tools in the version you have in
 
 ```bash
 cardano-init list           # every tool with its id, language, status, and links
-cardano-init list --table   # the same matrix as above
+cardano-init table         # the same matrix as above, with tool ids
 ```
 
-Use the **tool id** shown by `list` (for example `aiken`, `meshjs`, `yaci`, `tx-submit-api`) as the value for role flags.
+Use the **tool id** shown by `list` or `table` (for example `aiken`, `meshjs`, `yaci`, `tx-submit-api`) as the value for role flags.
 
 ## Notes
 

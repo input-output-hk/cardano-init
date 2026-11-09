@@ -160,7 +160,7 @@ Tools currently in the registry (✅ available · ⬜ planned· 🧪 experimenta
 | | 🧪 PyCardano | | | |
 
 
-You can also check locally with `cardano-init list --table`.
+You can also check locally with `cardano-init table`.
 Infrastructure provisioned via [cardano-up](https://github.com/blinklabs-io/cardano-up).
 
 ## User Documentation

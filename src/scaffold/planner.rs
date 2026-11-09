@@ -526,7 +526,7 @@ mod tests {
     #[test]
     fn lucid_evolution_off_chain_entries() {
         assert_plan_contains(
-            &selection(vec![a(Role::OffChain, "lucid-evolution")]),
+            &selection(vec![a(Role::OffChain, "lucid")]),
             &[
                 "off-chain/package.json",
                 "off-chain/Justfile",

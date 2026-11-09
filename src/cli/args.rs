@@ -39,7 +39,11 @@ pub enum Command {
     Doctor,
 
     /// List the available roles and tools (use --json for agents)
-    List(ListArgs),
+    List,
+
+    /// Show a compact matrix of tools by role, with the id to pass to the
+    /// role flags (`--json` prints the same catalog as `list --json`)
+    Table,
 
     /// Add or swap a tool/role in the project in the current directory
     Add(AddArgs),
@@ -47,15 +51,6 @@ pub enum Command {
     /// Remove a role (or an infrastructure provider) from the project in the
     /// current directory
     Remove(RemoveArgs),
-}
-
-/// Arguments for `list`.
-#[derive(clap::Args, Debug, Default)]
-pub struct ListArgs {
-    /// Show a compact matrix of tools by role (human output only; `--json` is
-    /// unaffected)
-    #[arg(long)]
-    pub table: bool,
 }
 
 /// Flags shared by the update commands (add / remove).

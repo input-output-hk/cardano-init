@@ -227,10 +227,7 @@ mod tests {
     #[test]
     fn lucid_evolution_with_yaci_is_compatible() {
         let reg = registry();
-        let sel = vec![
-            a(Role::OffChain, "lucid-evolution"),
-            a(Role::Devnet, "yaci"),
-        ];
+        let sel = vec![a(Role::OffChain, "lucid"), a(Role::Devnet, "yaci")];
         assert!(check(&sel, &reg).is_none());
     }
 
@@ -238,7 +235,7 @@ mod tests {
     fn lucid_evolution_with_kupmios_is_compatible() {
         let reg = registry();
         let sel = vec![
-            a(Role::OffChain, "lucid-evolution"),
+            a(Role::OffChain, "lucid"),
             a(Role::Infrastructure, "kupo"),
             a(Role::Infrastructure, "ogmios"),
         ];
@@ -250,12 +247,9 @@ mod tests {
         let reg = registry();
         // Lucid Evolution's UTxORPC provider only supports Lucid 0.4.x (the
         // template uses 0.8.x), so Dolos (u5c only) can't feed it yet.
-        let sel = vec![
-            a(Role::OffChain, "lucid-evolution"),
-            a(Role::Infrastructure, "dolos"),
-        ];
-        let inc = check(&sel, &reg).expect("lucid-evolution + dolos infra should be incompatible");
-        assert_eq!(inc.off_chain_id, "lucid-evolution");
+        let sel = vec![a(Role::OffChain, "lucid"), a(Role::Infrastructure, "dolos")];
+        let inc = check(&sel, &reg).expect("lucid + dolos infra should be incompatible");
+        assert_eq!(inc.off_chain_id, "lucid");
         assert!(inc.providers.iter().any(|p| p.id == "dolos"));
     }
 

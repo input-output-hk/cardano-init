@@ -21,7 +21,7 @@ Set TypingSpeed 45ms
 Set PlaybackSpeed 1.0
 
 # --- Show available tooling ---
-Type "cardano-init list --table"
+Type "cardano-init table"
 Sleep 600ms
 Enter
 Sleep 3s
