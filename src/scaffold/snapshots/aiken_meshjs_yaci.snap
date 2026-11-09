@@ -1868,8 +1868,9 @@ It is a development/testing tool, never deployed, which is why it fills the
 | `just build` | No-op (a devnet has nothing to build). |
 
 `just test` drives the devnet lifecycle in `scripts/devnet-test.sh` (start →
-wait for `:8080` → run `integration.test.mjs` → always tear down). `just dev` is
-only for interactive work where you want a devnet to stay up.
+wait until the chain is advancing and the faucet can fund an address → run
+`integration.test.mjs` → always tear down). `just dev` is only for interactive
+work where you want a devnet to stay up.
 
 ## How off-chain connects to it
 
@@ -2182,33 +2183,60 @@ else
 fi
 DEVNET_PID=$!
 
-echo "Waiting for the devnet node and indexer to advance (up to 150s) ..."
+echo "Waiting for the devnet node, indexer and faucet (up to 150s) ..."
 node -e "
 const url = '${API_URL}blocks/latest';
 const adminUrl = 'http://localhost:10000/local-cluster/api/admin/devnet/tip';
+const faucetUrl = 'http://localhost:10000/local-cluster/api/addresses/topup';
+// An enterprise address with an all-zero key hash. Nobody can spend from it,
+// so the probe's ADA never shows up in a test wallet.
+const probeAddress = 'addr_test1vqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqd9tg5t';
 const deadline = Date.now() + 150000;
 let firstHeight;
+let chainReady = false;
+let lastFaucet = 'no response';
 const probe = async () => {
   try {
-    const [res, admin] = await Promise.all([
-      fetch(url, { signal: AbortSignal.timeout(5000) }),
-      fetch(adminUrl, { signal: AbortSignal.timeout(5000) }),
-    ]);
-    if (res.ok && admin.ok) {
-      const block = await res.json();
-      const { tips } = await admin.json();
-      const tip = tips?.find((value) => value.nodeName === 'node-1');
-      if (Number.isInteger(tip?.blockNumber) && tip.blockNumber >= 0 &&
-          Number.isInteger(block.height) && block.height >= 0) {
-        firstHeight ??= tip.blockNumber;
-        // HTTP 200 (including a genesis/bootstrapped tip) is not readiness:
-        // wait for the live node to forge and the indexer to catch up before
-        // using the faucet's local-node query/submission connection.
-        if (tip.blockNumber > firstHeight && block.height >= firstHeight) process.exit(0);
+    if (!chainReady) {
+      const [res, admin] = await Promise.all([
+        fetch(url, { signal: AbortSignal.timeout(5000) }),
+        fetch(adminUrl, { signal: AbortSignal.timeout(5000) }),
+      ]);
+      if (res.ok && admin.ok) {
+        const block = await res.json();
+        const { tips } = await admin.json();
+        const tip = tips?.find((value) => value.nodeName === 'node-1');
+        if (Number.isInteger(tip?.blockNumber) && tip.blockNumber >= 0 &&
+            Number.isInteger(block.height) && block.height >= 0) {
+          firstHeight ??= tip.blockNumber;
+          // HTTP 200 (including a genesis/bootstrapped tip) is not readiness:
+          // wait for the live node to forge and the indexer to catch up.
+          chainReady = tip.blockNumber > firstHeight && block.height >= firstHeight;
+        }
       }
     }
-  } catch {}
-  if (Date.now() > deadline) { console.error('timed out waiting for the devnet node and indexer'); process.exit(1); }
+    // A moving chain doesn't mean the faucet can submit yet: on slow machines
+    // its first top-ups fail with HTTP 500. Wait for one to succeed (it returns
+    // once the transaction is in a block).
+    if (chainReady) {
+      const res = await fetch(faucetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: probeAddress, adaAmount: 2 }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (res.ok) process.exit(0);
+      lastFaucet = 'HTTP ' + res.status + ' ' + (await res.text());
+    }
+  } catch (err) {
+    if (chainReady) lastFaucet = String(err);
+  }
+  if (Date.now() > deadline) {
+    console.error(chainReady
+      ? 'timed out waiting for the devnet faucet (last response: ' + lastFaucet + ')'
+      : 'timed out waiting for the devnet node and indexer');
+    process.exit(1);
+  }
   setTimeout(probe, 3000);
 };
 probe();

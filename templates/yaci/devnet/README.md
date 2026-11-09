@@ -19,8 +19,9 @@ It is a development/testing tool, never deployed, which is why it fills the
 | `just build` | No-op (a devnet has nothing to build). |
 
 `just test` drives the devnet lifecycle in `scripts/devnet-test.sh` (start →
-wait for `:8080` → run `integration.test.mjs` → always tear down). `just dev` is
-only for interactive work where you want a devnet to stay up.
+wait until the chain is advancing and the faucet can fund an address → run
+`integration.test.mjs` → always tear down). `just dev` is only for interactive
+work where you want a devnet to stay up.
 
 ## How off-chain connects to it
 
