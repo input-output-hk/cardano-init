@@ -2,6 +2,7 @@
 
 use clap::{Parser, Subcommand};
 
+use super::icons::IconsMode;
 use super::oneshot::RoleFlags;
 
 /// Scaffold a new Cardano protocol project.
@@ -15,6 +16,18 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    /// Show tool icons (needs a Nerd Font; remembered; env: CARDANO_INIT_ICONS)
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        value_name = "WHEN",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "always"
+    )]
+    pub icons: Option<IconsMode>,
+
     #[command(flatten)]
     pub init: InitArgs,
 }
@@ -26,7 +39,11 @@ pub enum Command {
     Doctor(DoctorArgs),
 
     /// List the available roles and tools (use --json for agents)
-    List(ListArgs),
+    List,
+
+    /// Show a compact matrix of tools by role, with the id to pass to the
+    /// role flags (`--json` prints the same catalog as `list --json`)
+    Table,
 
     /// Add or swap a tool/role in the project in the current directory
     Add(AddArgs),
@@ -43,15 +60,6 @@ pub struct DoctorArgs {
     /// tools (human output only; `--json` is unaffected)
     #[arg(long)]
     pub links: bool,
-}
-
-/// Arguments for `list`.
-#[derive(clap::Args, Debug, Default)]
-pub struct ListArgs {
-    /// Show a compact matrix of tools by role (human output only; `--json` is
-    /// unaffected)
-    #[arg(long)]
-    pub table: bool,
 }
 
 /// Flags shared by the update commands (add / remove).

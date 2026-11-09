@@ -1,0 +1,29 @@
+# Off-chain component (PyCardano) — GiftCard
+# Part of {{ project_name }}
+
+build:
+    @test -f ../{{ blueprint_path }} || echo "Warning: no blueprint found; build the on-chain component before submitting transactions."
+    @uv run python -m compileall -q src tests
+
+test:
+    @uv run pytest -q
+
+# Show the loaded blueprint and whether the env is ready for txs.
+status:
+    @uv run giftcard status
+
+# Create a gift card: mint a token and lock <lovelace> at the script address.
+# Submits to the local devnet if one is running (INDEXER_URL in ../.env), else
+# to Blockfrost (needs BLOCKFROST_PROJECT_ID). Needs MNEMONIC either way — see
+# .env.example.
+create token lovelace:
+    @uv run giftcard create {{ "{{token}}" }} {{ "{{lovelace}}" }}
+
+# Redeem the gift card locked at redeem script address <address> (printed by
+# `just create`).
+redeem address:
+    @uv run giftcard redeem {{ "{{address}}" }}
+
+clean:
+    @rm -rf .venv .pytest_cache build src/*.egg-info
+    @find src tests -type d -name __pycache__ -prune -exec rm -rf {} +

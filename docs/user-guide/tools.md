@@ -8,24 +8,27 @@ Tools currently in the registry (✅ available · 🧪 experimental · ⬜ plann
 | ✅ Scalus | ✅ Scalus | | ✅ Ogmios | |
 | ✅ Plinth | ✅ Evolution SDK | | ✅ Dolos | |
 | ✅ Plutarch | 🧪 Tx3 | | ✅ Tx Submit API | |
-| ⬜ Pebble | ✅ Lucid Evolution | | ✅ Cardano Node | |
+| 🧪 Pebble | ✅ Lucid Evolution | | ✅ Cardano Node | |
 | ⬜ Opshin | ✅ Blaze | | ✅ Cardano Node API | |
-| | ⬜ Elm Cardano | | ✅ Dingo | |
-| | ⬜ PyCardano | | | |
+| | ✅ Apollo | | ✅ Dingo | |
+| | ⬜ Elm Cardano | | | |
+| | 🧪 PyCardano | | | |
 
 This table can be out of date. `list` shows the tools in the version you have installed:
 
 ```bash
 cardano-init list           # every tool with its id, language, status, and links
-cardano-init list --table   # the same matrix as above
+cardano-init table         # the same matrix as above, with tool ids
 ```
 
-Use the **tool id** shown by `list` (for example `aiken`, `meshjs`, `yaci`, `tx-submit-api`) as the value for role flags.
+Use the **tool id** shown by `list` or `table` (for example `aiken`, `meshjs`, `yaci`, `tx-submit-api`) as the value for role flags.
 
 ## Notes
 
 - **Scalus** fills both on-chain and off-chain and supports `--fullstack`, which generates a single `protocol/` component. See [Fullstack tools](how-it-works.md#fullstack-tools).
 - **Plinth** and **Plutarch** are both Haskell. Plinth targets GHC 9.6; Plutarch targets GHC 9.8. With `--nix`, each component ships a Nix flake that provides the right GHC.
+- **PyCardano** generates a Python project managed by [uv](https://docs.astral.sh/uv/), which installs the Python version and packages the project needs. It connects through a Blockfrost-compatible API, such as Yaci DevKit or Blockfrost itself.
+- **Pebble** scripts use protocol version 11 features, so they run on mainnet, preview, preprod, and Yaci DevKit 0.12 or later, but not on older devnets.
 - **Experimental** tools (🧪) require `--allow-experimental` in one-shot mode. See [Experimental tools](how-it-works.md#experimental-tools).
 - **Infrastructure** is the only role that accepts several tools. See [Infrastructure providers](infrastructure.md).
 - To add a tool to the registry, see [Adding a tool](../contributing/adding-a-tool.md).

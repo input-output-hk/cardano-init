@@ -1,5 +1,5 @@
 [tool]
-id = "lucid-evolution"
+id = "lucid"
 name = "Lucid Evolution"
 description = """\
 A TypeScript framework for building, signing, and submitting Cardano \
@@ -21,7 +21,7 @@ nix_packages = ["nodejs"]
 detect = [{ file = "package.json", contains = "@lucid-evolution" }]
 
 [roles.off-chain]
-template = "lucid-evolution/off-chain"
+template = "lucid/off-chain"
 
 # Lucid Evolution connects through its Blockfrost or Kupmios (Kupo + Ogmios)
 # providers. A UTxORPC provider exists (`@utxorpc/lucid-evolution-provider`),

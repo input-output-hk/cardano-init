@@ -697,7 +697,7 @@ mod tests {
 
         let result = scan_project(root, &registry());
         assert_eq!(result.components.len(), 1);
-        assert_eq!(result.components[0].tool_id, "lucid-evolution");
+        assert_eq!(result.components[0].tool_id, "lucid");
         assert!(result.unrecognized.is_empty());
     }
 
@@ -716,6 +716,39 @@ mod tests {
         assert_eq!(result.components.len(), 1);
         assert_eq!(result.components[0].tool_id, "blaze");
         assert!(result.unrecognized.is_empty());
+    }
+
+    #[test]
+    fn scan_identifies_pycardano() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("off-chain")).unwrap();
+        fs::write(
+            root.join("off-chain/pyproject.toml"),
+            "[project]\ndependencies = [\"pycardano>=0.19.2,<0.20\"]\n",
+        )
+        .unwrap();
+
+        let result = scan_project(root, &registry());
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(result.components[0].tool_id, "pycardano");
+        assert!(result.unrecognized.is_empty());
+    }
+
+    #[test]
+    fn scan_ignores_foreign_python_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("off-chain")).unwrap();
+        fs::write(
+            root.join("off-chain/pyproject.toml"),
+            "[project]\nname = \"other\"\n",
+        )
+        .unwrap();
+
+        let result = scan_project(root, &registry());
+        assert!(result.components.is_empty());
+        assert_eq!(result.unrecognized.len(), 1);
     }
 
     #[test]

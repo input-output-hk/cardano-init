@@ -1,0 +1,31 @@
+// Tests for the shared gift-card rules (`pebble test`).
+//
+// `pebble test` runs plain functions, it cannot build a transaction context, so
+// these cover the rules in giftcard.pebble. The full validators run against a
+// real chain in the off-chain and devnet integration tests.
+
+import { isSingleToken } from "./giftcard.pebble";
+
+test mint_accepts_exactly_one_token() {
+    assert isSingleToken( 1, 1, 1 ) else "one token must mint";
+}
+
+test mint_rejects_wrong_quantity() {
+    assert !isSingleToken( 1, 2, 1 ) else "two tokens must not mint";
+    assert !isSingleToken( 1, 0, 1 ) else "zero tokens must not mint";
+}
+
+test mint_rejects_extra_asset_names() {
+    assert !isSingleToken( 2, 1, 1 ) else "a second asset name must not mint";
+}
+
+test burn_accepts_exactly_one_token() {
+    assert isSingleToken( 1, -1, -1 ) else "burning one token must pass";
+    assert !isSingleToken( 1, -2, -1 ) else "burning two tokens must not pass";
+}
+
+// No quantity is both a valid mint and a valid burn.
+test mint_and_burn_never_overlap( assetCount: int, quantity: int ) {
+    assert !( isSingleToken( assetCount, quantity, 1 ) && isSingleToken( assetCount, quantity, -1 ) )
+        else "a quantity passed as both a mint and a burn";
+}

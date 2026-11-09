@@ -68,6 +68,24 @@ jobs:
         with:
           node-version: 20
 
+      # Keep in lockstep with templates/apollo/off-chain/go.mod.jinja.
+      - name: Install Go
+        if: contains(matrix.tools, 'apollo')
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+
+      - name: Install uv
+        if: contains(matrix.tools, 'pycardano')
+        uses: astral-sh/setup-uv@v10.3.3
+
+      # The Pebble compiler (an npm dev dependency of the template) needs Node 22+.
+      - name: Install Node (Pebble)
+        if: matrix.toolchain == 'pebble'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
       - name: Install JDK
         if: matrix.toolchain == 'scalus'
         uses: actions/setup-java@v4

@@ -290,7 +290,7 @@ pub fn resolve_all(required: &[Requirement], catalog: &DepCatalog, env: &Environ
 
 /// The Cardano tooling installed on this host regardless of what the project
 /// requires: the base dep plus every tool's `system_deps` that are present,
-/// sorted and deduplicated. Installer-only deps (aikup, rustup, go, ...) are
+/// sorted and deduplicated. Installer-only deps (aikup, rustup, ...) are
 /// excluded; they surface as installers.
 pub fn present_tooling(
     catalog: &DepCatalog,
@@ -626,7 +626,7 @@ mod tests {
     #[test]
     fn present_tooling_excludes_installer_only_deps() {
         let registry = crate::registry::loader::Registry::load().unwrap();
-        let tooling = present_tooling(&catalog(), &registry, &env(&[], &["go", "aikup"]));
+        let tooling = present_tooling(&catalog(), &registry, &env(&[], &["rustup", "aikup"]));
         assert!(tooling.is_empty());
     }
 

@@ -526,7 +526,7 @@ mod tests {
     #[test]
     fn lucid_evolution_off_chain_entries() {
         assert_plan_contains(
-            &selection(vec![a(Role::OffChain, "lucid-evolution")]),
+            &selection(vec![a(Role::OffChain, "lucid")]),
             &[
                 "off-chain/package.json",
                 "off-chain/Justfile",
@@ -551,6 +551,30 @@ mod tests {
                 "off-chain/src/contract.test.ts",
                 "off-chain/src/contract.integration.test.ts",
                 "off-chain/scripts/bundle-blueprint.mjs",
+            ],
+        );
+    }
+
+    #[test]
+    fn pycardano_off_chain_entries() {
+        assert_plan_contains(
+            &selection(vec![a(Role::OffChain, "pycardano")]),
+            &[
+                "off-chain/pyproject.toml",
+                "off-chain/Justfile",
+                "off-chain/.env.example",
+                "off-chain/.gitignore",
+                "off-chain/src/giftcard/__init__.py",
+                "off-chain/src/giftcard/__main__.py",
+                "off-chain/src/giftcard/contract.py",
+                "off-chain/src/giftcard/env.py",
+                "off-chain/src/giftcard/flat.py",
+                "off-chain/tests/conftest.py",
+                "off-chain/tests/test_cli.py",
+                "off-chain/tests/test_contract.py",
+                "off-chain/tests/test_env.py",
+                "off-chain/tests/test_flat.py",
+                "off-chain/tests/test_integration.py",
             ],
         );
     }

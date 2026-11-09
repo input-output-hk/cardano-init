@@ -172,7 +172,8 @@ fn select_single<'a>(
 /// `Name [experimental] — first sentence of the description`.
 fn prompt_label(tool: &ToolDef) -> String {
     format!(
-        "{}{} — {}",
+        "{}{}{} — {}",
+        theme::icon_prefix(tool),
         tool.name,
         output::experimental_tag(tool),
         output::first_sentence(&tool.description)

@@ -32,6 +32,17 @@ binaries = ["node"]
 docs = "https://nodejs.org/en/download"
 install = [{ brew = "node" }, { apt = "nodejs" }, { winget = "OpenJS.NodeJS" }, { nix = "nodejs" }]
 
+# uv also downloads the Python version a project needs. No apt: it isn't in the
+# stock Debian and Ubuntu repositories.
+[uv]
+binaries = ["uv"]
+docs = "https://docs.astral.sh/uv/getting-started/installation/"
+install = [{ brew = "uv" }, { winget = "astral-sh.uv" }, { nix = "uv" }, { curl = "https://astral.sh/uv/install.sh" }]
+support = [
+  { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=ms-python.python" },
+  { name = "Pyright (language server)", url = "https://github.com/microsoft/pyright" },
+]
+
 # The tx3 toolchain (trix, dolos, cshell, tx3c) — installed by `tx3up install`,
 # which bundles them under ~/.tx3. tx3up is a bootstrappable installer (like
 # aikup): the `[tx3up]` dep below provides it, so `doctor` installs tx3up first,
@@ -148,6 +159,10 @@ install = [{ curl = "https://sh.rustup.rs" }, { nix = "cargo" }]
 binaries = ["go"]
 docs = "https://go.dev/doc/install"
 install = [{ brew = "go" }, { apt = "golang" }, { winget = "GoLang.Go" }, { nix = "go" }]
+support = [
+  { name = "gopls (Go language server)", url = "https://go.dev/gopls/" },
+  { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=golang.go" },
+]
 
 # --- catalog reference (no tool requires it today; see §9.1) ---
 

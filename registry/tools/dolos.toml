@@ -34,7 +34,7 @@ env = [
 # (`/utils/txs/evaluate`, https://docs.txpipe.io/dolos/apis/minibf), which every
 # off-chain Blockfrost provider needs to budget script execution units — so it
 # can't drive the script-based (gift-card) templates. We therefore declare only
-# `u5c`: tools with a UTxORPC provider (e.g. Mesh) work; Blockfrost/TRP-only
+# `u5c`: tools with a UTxORPC provider (e.g. Mesh, Apollo) work; Blockfrost/TRP-only
 # tools (Evolution, Scalus, Tx3) don't.
 [compat]
 serves = ["u5c"]

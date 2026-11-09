@@ -154,13 +154,14 @@ Tools currently in the registry (✅ available · ⬜ planned· 🧪 experimenta
 | ✅ Scalus | ✅ Scalus | | ✅ Ogmios | |
 | ✅ Plinth | ✅ Evolution SDK | | ✅ Dolos | |
 | ✅ Plutarch | 🧪 Tx3 | | ✅ Tx Submit API | |
-| ⬜ Pebble | ✅ Lucid Evolution | | ✅ Cardano Node | |
+| 🧪 Pebble | ✅ Lucid Evolution | | ✅ Cardano Node | |
 | ⬜ Opshin | ✅ Blaze | | ✅ Cardano Node API | |
-| | ⬜ Elm Cardano | | ✅ Dingo | |
-| | ⬜ PyCardano | | | |
+| | ✅ Apollo | | ✅ Dingo | |
+| | ⬜ Elm Cardano | | | |
+| | 🧪 PyCardano | | | |
 
 
-You can also check locally with `cardano-init list --table`.
+You can also check locally with `cardano-init table`.
 Infrastructure provisioned via [cardano-up](https://github.com/blinklabs-io/cardano-up).
 
 ## User Documentation
@@ -199,6 +200,12 @@ cargo build       # build
 cargo test        # run tests
 cargo fmt         # format
 cargo clippy      # lint
+```
+
+A pre-commit hook blocks commits that would fail CI's `cargo fmt --check`. Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
 ```
 
 A Nix flake is provided. Use `nix develop` for a dev shell with the Rust toolchain, or `nix build .#cardano-init` to build the package.

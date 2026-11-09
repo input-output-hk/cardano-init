@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "giftcard-off-chain"
+version = "0.0.0"
+description = "Off-chain GiftCard bindings (PyCardano), importable as a library"
+requires-python = ">=3.10"
+dependencies = [
+  "blockfrost-python>=0.6,<1",
+  "pycardano>=0.19.2,<0.20",
+  # cbor2 6 removed an API that pycardano's cbor2pure dependency imports.
+  "cbor2>=5.6.5,<6",
+  "python-dotenv>=1.0,<2",
+  "requests>=2.32,<3",
+]
+
+[project.scripts]
+giftcard = "giftcard.__main__:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+  "integration: round trips against a live devnet; they skip when none is configured",
+  "needs_blueprint: reads the on-chain blueprint; skips until it is built",
+]

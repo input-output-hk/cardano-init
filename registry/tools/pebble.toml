@@ -1,0 +1,23 @@
+[tool]
+id = "pebble"
+name = "Pebble"
+description = """\
+A smart contract language with TypeScript-shaped syntax (const, if, for loops, \
+structs, generics) from Harmonic Labs, compiled to UPLC by an optimizing \
+whole-program compiler, with a built-in unit and property test runner. The \
+compiler is an npm package pinned in the project. Its scripts use protocol \
+version 11 features, so they need a chain at PV11 or later."""
+website = "https://github.com/HarmonicLabs/pebble"
+languages = ["pebble"]
+system_deps = ["node"]
+nix_packages = ["nodejs"]
+# The compiler is a per-project npm dependency, so package.json identifies it.
+detect = [{ file = "package.json", contains = "@harmoniclabs/pebble-cli" }]
+# Experimental: Pebble is pre-1.0 (0.5.0 changed struct encodings), and its
+# cardano-init template needs workarounds for missing upstream features (no
+# blueprint output; contract params are applied as plain constants, so the
+# template declares them as `data`).
+experimental = true
+
+[roles.on-chain]
+template = "pebble/on-chain"
