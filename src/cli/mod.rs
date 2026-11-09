@@ -59,9 +59,12 @@ pub fn run() -> i32 {
 
     let result = match cli.command {
         Some(Command::Doctor) => run_doctor(&registry, json),
-        Some(Command::List(args)) => DepCatalog::load()
+        Some(Command::List) => DepCatalog::load()
             .map_err(CliError::from)
-            .map(|catalog| output::print_list(&registry, &catalog, json, &args)),
+            .map(|catalog| output::print_list(&registry, &catalog, json)),
+        Some(Command::Table) => DepCatalog::load()
+            .map_err(CliError::from)
+            .map(|catalog| output::print_table(&registry, &catalog, json)),
         Some(Command::Add(args)) => update::run_add(&args, &registry, json),
         Some(Command::Remove(args)) => update::run_remove(&args, &registry, json),
         None => run_init(&cli.init, &registry, json),
@@ -194,7 +197,7 @@ fn compat_gate(
 }
 
 /// The one-shot flag that assigns a tool to `role`, e.g. `--on-chain`.
-fn role_flag(role: Role) -> &'static str {
+pub(crate) fn role_flag(role: Role) -> &'static str {
     match role {
         Role::OnChain => "--on-chain",
         Role::OffChain => "--off-chain",

@@ -74,7 +74,7 @@ cardano-init/
 │
 ├── registry/tools/             # Embedded data: one TOML per tool (20 tools)
 │   ├── aiken.toml  plinth.toml  plutarch.toml  scalus.toml        # on-chain
-│   ├── meshjs.toml  evolution.toml  lucid-evolution.toml           # off-chain
+│   ├── meshjs.toml  evolution.toml  lucid.toml                     # off-chain
 │   ├── blaze.toml  apollo.toml  pycardano.toml  tx3.toml          # off-chain
 │   ├── cardano-node.toml  cardano-node-api.toml  dingo.toml       # infra
 │   ├── dolos.toml  kupo.toml  ogmios.toml  tx-submit-api.toml     # infra
@@ -305,7 +305,7 @@ To serve both humans and agents without scattering format branches:
 ### 7.3 Machine-readable errors & discovery (PRD FR-13/FR-15)
 
 - **Errors** carry a **stable string code** (e.g. `unknown_tool`, `tool_role_mismatch`, `name_required`, `dir_exists`) plus context (offending input + valid alternatives) and map to **meaningful exit codes**. In `--json`, errors serialize to a stable shape on stderr; the core never falls back to interactive prompting in non-interactive mode. `CliError::code()`/`context()` carry the code + serializable context (§2.5).
-- **Discovery** is the **`list` subcommand** (`cardano-init list`) that emits the registry (roles, tools, the roles each fills, languages). Human by default (with **`--table`** for a compact tools-by-role matrix), **`--json`** for agents (§8 schema). `list` renders from the shared model `registry::view` (`role_views()` / `tool_views()`); the human tool block reuses `cli::format_tool` (shared with `--help`).
+- **Discovery** is the **`list` subcommand** (`cardano-init list`) that emits the registry (roles, tools, the roles each fills, languages). Human by default, **`--json`** for agents (§8 schema). `list` renders from the shared model `registry::view` (`role_views()` / `tool_views()`); the human tool block reuses `cli::format_tool` (shared with `--help`). A sibling **`table`** subcommand prints a compact tools-by-role matrix (`Name (id)` cells).
 
 ---
 

@@ -24,7 +24,7 @@ To see the tools available for each role:
 
 ```bash
 cardano-init list          # detailed list
-cardano-init list --table  # compact matrix
+cardano-init table         # compact matrix, with tool ids
 ```
 
 ## 2. Check your dependencies

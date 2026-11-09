@@ -11,7 +11,7 @@ mod update;
 use serde_json::json;
 
 pub use doctor::print_doctor;
-pub use list::print_list;
+pub use list::{print_list, print_table};
 pub use notice::print_update_notice;
 pub use update::{print_update_plan, print_update_success};
 

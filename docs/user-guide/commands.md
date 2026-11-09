@@ -2,7 +2,8 @@
 
 ```text
 cardano-init [OPTIONS]            # create a project (interactive, or one-shot with --name)
-cardano-init list [--table]       # list roles and tools
+cardano-init list                 # list roles and tools
+cardano-init table                # compact matrix of tools by role
 cardano-init doctor               # check this project's dependencies
 cardano-init add [ROLE FLAGS]     # add or replace a tool in the current project
 cardano-init remove [ROLE FLAGS]  # remove a role or infrastructure provider
@@ -56,13 +57,18 @@ List the available roles and tools, including each tool's language, status, docu
 
 ```bash
 cardano-init list                 # detailed, grouped by role
-cardano-init list --table         # compact matrix of tools by role
 cardano-init list --json   # machine-readable catalog
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--table` | Show a compact matrix of tools by role (human output only). |
+## `table`
+
+Show a compact matrix of tools by role: one column per role, headed by the role with the flag that fills it below (for example `--on-chain`), each tool shown as its name followed by its id in parentheses, for example `Aiken (aiken)`. Pass the id to the role flags, such as `--on-chain aiken`. Experimental tools are marked 🧪, and tools that also support `--fullstack` are marked 🧩.
+
+```bash
+cardano-init table
+```
+
+With `--json`, `table` prints the same catalog as `list --json`.
 
 ## `doctor`
 
