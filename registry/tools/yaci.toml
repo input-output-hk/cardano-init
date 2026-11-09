@@ -18,6 +18,8 @@ community = [
 ]
 languages = ["typescript"]
 system_deps = ["node", "yaci-devkit"]
+# yaci-devkit: the test readiness probe uses /devnet/tip (0.12.0 is the release CI runs). node: built-in fetch.
+min_versions = { node = "18", yaci-devkit = "0.12.0" }
 nix_packages = []
 detect = [{ file = "scripts/set-env.mjs", contains = "Yaci" }]
 

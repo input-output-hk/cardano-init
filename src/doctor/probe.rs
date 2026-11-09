@@ -3,17 +3,20 @@
 //! Detects the OS, the installers and dependency binaries on `PATH`, and scans
 //! a generated project to identify the tool in each component directory.
 
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use super::INFRA_DRIVER_ID;
-use super::catalog::DepCatalog;
+use super::catalog::{DepCatalog, VersionProbe};
 use super::installers::Installer;
+use super::{INFRA_DRIVER_ID, Requirement};
 use crate::contract;
 use crate::registry::loader::Registry;
 use crate::registry::types::{DetectSignature, Network, Role, RoleAssignment, Selection, ToolDef};
+use crate::registry::version::Version;
 
 /// Detected operating system family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -46,11 +49,14 @@ pub struct Environment {
     pub installers: HashSet<Installer>,
     /// Dependency and installer binaries found on `PATH`.
     pub present_binaries: HashSet<String>,
+    /// Installed versions of the present deps that have a minimum version,
+    /// keyed by dep id. A dep whose version can't be read is absent.
+    pub versions: HashMap<String, Version>,
 }
 
-/// Detect the OS, available installers, and which catalog/installer binaries
-/// are on `PATH`.
-pub fn detect_environment(catalog: &DepCatalog) -> Environment {
+/// Detect the OS, available installers, which catalog/installer binaries are
+/// on `PATH`, and the installed version of each `required` dep with a floor.
+pub fn detect_environment(catalog: &DepCatalog, required: &[Requirement]) -> Environment {
     let dep_binaries = catalog
         .dep_ids()
         .filter_map(|id| catalog.get(id))
@@ -76,22 +82,127 @@ pub fn detect_environment(catalog: &DepCatalog) -> Environment {
         os: Os::detect(),
         installers,
         present_binaries,
+        versions: detect_versions(catalog, required),
     }
 }
 
-/// True if `bin` is found in any `PATH` entry, trying common executable
-/// extensions on Windows.
+/// True if `bin` is found in any `PATH` entry.
 fn is_on_path(bin: &str) -> bool {
-    let Some(path) = std::env::var_os("PATH") else {
-        return false;
-    };
-    std::env::split_paths(&path).any(|dir| {
-        dir.join(bin).is_file()
-            || (cfg!(windows)
-                && ["exe", "cmd", "bat"]
-                    .iter()
-                    .any(|ext| dir.join(format!("{bin}.{ext}")).is_file()))
+    find_on_path(bin).is_some()
+}
+
+/// The first `PATH` entry holding `bin`, trying common executable extensions
+/// on Windows.
+fn find_on_path(bin: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).find_map(|dir| {
+        let exts: &[&str] = if cfg!(windows) {
+            &["", "exe", "cmd", "bat"]
+        } else {
+            &[""]
+        };
+        exts.iter()
+            .map(|ext| {
+                if ext.is_empty() {
+                    dir.join(bin)
+                } else {
+                    dir.join(format!("{bin}.{ext}"))
+                }
+            })
+            .find(|candidate| candidate.is_file())
     })
+}
+
+/// How long a dep's version command may run before it is given up on.
+const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Read the installed version of every `required` dep that has a floor and is
+/// on `PATH`, in parallel. Deps whose version can't be read are left out.
+fn detect_versions(catalog: &DepCatalog, required: &[Requirement]) -> HashMap<String, Version> {
+    let targets: Vec<(&str, PathBuf, &VersionProbe)> = required
+        .iter()
+        .filter(|req| req.min_version.is_some())
+        .filter_map(|req| {
+            let recipe = catalog.get(&req.id)?;
+            let bin = recipe.binaries.iter().find_map(|b| find_on_path(b))?;
+            Some((req.id.as_str(), bin, &recipe.version))
+        })
+        .collect();
+
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = targets
+            .iter()
+            .map(|(id, bin, probe)| scope.spawn(move || (*id, installed_version(bin, probe))))
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(|handle| handle.join().ok())
+            .filter_map(|(id, version)| Some((id.to_string(), version?)))
+            .collect()
+    })
+}
+
+fn installed_version(bin: &Path, probe: &VersionProbe) -> Option<Version> {
+    match probe {
+        VersionProbe::Args(args) => Version::find_in(&run_with_timeout(bin, args)?),
+        VersionProbe::Npm(package) => npm_package_version(bin, package),
+    }
+}
+
+/// Run `bin args`, returning its stdout and stderr (some tools print their
+/// version to stderr), or `None` if it can't start or exceeds the timeout.
+fn run_with_timeout(bin: &Path, args: &[String]) -> Option<String> {
+    let mut child = Command::new(bin)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + VERSION_TIMEOUT;
+    while child.try_wait().ok()?.is_none() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let output = child.wait_with_output().ok()?;
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push('\n');
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    Some(text)
+}
+
+/// The `version` of npm package `package`, read from the `package.json`
+/// behind its installed binary: up from the binary's real path (a global
+/// install symlinks into the package), or next to the bin dir (Windows shims,
+/// `<prefix>/lib/node_modules`).
+fn npm_package_version(bin: &Path, package: &str) -> Option<Version> {
+    let real = std::fs::canonicalize(bin).ok()?;
+    let bin_dir = bin.parent()?;
+    let beside = [
+        bin_dir.join("node_modules"),
+        bin_dir.join("..").join("lib").join("node_modules"),
+    ]
+    .map(|modules| modules.join(package).join("package.json"));
+
+    real.ancestors()
+        .skip(1)
+        .map(|dir| dir.join("package.json"))
+        .chain(beside)
+        .find_map(|manifest| package_json_version(&manifest, package))
+}
+
+/// `version` from `manifest` when it is the `package.json` of `package`.
+fn package_json_version(manifest: &Path, package: &str) -> Option<Version> {
+    let text = std::fs::read_to_string(manifest).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+    if json.get("name")?.as_str()? != package {
+        return None;
+    }
+    Version::parse(json.get("version")?.as_str()?.split(['-', '+']).next()?)
 }
 
 /// What a scanned component directory is: one of the roles, or the fused
@@ -412,6 +523,65 @@ mod tests {
     #[test]
     fn os_detect_is_known_on_ci() {
         let _ = Os::detect();
+    }
+
+    #[test]
+    fn npm_version_read_through_bin_symlink() {
+        // A global npm install: <prefix>/bin/tool -> ../lib/node_modules/<pkg>/start.mjs
+        let tmp = tempfile::tempdir().unwrap();
+        let pkg_dir = tmp.path().join("lib/node_modules/@scope/tool");
+        fs::create_dir_all(&pkg_dir).unwrap();
+        fs::write(
+            pkg_dir.join("package.json"),
+            r#"{ "name": "@scope/tool", "version": "0.10.6" }"#,
+        )
+        .unwrap();
+        fs::write(pkg_dir.join("start.mjs"), "").unwrap();
+        fs::create_dir_all(tmp.path().join("bin")).unwrap();
+        let bin = tmp.path().join("bin/tool");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(pkg_dir.join("start.mjs"), &bin).unwrap();
+        #[cfg(not(unix))]
+        fs::write(&bin, "").unwrap();
+
+        let version = npm_package_version(&bin, "@scope/tool").unwrap();
+        assert_eq!(version.to_string(), "0.10.6");
+        // A different package's manifest is never taken.
+        assert!(npm_package_version(&bin, "@scope/other").is_none());
+    }
+
+    #[test]
+    fn npm_prerelease_reads_as_its_release_core() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest = tmp.path().join("package.json");
+        fs::write(&manifest, r#"{ "name": "t", "version": "0.12.0-beta5" }"#).unwrap();
+        assert_eq!(
+            package_json_version(&manifest, "t").unwrap().to_string(),
+            "0.12.0"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn version_command_output_is_parsed() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let script = |name: &str, body: &str| {
+            let path = tmp.path().join(name);
+            fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let args = VersionProbe::default();
+
+        let stderr_tool = script("tool", "echo 'tool version 3.10.3.0' >&2");
+        assert_eq!(
+            installed_version(&stderr_tool, &args).unwrap().to_string(),
+            "3.10.3.0"
+        );
+
+        let silent = script("silent", "echo 'devel (commit )'");
+        assert!(installed_version(&silent, &args).is_none());
     }
 
     #[test]

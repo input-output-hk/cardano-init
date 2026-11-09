@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rust_embed::RustEmbed;
 use serde::Deserialize;
@@ -7,6 +7,7 @@ use super::types::{
     CompatConfig, DetectSignature, InfraConfig, Link, Role, RoleConfig, Seam, ToolDef,
     UnknownRoleError, UnknownSeamError,
 };
+use super::version::Version;
 
 #[derive(RustEmbed)]
 #[folder = "registry/"]
@@ -32,6 +33,19 @@ pub enum RegistryError {
         file: String,
         seam: String,
         source: UnknownSeamError,
+    },
+
+    #[error("tool '{file}' sets a minimum version for '{dep}', which is not in its system_deps")]
+    MinVersionForUnknownDep { file: String, dep: String },
+
+    #[error(
+        "tool '{file}' has an invalid minimum version '{version}' for '{dep}' \
+         (expected dotted numbers, e.g. \"0.12.0\")"
+    )]
+    InvalidMinVersion {
+        file: String,
+        dep: String,
+        version: String,
     },
 
     #[error("duplicate tool id '{id}'")]
@@ -75,6 +89,8 @@ struct ToolMetaToml {
     languages: Vec<String>,
     #[serde(default)]
     system_deps: Vec<String>,
+    #[serde(default)]
+    min_versions: BTreeMap<String, String>,
     #[serde(default)]
     nix_packages: Vec<String>,
     #[serde(default)]
@@ -163,11 +179,13 @@ fn to_tool_def(file_name: &str, raw: ToolFileToml) -> Result<ToolDef, RegistryEr
         community,
         languages,
         system_deps,
+        min_versions,
         nix_packages,
         nix_self_contained,
         detect,
         experimental,
     } = raw.tool;
+    let min_versions = parse_min_versions(file_name, &system_deps, min_versions)?;
 
     Ok(ToolDef {
         id,
@@ -177,6 +195,7 @@ fn to_tool_def(file_name: &str, raw: ToolFileToml) -> Result<ToolDef, RegistryEr
         community,
         languages,
         system_deps,
+        min_versions,
         nix_packages,
         nix_self_contained,
         detect: detect.into_iter().map(DetectSignature::from).collect(),
@@ -186,6 +205,33 @@ fn to_tool_def(file_name: &str, raw: ToolFileToml) -> Result<ToolDef, RegistryEr
         fullstack: raw.fullstack,
         compat,
     })
+}
+
+/// Validate `min_versions`: each key must be one of the tool's `system_deps`
+/// and each value a dotted version.
+fn parse_min_versions(
+    file_name: &str,
+    system_deps: &[String],
+    raw: BTreeMap<String, String>,
+) -> Result<BTreeMap<String, Version>, RegistryError> {
+    raw.into_iter()
+        .map(|(dep, version)| {
+            if !system_deps.contains(&dep) {
+                return Err(RegistryError::MinVersionForUnknownDep {
+                    file: file_name.to_string(),
+                    dep,
+                });
+            }
+            match Version::parse(&version) {
+                Some(parsed) => Ok((dep, parsed)),
+                None => Err(RegistryError::InvalidMinVersion {
+                    file: file_name.to_string(),
+                    dep,
+                    version,
+                }),
+            }
+        })
+        .collect()
 }
 
 fn parse_roles(
@@ -525,5 +571,51 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn min_versions_parse_for_declared_deps() {
+        let tool = demo_tool(
+            r#"system_deps = ["node", "ghc"]
+            min_versions = { ghc = "9.8" }"#,
+        )
+        .unwrap();
+        assert_eq!(tool.min_versions["ghc"].to_string(), "9.8");
+        assert!(!tool.min_versions.contains_key("node"));
+    }
+
+    #[test]
+    fn min_version_for_undeclared_dep_is_error() {
+        let err = demo_tool(
+            r#"system_deps = ["node"]
+            min_versions = { ghc = "9.8" }"#,
+        )
+        .unwrap_err();
+        assert!(matches!(err, RegistryError::MinVersionForUnknownDep { .. }));
+    }
+
+    #[test]
+    fn malformed_min_version_is_error() {
+        let err = demo_tool(
+            r#"system_deps = ["node"]
+            min_versions = { node = "latest" }"#,
+        )
+        .unwrap_err();
+        assert!(matches!(err, RegistryError::InvalidMinVersion { .. }));
+    }
+
+    #[test]
+    fn aiken_floor_matches_template_compiler_pin() {
+        // The aiken template pins `compiler = "vX.Y.Z"` in aiken.toml; the
+        // doctor's floor must move with it.
+        let template = include_str!("../../templates/aiken/on-chain/aiken.toml.jinja");
+        let pin = template
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("compiler = "))
+            .expect("aiken.toml pins a compiler")
+            .trim_matches('"');
+        let registry = registry();
+        let floor = &registry.get("aiken").unwrap().min_versions["aiken"];
+        assert_eq!(Some(floor), Version::parse(pin).as_ref());
     }
 }

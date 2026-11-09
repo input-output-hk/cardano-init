@@ -449,10 +449,10 @@ pub fn print_success(
         theme::accent("→"),
         theme::command(format!("cd {}", selection.project_name))
     );
-    if !report.all_required_present {
+    if !report.all_required_satisfied {
         println!(
             "    {}",
-            theme::dim("# install the missing dependencies listed above, then:")
+            theme::dim("# install or upgrade the dependencies listed above, then:")
         );
     }
     println!(

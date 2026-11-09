@@ -13,6 +13,8 @@ community = [
 ]
 languages = ["typescript"]
 system_deps = ["node"]
+# vitest 2 needs Node 18.
+min_versions = { node = "18" }
 nix_packages = ["nodejs"]
 # A package.json alone is ambiguous (any JS project has one); require the
 # Evolution SDK dependency so foreign projects read as "unrecognized" instead.
