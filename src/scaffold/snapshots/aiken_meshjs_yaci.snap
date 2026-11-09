@@ -1835,10 +1835,13 @@ dev:
     yaci-devkit up --enable-yaci-store
 
 # A devnet leaves nothing to build. `clean` stops a devnet if one is still
-# running (the npm CLI has no `down` command, so we stop its process tree —
-# scoped to ~/.yaci-cli, a no-op when nothing is running) and clears the
-# connection details it published to ../.env.
+# running and clears the connection details it published to ../.env. The npm
+# CLI has no `down` command: stop yaci-cli first (via the PID file the
+# `yaci-devkit` wrapper writes, only if that PID is still yaci-cli) so it
+# can't restart the node, then its components, which run from ~/.yaci-cli.
+# A no-op when nothing is running.
 clean:
+    @pid_file="$HOME/.yaci-cli/yaci-cli.pid"; if [ -f "$pid_file" ]; then pid="$(cat "$pid_file")"; if ps -p "$pid" -o comm= 2>/dev/null | grep -q yaci-cli; then kill "$pid"; fi; rm -f "$pid_file"; fi
     @pkill -f "$HOME/.yaci-cli/" 2>/dev/null || true
     @node scripts/set-env.mjs --clear
     @echo "Cleared the devnet connection details from ../.env."
@@ -2075,6 +2078,9 @@ set -eu
 
 API_URL="http://localhost:8080/api/v1/"
 LOG=".yaci-devnet.log"
+# Written by the npm `yaci-devkit` wrapper; a later `yaci-devkit` run kills the
+# PID it names.
+YACI_PIDFILE="$HOME/.yaci-cli/yaci-cli.pid"
 
 if ! command -v yaci-devkit >/dev/null 2>&1; then
   if [ -n "${CARDANO_INIT_REQUIRE_DEVNET:-}" ]; then
@@ -2089,22 +2095,91 @@ if ! command -v yaci-devkit >/dev/null 2>&1; then
 fi
 
 DEVNET_PID=""
+
+# Is any of these PIDs (or `-PGID` process groups) still alive?
+any_alive() {
+  for p in "$@"; do kill -0 "$p" 2>/dev/null && return 0; done
+  return 1
+}
+
+# The process tree under a PID, as it is right now.
+process_tree() {
+  ps -A -o pid= -o ppid= | awk -v root="$1" '
+    { parent[$1] = $2 }
+    END {
+      keep[root] = 1
+      do { n = 0; for (p in parent) if (!(p in keep) && (parent[p] in keep)) { keep[p] = 1; n++ } } while (n)
+      for (p in keep) print p
+    }'
+}
+
+# Stop the whole devnet. The npm CLI has no `down` command, and killing just
+# the `yaci-devkit` wrapper orphans the `yaci-cli` it spawned, which keeps
+# running (and restarts the node it supervises). The devnet normally runs in
+# its own process group (see below): the wrapper, yaci-cli and every component
+# (cardano-node, submit-api, ogmios, yaci-store). Signal the group, give it
+# 15s to shut down, then force it. Without a group of its own, fall back to
+# the process trees under the wrapper and under yaci-cli (found via its PID
+# file, as a Ctrl-C may already have killed the wrapper and orphaned it).
+# Upstream: https://github.com/bloxbean/yaci-devkit/issues/220
+stop_devnet() {
+  [ -n "$DEVNET_PID" ] || return 0
+  if kill -0 "-$DEVNET_PID" 2>/dev/null; then
+    set -- "-$DEVNET_PID"
+  else
+    cli_pid=""
+    if [ -f "$YACI_PIDFILE" ]; then
+      cli_pid="$(cat "$YACI_PIDFILE")"
+      ps -p "$cli_pid" -o comm= 2>/dev/null | grep -q yaci-cli || cli_pid=""
+    fi
+    # shellcheck disable=SC2046 # one PID per word
+    set -- $(process_tree "$DEVNET_PID") ${cli_pid:+$(process_tree "$cli_pid")}
+  fi
+  [ "$#" -gt 0 ] || return 0
+  kill -TERM "$@" 2>/dev/null || true
+  waited=0
+  while any_alive "$@" && [ "$waited" -lt 15 ]; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  kill -KILL "$@" 2>/dev/null || true
+  # The wrapper removes its PID file only when yaci-cli exits cleanly. A stale
+  # one would make the next `yaci-devkit` run kill whatever process reuses
+  # that PID.
+  if [ -f "$YACI_PIDFILE" ] && ! kill -0 "$(cat "$YACI_PIDFILE")" 2>/dev/null; then
+    rm -f "$YACI_PIDFILE"
+  fi
+}
+
+# The exit status: the script's own, or the signal's 128+n (a trap's `$?` is
+# the interrupted command's, so Ctrl-C would otherwise exit 0).
 teardown() {
-  status=$?
+  status=${1:-$?}
+  trap - EXIT INT TERM # run once, even when a signal's exit re-fires EXIT
   if [ "$status" -ne 0 ]; then
     echo "Recent devnet log:"
     tail -n 80 "$LOG" 2>/dev/null || true
   fi
   echo "Tearing down the ephemeral devnet ..."
-  # The npm yaci-devkit CLI has no `down`/`stop` command. killing the process tree.
-  if [ -n "$DEVNET_PID" ]; then kill "$DEVNET_PID" >/dev/null 2>&1 || true; fi
-  pkill -f "$HOME/.yaci-cli/" >/dev/null 2>&1 || true
+  stop_devnet
   exit "$status"
 }
-trap teardown EXIT INT TERM
+trap teardown EXIT
+trap 'teardown 130' INT
+trap 'teardown 143' TERM
 
 echo "Starting ephemeral Yaci devnet (logs: $LOG) ..."
-nohup yaci-devkit up --enable-yaci-store >"$LOG" 2>&1 &
+# Start the devnet in its own process group (its PGID is its PID), so
+# stop_devnet can stop all of it at once. `setsid` does this on Linux; job
+# control does it elsewhere (macOS), but dash turns job control off when
+# there is no terminal, as in CI.
+if command -v setsid >/dev/null 2>&1; then
+  nohup setsid yaci-devkit up --enable-yaci-store >"$LOG" 2>&1 &
+else
+  set -m 2>/dev/null
+  nohup yaci-devkit up --enable-yaci-store >"$LOG" 2>&1 &
+  set +m
+fi
 DEVNET_PID=$!
 
 echo "Waiting for the devnet node and indexer to advance (up to 150s) ..."
