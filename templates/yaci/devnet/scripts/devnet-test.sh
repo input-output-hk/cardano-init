@@ -61,6 +61,7 @@ process_tree() {
 # 15s to shut down, then force it. Without a group of its own, fall back to
 # the process trees under the wrapper and under yaci-cli (found via its PID
 # file, as a Ctrl-C may already have killed the wrapper and orphaned it).
+# Upstream: https://github.com/bloxbean/yaci-devkit/issues/220
 stop_devnet() {
   [ -n "$DEVNET_PID" ] || return 0
   if kill -0 "-$DEVNET_PID" 2>/dev/null; then
