@@ -2096,21 +2096,52 @@ fi
 
 DEVNET_PID=""
 
+# Is any of these PIDs (or `-PGID` process groups) still alive?
+any_alive() {
+  for p in "$@"; do kill -0 "$p" 2>/dev/null && return 0; done
+  return 1
+}
+
+# The process tree under a PID, as it is right now.
+process_tree() {
+  ps -A -o pid= -o ppid= | awk -v root="$1" '
+    { parent[$1] = $2 }
+    END {
+      keep[root] = 1
+      do { n = 0; for (p in parent) if (!(p in keep) && (parent[p] in keep)) { keep[p] = 1; n++ } } while (n)
+      for (p in keep) print p
+    }'
+}
+
 # Stop the whole devnet. The npm CLI has no `down` command, and killing just
 # the `yaci-devkit` wrapper orphans the `yaci-cli` it spawned, which keeps
-# running (and restarts the node it supervises). The devnet runs in its own
-# process group (see below): the wrapper, yaci-cli and every component
+# running (and restarts the node it supervises). The devnet normally runs in
+# its own process group (see below): the wrapper, yaci-cli and every component
 # (cardano-node, submit-api, ogmios, yaci-store). Signal the group, give it
-# 15s to shut down, then force it.
+# 15s to shut down, then force it. Without a group of its own, fall back to
+# the process trees under the wrapper and under yaci-cli (found via its PID
+# file, as a Ctrl-C may already have killed the wrapper and orphaned it).
 stop_devnet() {
   [ -n "$DEVNET_PID" ] || return 0
-  kill -TERM "-$DEVNET_PID" 2>/dev/null || true
+  if kill -0 "-$DEVNET_PID" 2>/dev/null; then
+    set -- "-$DEVNET_PID"
+  else
+    cli_pid=""
+    if [ -f "$YACI_PIDFILE" ]; then
+      cli_pid="$(cat "$YACI_PIDFILE")"
+      ps -p "$cli_pid" -o comm= 2>/dev/null | grep -q yaci-cli || cli_pid=""
+    fi
+    # shellcheck disable=SC2046 # one PID per word
+    set -- $(process_tree "$DEVNET_PID") ${cli_pid:+$(process_tree "$cli_pid")}
+  fi
+  [ "$#" -gt 0 ] || return 0
+  kill -TERM "$@" 2>/dev/null || true
   waited=0
-  while kill -0 "-$DEVNET_PID" 2>/dev/null && [ "$waited" -lt 15 ]; do
+  while any_alive "$@" && [ "$waited" -lt 15 ]; do
     sleep 1
     waited=$((waited + 1))
   done
-  kill -KILL "-$DEVNET_PID" 2>/dev/null || true
+  kill -KILL "$@" 2>/dev/null || true
   # The wrapper removes its PID file only when yaci-cli exits cleanly. A stale
   # one would make the next `yaci-devkit` run kill whatever process reuses
   # that PID.
@@ -2137,12 +2168,18 @@ trap 'teardown 130' INT
 trap 'teardown 143' TERM
 
 echo "Starting ephemeral Yaci devnet (logs: $LOG) ..."
-# Job control puts the background devnet in its own process group (its PGID
-# is its PID), so stop_devnet can stop all of it at once.
-set -m
-nohup yaci-devkit up --enable-yaci-store >"$LOG" 2>&1 &
+# Start the devnet in its own process group (its PGID is its PID), so
+# stop_devnet can stop all of it at once. `setsid` does this on Linux; job
+# control does it elsewhere (macOS), but dash turns job control off when
+# there is no terminal, as in CI.
+if command -v setsid >/dev/null 2>&1; then
+  nohup setsid yaci-devkit up --enable-yaci-store >"$LOG" 2>&1 &
+else
+  set -m 2>/dev/null
+  nohup yaci-devkit up --enable-yaci-store >"$LOG" 2>&1 &
+  set +m
+fi
 DEVNET_PID=$!
-set +m
 
 echo "Waiting for the devnet node and indexer to advance (up to 150s) ..."
 node -e "
