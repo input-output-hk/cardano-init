@@ -1,0 +1,28 @@
+# On-chain component (Pebble)
+# Part of {{ project_name }}
+#
+# Pebble compiles one contract per run and writes flat UPLC, not a blueprint.
+# `build` compiles each validator (one pebble.<validator>.json config each),
+# then scripts/blueprint.mjs assembles the CIP-57 blueprint at
+# ../{{ blueprint_path }} for the off-chain / devnet / formal components.
+#
+# The compiler is a pinned npm dev dependency (package.json), run with npx.
+# Pebble scripts use protocol version 11 features, so they need a chain at
+# PV11 or later (mainnet, preview, preprod, and Yaci DevKit 0.12+ qualify).
+
+# Install the pinned compiler on first use or when package.json changes.
+_install:
+    @if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install --no-fund --no-audit --loglevel=error; fi
+
+# Compile both validators and write the blueprint to ../{{ blueprint_path }}.
+build: _install
+    @npx pebble compile -c pebble.gift_card.json
+    @npx pebble compile -c pebble.redeem.json
+    @node scripts/blueprint.mjs ../{{ blueprint_path }}
+
+# Run the unit and property tests (`test` blocks in src/*.test.pebble).
+test: _install
+    @npx pebble test src -c pebble.gift_card.json
+
+clean:
+    @rm -rf out/ node_modules/

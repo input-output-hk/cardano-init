@@ -1,0 +1,5 @@
+# npm dependencies
+node_modules/
+
+# Compiled flat UPLC (the blueprint is written to ../blueprint/)
+out/

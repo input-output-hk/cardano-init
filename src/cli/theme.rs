@@ -181,7 +181,7 @@ pub fn terminal_icon() -> StyledObject<&'static str> {
 
 /// The icon for a registry language id in its brand color (nearest 256-color
 /// match), if there is one. Aiken uses the closest glyph to its connected-dots
-/// logo. Tx3 and Lean have no Nerd Font glyph, so they borrow a character
+/// logo, and Pebble an outlined oval for a pebble. Tx3 and Lean have no Nerd Font glyph, so they borrow a character
 /// from their logos that any font can draw: Tx3's pink `3`, and Lean's `∀`
 /// (from its `L∃∀N` wordmark) for Blaster's Lean-based specs.
 pub fn language_icon(language: &str) -> Option<StyledObject<&'static str>> {
@@ -194,6 +194,7 @@ pub fn language_icon(language: &str) -> Option<StyledObject<&'static str>> {
         "rust" => ("\u{e68b}", 173),      // nf-seti-rust, rust orange
         "go" => ("\u{e627}", 38),         // nf-seti-go, gopher cyan
         "python" => ("\u{e606}", 220),    // nf-seti-python, yellow
+        "pebble" => ("\u{f0ea1}", 248),   // nf-md-ellipse_outline, stone gray
         "blaster-spec" => ("∀", 75),      // Lean, light blue
         _ => return None,
     };
