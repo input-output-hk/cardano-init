@@ -16,10 +16,12 @@ import (
 )
 
 // A full mint → lock → redeem round-trip against a local Yaci DevKit devnet.
-// It runs only when a devnet is up and a blueprint is bundled:
+// It runs only when a Yaci devnet is up and a blueprint is bundled:
 //
-//   - INDEXER_URL: exported by the devnet component's ephemeral `just test`,
-//     or written to ../.env by its `just dev`.
+//   - INDEXER_URL and YACI_ADMIN_URL: exported by the Yaci devnet component's
+//     ephemeral `just test`, or written to ../.env by its `just dev`. The
+//     admin URL is what funds the throwaway wallet from the faucet, so other
+//     indexers (Dingo, Kupo) that set only INDEXER_URL are skipped.
 //   - a bundled blueprint: produced by the on-chain `just build`.
 //
 // Otherwise it skips, so `just test` stays green without a devnet. Under
@@ -30,8 +32,6 @@ import (
 const devnetMnemonic = "test test test test test test test test test test test test " +
 	"test test test test test test test test test test test sauce"
 
-const defaultYaciAdminURL = "http://localhost:10000"
-
 func TestRoundTripOnDevnet(t *testing.T) {
 	lookup, err := config.Lookup("..") // tests run in e2e/, one level below off-chain/
 	if err != nil {
@@ -39,6 +39,9 @@ func TestRoundTripOnDevnet(t *testing.T) {
 	}
 	if lookup("INDEXER_URL") == "" {
 		t.Skip("no devnet (INDEXER_URL unset); the devnet component's `just test` runs this against an ephemeral devnet")
+	}
+	if lookup("YACI_ADMIN_URL") == "" {
+		t.Skip("not a Yaci devnet (YACI_ADMIN_URL unset); this round-trip needs the Yaci faucet to fund its wallet")
 	}
 	if !giftcard.HasBundledBlueprint() {
 		if os.Getenv("CARDANO_INIT_REQUIRE_DEVNET") != "" {
@@ -49,14 +52,10 @@ func TestRoundTripOnDevnet(t *testing.T) {
 
 	// Use the devnet from the environment, with a throwaway wallet.
 	env, err := config.Resolve(func(key string) string {
-		switch v := lookup(key); {
-		case key == "MNEMONIC":
+		if key == "MNEMONIC" {
 			return devnetMnemonic
-		case key == "YACI_ADMIN_URL" && v == "":
-			return defaultYaciAdminURL
-		default:
-			return v
 		}
+		return lookup(key)
 	})
 	if err != nil {
 		t.Fatal(err)

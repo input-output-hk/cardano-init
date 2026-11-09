@@ -252,8 +252,11 @@ func (c *Contract) Create(ctx context.Context, walletAddr common.Address, tokenN
 	}, nil
 }
 
-// UtxoAt returns the gift-card UTxO locked at redeemAddress: the output that
-// carries an inline datum. It returns ErrNoGiftCard if there is none.
+// UtxoAt returns the gift-card UTxO locked at redeemAddress. It returns
+// ErrNoGiftCard if there is none.
+//
+// Anyone can pay to a script address, with any datum, so outputs are checked
+// rather than trusted: see isGiftCard. Unrelated outputs are skipped.
 func (c *Contract) UtxoAt(ctx context.Context, redeemAddress string) (common.Utxo, error) {
 	addr, err := common.NewAddress(redeemAddress)
 	if err != nil {
@@ -264,11 +267,27 @@ func (c *Contract) UtxoAt(ctx context.Context, redeemAddress string) (common.Utx
 		return common.Utxo{}, fmt.Errorf("query %s: %w", redeemAddress, err)
 	}
 	for _, u := range utxos {
-		if d := u.Output.Datum(); d != nil && d.Data != nil {
+		if c.isGiftCard(addr, u.Output.Datum(), u.Output.Assets()) {
 			return u, nil
 		}
 	}
 	return common.Utxo{}, ErrNoGiftCard
+}
+
+// isGiftCard reports whether an output at addr, with datum d and assets, is a
+// genuine gift card: the datum decodes, the scripts it parameterises derive
+// back to addr, and the output holds exactly one of that gift card's token.
+func (c *Contract) isGiftCard(addr common.Address, d *common.Datum, assets *common.MultiAsset[common.MultiAssetTypeOutput]) bool {
+	seedTxHash, seedIndex, tokenName, err := decodeDatum(d)
+	if err != nil || assets == nil {
+		return false
+	}
+	s, err := c.scripts(tokenName, seedTxHash, seedIndex)
+	if err != nil || s.RedeemAddress.String() != addr.String() {
+		return false
+	}
+	n := assets.Asset(s.GiftCard.Hash(), tokenName)
+	return n != nil && n.Cmp(big.NewInt(1)) == 0
 }
 
 // Redeem builds a transaction that burns the gift-card token held by

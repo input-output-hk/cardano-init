@@ -42,6 +42,10 @@ source = "giftcard/datum_test.go"
 dest = "giftcard/datum_test.go"
 
 [[files]]
+source = "giftcard/utxo_test.go"
+dest = "giftcard/utxo_test.go"
+
+[[files]]
 source = "internal/config/config.go.jinja"
 dest = "internal/config/config.go"
 
