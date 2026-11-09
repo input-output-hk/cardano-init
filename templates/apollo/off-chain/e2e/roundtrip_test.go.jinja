@@ -1,0 +1,124 @@
+// Package e2e runs the GiftCard flow end to end against a local devnet.
+package e2e
+
+import (
+	"context"
+	"errors"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/blinklabs-io/gouroboros/ledger/common"
+
+	"{{ project_name }}/off-chain/giftcard"
+	"{{ project_name }}/off-chain/internal/config"
+	"{{ project_name }}/off-chain/internal/poll"
+)
+
+// A full mint → lock → redeem round-trip against a local Yaci DevKit devnet.
+// It runs only when a Yaci devnet is up and a blueprint is bundled:
+//
+//   - INDEXER_URL and YACI_ADMIN_URL: exported by the Yaci devnet component's
+//     ephemeral `just test`, or written to ../.env by its `just dev`. The
+//     admin URL is what funds the throwaway wallet from the faucet, so other
+//     indexers (Dingo, Kupo) that set only INDEXER_URL are skipped.
+//   - a bundled blueprint: produced by the on-chain `just build`.
+//
+// Otherwise it skips, so `just test` stays green without a devnet. Under
+// CARDANO_INIT_REQUIRE_DEVNET (the end-to-end CI smoke test), a live devnet
+// with no bundled blueprint is a failure instead of a skip.
+
+// A throwaway devnet mnemonic, funded from the faucet. Never a real seed.
+const devnetMnemonic = "test test test test test test test test test test test test " +
+	"test test test test test test test test test test test sauce"
+
+func TestRoundTripOnDevnet(t *testing.T) {
+	lookup, err := config.Lookup("..") // tests run in e2e/, one level below off-chain/
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lookup("INDEXER_URL") == "" {
+		t.Skip("no devnet (INDEXER_URL unset); the devnet component's `just test` runs this against an ephemeral devnet")
+	}
+	if lookup("YACI_ADMIN_URL") == "" {
+		t.Skip("not a Yaci devnet (YACI_ADMIN_URL unset); this round-trip needs the Yaci faucet to fund its wallet")
+	}
+	if !giftcard.HasBundledBlueprint() {
+		if os.Getenv("CARDANO_INIT_REQUIRE_DEVNET") != "" {
+			t.Fatal("devnet is live but no blueprint is bundled; build the on-chain component first")
+		}
+		t.Skip("no blueprint bundled")
+	}
+
+	// Use the devnet from the environment, with a throwaway wallet.
+	env, err := config.Resolve(func(key string) string {
+		if key == "MNEMONIC" {
+			return devnetMnemonic
+		}
+		return lookup(key)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := config.Connect(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if _, err := client.FundFromFaucet(ctx); err != nil {
+		t.Fatal(err)
+	}
+	addr := client.Wallet.Address()
+
+	// Create. The transaction is built from the address alone (no keys), as a
+	// backend would, then signed by the wallet.
+	created, err := client.GiftCard.Create(ctx, addr, "IntegrationGift", 5_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.GiftCard.SignAndSubmit(ctx, client.Wallet, created.TxCbor); err != nil {
+		t.Fatal(err)
+	}
+
+	var gift common.Utxo
+	waitFor(ctx, t, "gift-card UTxO at "+created.RedeemAddress, func(ctx context.Context) (bool, error) {
+		u, err := client.GiftCard.UtxoAt(ctx, created.RedeemAddress)
+		if errors.Is(err, giftcard.ErrNoGiftCard) {
+			return false, nil
+		}
+		gift = u
+		return err == nil, err
+	})
+
+	// Redeem: burn the token and release the locked assets.
+	tx, err := client.GiftCard.Redeem(ctx, addr, gift)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txHash, err := client.GiftCard.SignAndSubmit(ctx, client.Wallet, tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txHash) != 64 {
+		t.Fatalf("unexpected tx hash %q", txHash)
+	}
+	waitFor(ctx, t, "gift-card UTxO to be spent", func(ctx context.Context) (bool, error) {
+		_, err := client.GiftCard.UtxoAt(ctx, created.RedeemAddress)
+		if errors.Is(err, giftcard.ErrNoGiftCard) {
+			return true, nil
+		}
+		return false, err
+	})
+}
+
+func waitFor(ctx context.Context, t *testing.T, what string, ok func(context.Context) (bool, error)) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	if err := poll.Until(ctx, time.Second, ok); err != nil {
+		t.Fatalf("waiting for %s: %v", what, err)
+	}
+}

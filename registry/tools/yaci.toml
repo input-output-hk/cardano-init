@@ -25,7 +25,7 @@ detect = [{ file = "scripts/set-env.mjs", contains = "Yaci" }]
 template = "yaci/devnet"
 
 # Yaci Store exposes a Blockfrost-compatible REST API, so Yaci serves the
-# `blockfrost` seam. Off-chain tools that consume it (Evolution, Mesh, Scalus)
+# `blockfrost` seam. Off-chain tools that consume it (Evolution, Mesh, Scalus, Apollo)
 # connect via INDEXER_URL; a TRP-only consumer (Tx3) cannot use it.
 [compat]
 serves = ["blockfrost"]
