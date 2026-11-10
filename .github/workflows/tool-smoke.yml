@@ -60,7 +60,7 @@ jobs:
         uses: aiken-lang/setup-aiken@v1
         with:
           # Keep this in lockstep with templates/aiken/on-chain/aiken.toml.jinja.
-          version: v1.1.21
+          version: v1.1.24
 
       - name: Install Node
         if: matrix.toolchain == 'node' || matrix.toolchain == 'tx3'

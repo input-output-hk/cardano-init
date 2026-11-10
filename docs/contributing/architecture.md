@@ -223,7 +223,7 @@ description = "…newcomer-friendly explanation…"
 website = "https://aiken-lang.org"
 languages = ["aiken"]
 system_deps = ["aiken"]    # abstract dep ids → resolved via registry/deps.toml (§8)
-min_versions = { aiken = "1.1.23" }  # optional floors the doctor checks (TECH_SPEC §9.7)
+min_versions = { aiken = "1.1.24" }  # optional floors the doctor checks (TECH_SPEC §9.7)
 nix_packages = ["aiken"]       # packages for the generated Nix dev shell
 
 [roles.on-chain]
