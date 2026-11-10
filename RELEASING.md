@@ -10,6 +10,11 @@ cargo-dist extracts the `CHANGELOG.md` section whose heading matches the tag and
 places it at the **top** of the GitHub Release body, then appends its own
 Install/Download tables below.
 
+Each release builds 5 targets (x86_64/aarch64 Linux, x86_64/aarch64 macOS,
+x86_64 Windows), attaches the archives, checksums, and the `shell`/`powershell`
+installer scripts to the GitHub Release, and publishes the `cardano-init`
+package to npm (needs the `NPM_TOKEN` repo secret).
+
 ## Cutting a release
 
 `main` is protected by a ruleset that requires changes to land via pull
@@ -49,6 +54,60 @@ git push origin vX.Y.Z
 > Do **not** `git push origin main vX.Y.Z` to release: the branch push is
 > rejected by the ruleset while the tag slips through, triggering a release from
 > a commit that isn't on `main`. Always merge the PR first, then tag `main`.
+
+## Release candidates
+
+Use a SemVer prerelease suffix: `vX.Y.Z-rc.N`, with the same suffix in
+`Cargo.toml` (`version = "X.Y.Z-rc.N"`; cargo-dist requires the tag and the
+crate version to match). Follow the steps above with that version everywhere.
+
+- The GitHub Release is marked as a **prerelease** automatically.
+- npm publishing is **skipped** for prereleases (`publish-prereleases` is not
+  set in `dist-workspace.toml`), so `latest` on npm is never an RC.
+- Don't tag the final version as an RC and flip it later: tag `vX.Y.Z` only
+  for the final release.
+
+`cliff.toml` sets `ignore_tags = "rc"`, so RC tags never get a changelog
+section of their own once a later tag exists. Generating the RC itself works
+as usual (`--tag vX.Y.Z-rc.N` names the unreleased section). When you
+regenerate for the final `vX.Y.Z`, the RC section is replaced by a single
+`vX.Y.Z` section covering every commit since the previous final release.
+
+## Pipeline config (`dist-workspace.toml`)
+
+`dist-workspace.toml` is the source of truth; `.github/workflows/release.yml` is
+generated from it. **Never hand-edit `release.yml`**: CI runs
+`dist generate --check` and fails if the two disagree.
+
+- `targets`, `installers`, and `publish-jobs` define what gets built and where
+  it is published.
+- `cargo-dist-version` pins the `dist` version CI uses. Keep it equal to the
+  `dist` you run locally (`cargo install cargo-dist --version <X> --locked`).
+- Homebrew and crates.io publishing are off; the comment block in
+  `dist-workspace.toml` lists the switches and credentials each one needs.
+
+After changing the config (or bumping the pinned version), re-render the
+workflow:
+
+```bash
+dist generate   # or `dist init` for an interactive config update
+```
+
+## Testing before you tag
+
+Nothing here requires a push:
+
+```bash
+dist plan               # what artifacts would be produced (resolves all targets)
+dist generate --check   # confirms release.yml matches dist-workspace.toml (the CI gate)
+dist build --artifacts=local --target <your-host-triple>   # real compile + archive locally
+```
+
+To exercise the full build matrix in CI without publishing, set
+`pr-run-mode = "upload"` in `dist-workspace.toml`, run `dist generate`, and open
+a PR: CI builds all 5 targets and attaches them to the workflow run (no tag, no
+Release). For a live end-to-end dry run, push a prerelease tag to a **fork** and
+delete it afterward.
 
 ## Notes
 

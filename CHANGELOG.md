@@ -5,6 +5,47 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.4.0-rc.1] - 2026-11-10
+
+### Documentation
+
+- Link the upstream wrapper issue from the devnet teardown by @rober-m
+- Refresh README, user guide, and demo GIF by @rober-m
+- Re-record the demo gif at the larger zoom by @rober-m
+
+### Features
+
+- Replace --format <human|json> with --json by @paulobressan
+- Lucid evolution (#109) by @paulobressan
+- Add Blaze off-chain template (#114) by @paulobressan
+- Add Plutarch on-chain template (#113) by @rober-m
+- Check minimum dependency versions by @rober-m
+- Tool icons and a role-grouped `list` by @rober-m
+- Show the tool icon in place of the language in the summary by @rober-m
+- Add PyCardano off-chain template by @paulobressan
+- Add `table` command and shorten Lucid Evolution id to `lucid` by @rober-m
+- Add Apollo off-chain template by @rober-m
+- Add Pebble on-chain template (experimental) by @rober-m
+
+### Fixes
+
+- Restore Yaci devnet smoke compatibility (#110) by @rober-m
+- Require the yaci-devkit CLI for Yaci projects (#117) by @rober-m
+- Refresh Yaci DevKit components after an upgrade by @rober-m
+- Report corrupt blueprints and low funds clearly in PyCardano template by @paulobressan
+- Validate gift-card UTxOs and require Yaci for the e2e test by @rober-m
+- Stop the whole devnet on teardown by @rober-m
+- Start the devnet with setsid so teardown works without a TTY by @rober-m
+- Wait for the faucet before running devnet tests (#128) by @rober-m
+- Zoom in on the demo gif by @rober-m
+
+### Refactor
+
+- Clean up structure, duplication and comments across modules (#107) by @paulobressan
+- Use PyCardano helpers and validate gift card UTxOs by @paulobressan
+- Address PyCardano template review feedback by @paulobressan
+- Make the Go template idiomatic by @rober-m
+
 ## [v0.3.0] - 2026-10-12
 
 ### Documentation
@@ -121,6 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Remove redundant borrow in println (clippy 1.97) by @paulobressan
 
+[v0.4.0-rc.1]: https://github.com/input-output-hk/cardano-init/compare/v0.3.0..v0.4.0-rc.1
 [v0.3.0]: https://github.com/input-output-hk/cardano-init/compare/v0.2.1..v0.3.0
 [v0.2.1]: https://github.com/input-output-hk/cardano-init/compare/v0.2.0..v0.2.1
 [v0.2.0]: https://github.com/input-output-hk/cardano-init/compare/v0.1.0..v0.2.0

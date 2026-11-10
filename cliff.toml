@@ -77,5 +77,8 @@ commit_parsers = [
 # Anything that isn't a conventional commit (and survives the parsers) is dropped.
 filter_commits = true
 tag_pattern = "v[0-9]*"
+# Release-candidate tags (vX.Y.Z-rc.N) get no section of their own once the
+# final release is cut: their commits fold into the next non-rc version.
+ignore_tags = "rc"
 topo_order = false
 sort_commits = "oldest"
