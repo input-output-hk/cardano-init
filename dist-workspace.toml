@@ -28,3 +28,8 @@ windows-archive = ".tar.gz"
 #   - Homebrew: add "homebrew" to `installers` + set `tap` to a formula repo (needs a tap repo + token).
 #   - crates.io: add "cargo" to `publish-jobs` (needs a CARGO_REGISTRY_TOKEN secret).
 # Re-run `dist init && dist generate` after enabling any of these.
+
+# GitHub retired the macos-14 runner that dist 0.32 picks for Apple Silicon by
+# default, so pin that target to a supported image.
+[dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"
