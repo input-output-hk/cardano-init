@@ -8,8 +8,10 @@
 
 Pick a tool for each role you need (on-chain, off-chain, devnet, infrastructure, formal-methods) and `cardano-init` generates a monorepo where every component is **already wired together**, plus a worked end-to-end example that **builds and passes its tests out of the box**.
 
+📖 **Documentation:** [input-output-hk.github.io/cardano-init](https://input-output-hk.github.io/cardano-init/)
+
 <p align="center">
-  <img src="assets/demo.gif" alt="cardano-init scaffolds a full stack in one command, then just test passes out of the box" width="800">
+  <img src="assets/demo.gif" alt="cardano-init lists its tools by role, scaffolds an Aiken + MeshJS + Yaci DevKit stack in one command, then just test passes against a local devnet (test run sped up)" width="800">
 </p>
 
 ```console
@@ -35,7 +37,8 @@ $ cd my-protocol && just test
 - ⚡ **Zero to running in one command:** A wired-together monorepo that builds and passes its tests immediately.
 - 🧩 **Mix and match, freely:** Components talk to a shared *contract*. So, you can combine tools of different roles however you want and it'll just work.
 - 🤖 **Agent-native:** Machine-readable JSON on every command and a generated `AGENTS.md` in every project, so coding agents know what the project is and what to do next.
-- 🩺 **Never stuck on setup:** A built-in dependency `doctor` detects your toolchains and tells you the exact installer to run for anything missing.
+- 🩺 **Never stuck on setup:** A built-in dependency `doctor` detects your toolchains and tells you the exact command to install anything missing or upgrade anything too old.
+- 🔁 **Change your mind later:** `add` and `remove` swap a tool or a whole role in an existing project, under a clean-git safety net so every change is a reviewable `git diff`.
 - 🧪 **Real example:** Every stack ships the same worked gift-card scenario end-to-end, so what you generate actually runs.
 
 ## Quick start
@@ -93,31 +96,37 @@ cargo install --path .
 
 ### Usage
 
-#### Normal workflow
+<details>
+<summary><b>Normal workflow</b></summary>
 
 ```bash
 # 1. Create your project
 cardano-init --name my-protocol --on-chain aiken --off-chain meshjs --devnet yaci
 
-# 2. Enter Modify the protocol to you liking
-cd my-protocol 
+# 2. Enter it and change the protocol to your liking
+cd my-protocol
 
 # 3. Run tests often
 just test
 ```
 
-Every generated project is driven by [`just`](https://just.systems): `just build`, `just test`, `just clean`. 
-Missing a dependency? Run the built-in dependency doctor `cardano-init doctor` and it tells you exactly how to solve it.
+Every generated project is driven by [`just`](https://just.systems): `just build`, `just test`, `just clean`.
+Missing a dependency, or running one that is too old? Run the built-in dependency doctor, `cardano-init doctor`, and it tells you exactly how to fix it.
+New projects start as a git repository with an initial commit, so you can review every later change with `git diff`.
 
 When a newer `cardano-init` is out, you get a notice with the update command for your install method before anything is generated (checked at most once a day; set `CARDANO_INIT_NO_UPDATE_CHECK=1` to turn it off).
 
-#### Other useful commands
+</details>
+
+<details>
+<summary><b>Other useful commands</b></summary>
 
 ```bash
 # Check how to use it
 cardano-init help
 
-# Check available tooling
+# Check available tooling: compact matrix with the id for each flag, or the detailed list
+cardano-init table
 cardano-init list
 
 # Interactive guided setup (the easiest way to start)
@@ -132,20 +141,24 @@ cardano-init -n my-protocol -p scalus -d yaci
 # Preview what would be generated, without writing
 cardano-init --name my-protocol --on-chain aiken --dry-run
 
-#Check if you have all dependencies needed (inside generated project)
+# Check if you have all dependencies needed (inside generated project);
+# --links also lists editor tooling and community channels for your stack
 cardano-init doctor
+cardano-init doctor --links
 
 # Add/replace tool
 cardano-init add --on-chain plinth
 
-# Remove a tool
-cardano-init remove --devnet yaci
+# Remove a role (or one provider: --infra kupo)
+cardano-init remove --devnet
 ```
+
+</details>
 
 
 ## Tools
 
-Tools currently in the registry (✅ available · ⬜ planned· 🧪 experimental):
+Tools currently in the registry (✅ available · 🧪 experimental · ⬜ planned):
 
 
 | On-chain | Off-chain | Devnet | Infrastructure | Formal methods |
@@ -161,20 +174,8 @@ Tools currently in the registry (✅ available · ⬜ planned· 🧪 experimenta
 | | 🧪 PyCardano | | | |
 
 
-You can also check locally with `cardano-init table`.
+You can also check locally with `cardano-init table`, which shows the id to pass to each role flag. Experimental tools need `--allow-experimental` (`-e`).
 Infrastructure provisioned via [cardano-up](https://github.com/blinklabs-io/cardano-up).
-
-## User Documentation
-
-Full user docs are published at **[input-output-hk.github.io/cardano-init](https://input-output-hk.github.io/cardano-init/)** (source in [`docs/`](docs/)):
-
-- [Quick start](https://input-output-hk.github.io/cardano-init/user-guide/quick-start.html): create, check, build, and test your first project
-- [How it works](https://input-output-hk.github.io/cardano-init/user-guide/how-it-works.html): roles, the interface contract, the worked gift-card example, fullstack tools, and compatibility checks
-- [Command reference](https://input-output-hk.github.io/cardano-init/user-guide/commands.html): every command, flag, alias, and exit code
-- [For coding agents](https://input-output-hk.github.io/cardano-init/user-guide/agents.html): the JSON interface, error codes, and generated `AGENTS.md`
-- [Ecosystem: `aikup`, `cardano-up`, and friends](https://input-output-hk.github.io/cardano-init/user-guide/ecosystem.html)
-- [Infrastructure providers](https://input-output-hk.github.io/cardano-init/user-guide/infrastructure.html)
-- [Supporting tools and getting help](https://input-output-hk.github.io/cardano-init/user-guide/help.html): editor extensions, language servers, CBOR/transaction inspectors, and each tool's community channels
 
 ## Development Documentation
 

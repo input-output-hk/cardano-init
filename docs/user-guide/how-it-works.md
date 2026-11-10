@@ -68,7 +68,7 @@ A tool is **experimental** when the tool itself is still in development, or when
 - In one-shot or JSON mode, pass `--allow-experimental` (`-e`). Without it, selecting an experimental tool is an error and nothing is generated.
 - In interactive mode, you are asked to confirm. The default answer is **No**.
 
-`cardano-init list` marks these tools as `[experimental]`.
+`cardano-init list` marks these tools as `experimental · needs --allow-experimental`, and `cardano-init table` marks them with 🧪.
 
 ## Networks
 

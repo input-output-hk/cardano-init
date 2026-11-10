@@ -2,21 +2,24 @@
 
 ## `demo.gif`
 
-The animated demo shown at the top of the root `README.md`.
+The animated demo shown at the top of the root `README.md` and the docs site.
 
-It is generated from [`demo.tape`](demo.tape) with [VHS](https://github.com/charmbracelet/vhs):
+It is recorded with [VHS](https://github.com/charmbracelet/vhs) from two tapes and joined with `ffmpeg`:
+
+- [`demo.tape`](demo.tape): `cardano-init table`, then a one-shot scaffold (normal speed).
+- [`demo-test.tape`](demo-test.tape): `just test` in the new project, played back at 4x, because the real run installs packages and boots a local devnet. The typed command says it is sped up.
 
 ```bash
-# Install VHS (see the repo for platform packages)
-go install github.com/charmbracelet/vhs@latest   # or: brew install vhs / nix run nixpkgs#vhs
+# From the repository root, with cardano-init on PATH (e.g. target/debug)
+assets/render-demo.sh
 
-# Regenerate assets/demo.gif from the tape
-vhs assets/demo.tape
+# On Nix, VHS and ffmpeg are one shell away
+nix shell nixpkgs#vhs nixpkgs#ffmpeg -c assets/render-demo.sh
 ```
 
-Run it in an environment where the demo's toolchains are installed (`aiken`,
-`node`, `just`, and Yaci DevKit), so the recorded `just test` actually passes.
-`cardano-init doctor` will tell you what's missing.
+Requirements:
 
-Keep the tape as the source of truth — edit `demo.tape`, not the GIF — so the
-demo stays reproducible and reviewable in diffs.
+- the toolchains of the recorded stack (`aiken`, `node`, `just`, `yaci-devkit`, Docker), so `just test` passes. `cardano-init doctor` tells you what's missing;
+- a [Nerd Font](https://www.nerdfonts.com) named `JetBrainsMono Nerd Font`, so the tool icons render. Without it installed system-wide, point `FONTCONFIG_FILE` at a config that includes the font's directory.
+
+Keep the tapes as the source of truth (edit them, not the GIF) so the demo stays reproducible and reviewable in diffs.
