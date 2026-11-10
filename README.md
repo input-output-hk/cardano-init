@@ -193,7 +193,7 @@ Internal CI (smoke tests, installer recipes, devnet):
 | [docs/design/tech-spec.md](docs/design/tech-spec.md) | Exact contracts, schemas, algorithms, edge cases |
 | [docs/design/roadmap.md](docs/design/roadmap.md) | Phases & milestones (DX.02, DX.05) |
 | [docs/contributing/adding-a-tool.md](docs/contributing/adding-a-tool.md) | Contributor guide for integrating a new tool |
-| [docs/design/releasing.md](docs/design/releasing.md) | How to cut a release and publish prebuilt binaries (cargo-dist) |
+| [RELEASING.md](RELEASING.md) | How to cut a release and publish prebuilt binaries (cargo-dist) |
 
 
 ```bash

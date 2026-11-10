@@ -25,4 +25,3 @@
 - [Product requirements](design/prd.md)
 - [Technical specification](design/tech-spec.md)
 - [Roadmap](design/roadmap.md)
-- [Releasing](design/releasing.md)
