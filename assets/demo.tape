@@ -14,8 +14,8 @@ Require cardano-init
 
 Set Shell "bash"
 Set FontFamily "JetBrainsMono Nerd Font"
-Set FontSize 14
-Set Width 1600
+Set FontSize 18
+Set Width 1680
 Set Height 1000
 Set Padding 24
 Set Theme "Catppuccin Mocha"

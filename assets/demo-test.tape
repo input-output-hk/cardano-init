@@ -9,8 +9,8 @@ Require just
 
 Set Shell "bash"
 Set FontFamily "JetBrainsMono Nerd Font"
-Set FontSize 14
-Set Width 1600
+Set FontSize 18
+Set Width 1680
 Set Height 1000
 Set Padding 24
 Set Theme "Catppuccin Mocha"
@@ -18,9 +18,15 @@ Set Theme "Catppuccin Mocha"
 Set TypingSpeed 180ms
 
 Hide
-Type "PS1='$ ' && cd my-protocol && clear"
+Type "PS1='$ ' && clear"
 Enter
 Show
+
+# --- Step into the new project ---
+Type "cd my-protocol"
+Sleep 2s
+Enter
+Sleep 2s
 
 # --- Everything builds and tests out of the box, devnet included ---
 Type "just test    # played back at 4x"
