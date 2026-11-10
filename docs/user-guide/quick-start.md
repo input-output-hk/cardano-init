@@ -36,9 +36,11 @@ cd my-protocol
 cardano-init doctor
 ```
 
-It finds the components in the project, checks which toolchains are installed, and prints the install command for each one that is missing.
+It finds the components in the project, checks which toolchains are installed and recent enough, and prints the install command for each one that is missing and the upgrade command for each one that is too old. Add `--links` to also see the editor extensions and community channels for your stack.
 
 ## 3. Build and test
+
+`cardano-init` also runs `git init` and makes an initial commit (when `git` is installed and the project is not inside another repository), so you can review every later change with `git diff`.
 
 Every generated project uses [`just`](https://just.systems):
 

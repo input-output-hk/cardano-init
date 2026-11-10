@@ -80,4 +80,4 @@ Every project includes an `AGENTS.md`, and a `CLAUDE.md` that imports it, writte
 
 ## Changing the stack later
 
-From inside the project, use [`add`](commands.md#add) and [`remove`](commands.md#remove) to add, replace, or remove components. `cardano-init` reads the current selection from the component directories (the project has no metadata file) and updates the shared top-level files.
+From inside the project, use [`add`](commands.md#add) and [`remove`](commands.md#remove) to add, replace, or remove components. `cardano-init` reads the current selection from the component directories (the project has no metadata file) and updates the shared top-level files. New projects start as a git repository with an initial commit, so `add` and `remove` work right away and you can review each change with `git diff`.
