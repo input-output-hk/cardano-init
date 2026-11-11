@@ -27,6 +27,6 @@ If the fonts aren't installed system-wide, point `FONTCONFIG_FILE` at a config t
 
 ## `demo-scaffold.mp4` and `demo-test.mp4`
 
-The two raw VHS recordings behind the GIF, kept for video editing: scene 1 (catalog and scaffold) and scene 2 (`just test`) at real speed, not the 4x of the GIF. `assets/render-demo.sh` writes them alongside `demo.gif`.
+The two raw VHS recordings behind the GIF, kept for video editing: scene 1 (catalog and scaffold) and scene 2 (`just test`) at real speed, not the 4x of the GIF. `assets/render-demo.sh` writes them alongside `demo.gif`, at 30 fps. The tapes output raw frames and the script encodes the MP4s itself, because VHS's own MP4 output is resampled to 25 fps regardless of `Set Framerate`.
 
 Keep the tapes as the source of truth (edit them, not the GIF) so the demo stays reproducible and reviewable in diffs.
