@@ -20,6 +20,7 @@ Set Height 1000
 Set Padding 24
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 45ms
+Set Framerate 30
 
 Hide
 Type "PS1='$ ' && export CARDANO_INIT_ICONS=always CARDANO_INIT_NO_UPDATE_CHECK=1 && rm -rf my-protocol && clear"

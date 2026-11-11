@@ -16,6 +16,7 @@ Set Padding 24
 Set Theme "Catppuccin Mocha"
 # Typing and pauses below are 4x the usual values, so they look normal at 4x.
 Set TypingSpeed 180ms
+Set Framerate 30
 
 Hide
 Type "PS1='$ ' && clear"

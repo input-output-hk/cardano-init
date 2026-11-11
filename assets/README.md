@@ -22,4 +22,8 @@ Requirements:
 - the toolchains of the recorded stack (`aiken`, `node`, `just`, `yaci-devkit`, Docker), so `just test` passes. `cardano-init doctor` tells you what's missing;
 - a [Nerd Font](https://www.nerdfonts.com) named `JetBrainsMono Nerd Font`, so the tool icons render. Without it installed system-wide, point `FONTCONFIG_FILE` at a config that includes the font's directory.
 
+## `demo-scaffold.mp4` and `demo-test.mp4`
+
+The two raw VHS recordings behind the GIF, kept for video editing: scene 1 (catalog and scaffold) and scene 2 (`just test`) at real speed, not the 4x of the GIF. `assets/render-demo.sh` writes them alongside `demo.gif`.
+
 Keep the tapes as the source of truth (edit them, not the GIF) so the demo stays reproducible and reviewable in diffs.
