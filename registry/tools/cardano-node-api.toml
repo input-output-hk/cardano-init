@@ -2,8 +2,8 @@
 id = "cardano-node-api"
 name = "Cardano Node API"
 description = """\
-A multi-protocol API in front of a local Cardano node, exposing its functions \
-over gRPC (UTxO RPC) and REST. Useful when off-chain code prefers a modern API \
+A gRPC and REST API in front of a local Cardano node. It exposes the node's \
+functions over gRPC (UTxO RPC) and REST, which helps when off-chain code prefers a modern API \
 to the raw node protocols. Run as infrastructure via cardano-up (which pulls \
 in a Cardano node automatically). Its gRPC endpoint is published to the \
 project .env as CARDANO_NODE_API_URL, and the node socket as NODE_SOCKET_PATH."""

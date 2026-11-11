@@ -2,7 +2,7 @@
 id = "tx-submit-api"
 name = "Tx Submit API"
 description = """\
-An HTTP gateway for submitting signed transactions to the Cardano network. \
+An HTTP gateway for submitting signed transactions. \
 Off-chain code POSTs a CBOR transaction and the API relays it to the node, so \
 you don't have to speak the node's submission protocol directly. Run as \
 infrastructure via cardano-up (which pulls in a Cardano node automatically). \

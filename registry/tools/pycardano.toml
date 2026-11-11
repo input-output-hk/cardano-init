@@ -2,8 +2,8 @@
 id = "pycardano"
 name = "PyCardano"
 description = """\
-A Python library for building and signing Cardano transactions and writing \
-off-chain code for Plutus applications. It provides transaction serialization, \
+A Python library for building and signing Cardano transactions. Use it to \
+write off-chain code for Plutus applications: it provides transaction serialization, \
 wallet and key utilities, and chain-backend integrations — a good fit for \
 Python backends, scripts, and data tooling."""
 website = "https://pycardano.readthedocs.io"

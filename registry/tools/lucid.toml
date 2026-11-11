@@ -2,8 +2,8 @@
 id = "lucid"
 name = "Lucid Evolution"
 description = """\
-A TypeScript framework for building, signing, and submitting Cardano \
-transactions, maintained by Anastasia Labs. Lucid Evolution bundles wallet \
+A TypeScript framework for building and submitting Cardano transactions. \
+Maintained by Anastasia Labs, Lucid Evolution bundles wallet \
 and provider integrations (Blockfrost, Kupmios, Koios), Plutus \
 helpers, and an in-memory emulator for testing transaction logic without a \
 chain — a good fit for dApp backends and frontends."""

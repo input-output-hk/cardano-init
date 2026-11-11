@@ -2,8 +2,8 @@
 id = "apollo"
 name = "Apollo"
 description = """\
-A pure Go library for building Cardano transactions, on the Blink Labs \
-ledger packages (gouroboros, bursa, plutigo). Apollo has a fluent Conway \
+A pure Go library for building Cardano transactions. Built on the Blink Labs \
+ledger packages (gouroboros, bursa, plutigo), Apollo has a fluent Conway \
 transaction builder with automatic coin selection, Plutus V1–V3 script \
 support, and several chain backends. Choose it for Go backends, bots, and \
 services that build and submit transactions."""
