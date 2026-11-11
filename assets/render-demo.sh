@@ -21,5 +21,8 @@ ffmpeg -y -loglevel error \
   -filter_complex "[1:v]setpts=PTS/4[t];[0:v][t]concat=n=2:v=1[v];[v]fps=12,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" \
   assets/demo.gif
 
-rm -f assets/.demo-1.mp4 assets/.demo-2.mp4 assets/.demo-status
-echo "wrote assets/demo.gif"
+# Keep the full-framerate recordings (scene 2 at real speed) for video editing.
+mv assets/.demo-1.mp4 assets/demo-scaffold.mp4
+mv assets/.demo-2.mp4 assets/demo-test.mp4
+rm -f assets/.demo-status
+echo "wrote assets/demo.gif, assets/demo-scaffold.mp4, assets/demo-test.mp4"
