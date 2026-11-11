@@ -20,10 +20,13 @@ nix shell nixpkgs#vhs nixpkgs#ffmpeg -c assets/render-demo.sh
 Requirements:
 
 - the toolchains of the recorded stack (`aiken`, `node`, `just`, `yaci-devkit`, Docker), so `just test` passes. `cardano-init doctor` tells you what's missing;
-- a [Nerd Font](https://www.nerdfonts.com) named `JetBrainsMono Nerd Font`, so the tool icons render. Without it installed system-wide, point `FONTCONFIG_FILE` at a config that includes the font's directory.
+- a [Nerd Font](https://www.nerdfonts.com) named `JetBrainsMono Nerd Font`, so the tool icons render;
+- a color emoji font (e.g. Noto Color Emoji, `nixpkgs#noto-fonts-color-emoji`), so the experimental and fullstack markers in `cardano-init table` render instead of empty boxes.
+
+If the fonts aren't installed system-wide, point `FONTCONFIG_FILE` at a config that includes their directories.
 
 ## `demo-scaffold.mp4` and `demo-test.mp4`
 
-The two raw VHS recordings behind the GIF, kept for video editing: scene 1 (catalog and scaffold) and scene 2 (`just test`) at real speed, not the 4x of the GIF. `assets/render-demo.sh` writes them alongside `demo.gif`.
+The two raw VHS recordings behind the GIF, kept for video editing: scene 1 (catalog and scaffold) and scene 2 (`just test`) at real speed, not the 4x of the GIF. `assets/render-demo.sh` writes them alongside `demo.gif`, at 30 fps. The tapes output raw frames and the script encodes the MP4s itself, because VHS's own MP4 output is resampled to 25 fps regardless of `Set Framerate`.
 
 Keep the tapes as the source of truth (edit them, not the GIF) so the demo stays reproducible and reviewable in diffs.
