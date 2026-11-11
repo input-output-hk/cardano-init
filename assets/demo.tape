@@ -8,7 +8,7 @@
 # yaci-devkit + Docker) so `just test` goes green. `cardano-init doctor` tells
 # you what's missing.
 
-Output assets/.demo-1.mp4
+Output assets/.demo-1.png
 
 Require cardano-init
 

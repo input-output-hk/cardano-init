@@ -3,7 +3,7 @@
 # real run installs packages and boots a local devnet; the typed command says so.
 # Render with assets/render-demo.sh, not on its own.
 
-Output assets/.demo-2.mp4
+Output assets/.demo-2.png
 
 Require just
 
