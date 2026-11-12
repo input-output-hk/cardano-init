@@ -55,6 +55,14 @@ def normalize(schema, definitions, depth=0):
     if not isinstance(schema, dict):
         return schema
     out = {k: normalize(v, definitions, depth + 1) for k, v in schema.items() if k not in DOC_KEYS}
+    # Constructors with distinct indices can't overlap, so `oneOf` (Plinth, Plutarch)
+    # accepts exactly what `anyOf` (Aiken) does.
+    alternatives = out.get("oneOf")
+    if isinstance(alternatives, list) and "anyOf" not in out:
+        indices = [a.get("index") if isinstance(a, dict) and a.get("dataType") == "constructor" else None
+                   for a in alternatives]
+        if None not in indices and len(set(indices)) == len(indices):
+            out["anyOf"] = out.pop("oneOf")
     # A single-constructor type may be written with or without an anyOf wrapper.
     if set(out) == {"anyOf"} and len(out["anyOf"]) == 1:
         return out["anyOf"][0]
