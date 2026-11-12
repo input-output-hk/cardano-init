@@ -19,6 +19,7 @@
 
 - [Adding a tool](contributing/adding-a-tool.md)
 - [Architecture](contributing/architecture.md)
+- [Release testing](contributing/release-testing.md)
 
 # Design
 

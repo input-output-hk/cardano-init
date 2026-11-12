@@ -1,0 +1,49 @@
+name: Release QA
+description: Manual release checklist for a release candidate (interactive setup, errors, output).
+title: "Release QA: vX.Y.Z-rc.N"
+labels: ["release-qa"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Follow [Release testing](https://input-output-hk.github.io/cardano-init/contributing/release-testing.html). Each case ID below matches a section on that page, with its exact steps and expected result.
+
+        Open this issue before you start, then edit it and tick each case as it passes. For a failure, leave the box unticked and add a comment that names the case ID, with the terminal output or a screenshot.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version under test
+      description: Output of `cardano-init --version`.
+      placeholder: cardano-init 0.5.0-rc.1
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS and architecture, terminal app, and theme (light or dark).
+      placeholder: macOS 15.1 (arm64), Ghostty, dark theme
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: cases
+    attributes:
+      label: Cases
+      options:
+        - label: "RT-01 · Install the release candidate"
+        - label: "RT-02 · Interactive setup, normal path"
+        - label: "RT-03 · Interactive setup, edge cases"
+        - label: "RT-04 · Ctrl-C"
+        - label: "RT-05 · Error messages"
+        - label: "RT-06 · add and remove"
+        - label: "RT-07 · Output formatting"
+        - label: "RT-08 · doctor"
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Skipped cases and why, anything that passed but looked off, and links to bug issues you opened.
