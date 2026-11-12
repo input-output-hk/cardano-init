@@ -102,7 +102,9 @@ install = [{ brew = "cabal-install" }, { apt = "cabal-install" }, { nix = "cabal
 binaries = ["ghc"]
 docs = "https://www.haskell.org/ghcup/"
 # Plinth targets GHC 9.6.x and Plutarch GHC 9.8.x; ghcup can install both side by side.
-install = [{ brew = "ghc" }, { apt = "ghc" }, { nix = "haskell.compiler.ghc966" }, { curl = "https://get-ghcup.haskell.org" }]
+# `ghc96` tracks the latest 9.6.x in nixpkgs; a patch attr like `ghc966` is removed
+# when nixpkgs moves to the next patch release.
+install = [{ brew = "ghc" }, { apt = "ghc" }, { nix = "haskell.compiler.ghc96" }, { curl = "https://get-ghcup.haskell.org" }]
 support = [
   { name = "Haskell Language Server", url = "https://haskell-language-server.readthedocs.io" },
   { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=haskell.haskell" },
