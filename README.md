@@ -158,21 +158,18 @@ cardano-init remove --devnet
 
 ## Tools
 
-Tools currently in the registry (✅ available · 🧪 experimental · ⬜ planned):
-
+The registry has 21 tools (✅ supported · 🔌 supported, provisioned through cardano-up · 🧪 experimental · 🚧 placeholder). The [tools catalog](docs/user-guide/tools.md) explains each status and lists the [combinations CI tests](docs/user-guide/tools.md#tested-combinations).
 
 | On-chain | Off-chain | Devnet | Infrastructure | Formal methods |
 |----------|-----------|--------|----------------|----------------|
-| ✅ Aiken | ✅ MeshJS | ✅ Yaci DevKit | ✅ Kupo | 🧪 Blaster |
-| ✅ Scalus | ✅ Scalus | | ✅ Ogmios | |
-| ✅ Plinth | ✅ Evolution SDK | | ✅ Dolos | |
-| ✅ Plutarch | 🧪 Tx3 | | ✅ Tx Submit API | |
-| 🧪 Pebble | ✅ Lucid Evolution | | ✅ Cardano Node | |
-| ⬜ Opshin | ✅ Blaze | | ✅ Cardano Node API | |
-| | ✅ Apollo | | ✅ Dingo | |
-| | ⬜ Elm Cardano | | | |
+| ✅ Aiken | ✅ MeshJS | ✅ Yaci DevKit | 🔌 Kupo | 🚧 Blaster |
+| ✅ Scalus | ✅ Scalus | | 🔌 Ogmios | |
+| ✅ Plinth | ✅ Evolution SDK | | 🔌 Dolos | |
+| ✅ Plutarch | 🧪 Tx3 | | 🔌 Tx Submit API | |
+| 🧪 Pebble | ✅ Lucid Evolution | | 🔌 Cardano Node | |
+| | ✅ Blaze | | 🔌 Cardano Node API | |
+| | ✅ Apollo | | 🔌 Dingo | |
 | | 🧪 PyCardano | | | |
-
 
 You can also check locally with `cardano-init table`, which shows the id to pass to each role flag. Experimental tools need `--allow-experimental` (`-e`).
 Infrastructure provisioned via [cardano-up](https://github.com/blinklabs-io/cardano-up).

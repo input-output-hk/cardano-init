@@ -73,7 +73,7 @@ cardano-init/
 │   │
 │   └── contract.rs             # Interface-contract constants (paths, env vars, dirs)
 │
-├── registry/tools/             # Embedded data: one TOML per tool (20 tools)
+├── registry/tools/             # Embedded data: one TOML per tool
 │   ├── aiken.toml  plinth.toml  plutarch.toml  scalus.toml        # on-chain
 │   ├── meshjs.toml  evolution.toml  lucid.toml                     # off-chain
 │   ├── blaze.toml  apollo.toml  pycardano.toml  tx3.toml          # off-chain

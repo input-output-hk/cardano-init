@@ -496,4 +496,6 @@ For a thorough validation, also scaffold a project with your tool combined with 
 { "variant": "mytool", "toolchain": "node", "flags": "--off-chain mytool", "tools": ["mytool"] }
 ```
 
+After editing `smoke-matrix.json`, run `.github/scripts/tested_combinations.py` to regenerate the [tested combinations](../user-guide/tools.md#tested-combinations) table. CI fails if the table is out of date.
+
 A PR that changes `templates/mytool/` or `registry/tools/mytool.toml` then runs that row automatically, and the weekly smoke run picks it up too. If your tool needs a toolchain CI doesn't install yet, add the setup step to `.github/workflows/tool-smoke.yml`.
