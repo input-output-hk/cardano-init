@@ -1,6 +1,14 @@
 package app
 
-import scalus.cardano.blueprint.{Blueprint, Contract, HasTypeDescription, Preamble, Validator}
+import scalus.cardano.blueprint.{
+    Blueprint,
+    Contract,
+    HasTypeDescription,
+    PlutusDataSchema,
+    Preamble,
+    TypeDescription,
+    Validator
+}
 import scalus.cardano.onchain.plutus.v1.{PolicyId, TokenName}
 import scalus.cardano.onchain.plutus.v3.TxOutRef
 import scalus.compiler.Options
@@ -42,10 +50,17 @@ object GiftCardContract extends Contract {
     /** CIP-57 blueprint describing both gift-card validators. */
     lazy val blueprint: Blueprint = {
         val tokenNameParam = summon[HasTypeDescription[ByteString]].typeDescription
-        val seedParam = summon[HasTypeDescription[TxOutRef]].typeDescription
+        // CIP-57 requires a constructor's `index`; Scalus leaves it out for single-constructor
+        // types, so set it (TxOutRef is Constr 0).
+        val seedParam = {
+            val derived = summon[HasTypeDescription[TxOutRef]].typeDescription
+            derived.copy(schema = derived.schema.copy(index = Some(0)))
+        }
         val policyIdParam = summon[HasTypeDescription[ByteString]].typeDescription
         val actionSchema = summon[HasTypeDescription[Action]].typeDescription
-        val unitSchema = summon[HasTypeDescription[Unit]].typeDescription
+        // The redeem validator ignores its redeemer, so any Plutus data is accepted. (Scalus's Unit
+        // schema is the builtin `#unit`, which a redeemer can never be.)
+        val anyDataSchema = TypeDescription(title = Some("Redeemer"), schema = PlutusDataSchema())
         Blueprint(
           preamble = Preamble(
             "Gift Card",
@@ -71,7 +86,7 @@ object GiftCardContract extends Contract {
               description = Some(
                 "Guards the locked gift; releases the assets when the gift-card token is burned"
               ),
-              redeemer = Some(unitSchema),
+              redeemer = Some(anyDataSchema),
               datum = None,
               parameters = Some(List(tokenNameParam, policyIdParam)),
               compiledCode = Some(redeemCompiled.program.cborEncoded.toHex),
