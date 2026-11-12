@@ -44,3 +44,6 @@ jobs:
 
       - name: Tested-combinations table matches smoke-matrix.json
         run: python3 .github/scripts/tested_combinations.py --check
+
+      - name: Every installer is tested or excluded, and the docs table is current
+        run: python3 .github/scripts/verify_installers.py --check

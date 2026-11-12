@@ -182,6 +182,8 @@ Internal CI (smoke tests, installer recipes, devnet):
 [![Installer Recipes](https://github.com/input-output-hk/cardano-init/actions/workflows/installer-recipes.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/installer-recipes.yml)
 [![Devnet Smoke](https://github.com/input-output-hk/cardano-init/actions/workflows/devnet-smoke.yml/badge.svg)](https://github.com/input-output-hk/cardano-init/actions/workflows/devnet-smoke.yml)
 
+Installer Recipes runs each `doctor` install command on one platform per installer. See [Tested install commands](docs/user-guide/commands.md#tested-install-commands) for which platform covers each installer.
+
 | Doc | Purpose |
 |-----|---------|
 | [docs/SUMMARY.md](docs/SUMMARY.md) | Docs site table of contents (mdBook; preview with `mdbook serve docs`) |

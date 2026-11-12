@@ -58,6 +58,8 @@ version = { npm = "@bloxbean/yaci-devkit" }    # read the npm package.json, don'
 
 Use `npm` when running the binary has side effects (`yaci-devkit --version` starts the CLI, which stops a running devnet). When `doctor` can't read a version, it treats the dep as satisfied rather than block on something it can't check.
 
+**Install recipes are tested weekly.** The `installer-recipes` workflow runs every `install` entry in `registry/deps.toml` and checks that the dep's `binaries` end up on `PATH`. After adding or changing an entry, run `.github/scripts/verify_installers.py --docs` to regenerate the [tested install commands](../user-guide/commands.md#tested-install-commands) table; CI fails if it is out of date. If you use an installer no recipe used before, add it to `TESTED` in that script (with a runner where it is native) or to `EXCLUDED` with the reason it can't be tested. CI fails until you do one or the other. If your install script asks a question before installing, add its unattended mode to `UNATTENDED` rather than changing the command `doctor` prints.
+
 If your dep downloads its own components that an upgrade leaves behind, add `after_upgrade = "<command>"` to its entry; `doctor` chains it onto every upgrade command it suggests.
 
 **Supporting tools.** In the dep's `registry/deps.toml` entry, you can add an optional `support` list pointing users at your language's editor tooling (VS Code / Neovim extensions, a language server, a playground). `cardano-init doctor --links` lists these for every detected tool, and `cardano-init list` shows them under each tool that depends on this dep:
