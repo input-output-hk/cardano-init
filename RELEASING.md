@@ -66,6 +66,26 @@ crate version to match). Follow the steps above with that version everywhere.
   set in `dist-workspace.toml`), so `latest` on npm is never an RC.
 - Don't tag the final version as an RC and flip it later: tag `vX.Y.Z` only
   for the final release.
+- Run the manual checklist against the published RC before tagging the final
+  version (see [Manual release testing](#manual-release-testing)).
+
+## Manual release testing
+
+CI checks that generated projects build, test, and run on a devnet. It can't
+check what a person sees in a terminal: the interactive prompts, error
+messages, and output formatting. That's covered by the manual checklist in
+[`docs/contributing/release-testing.md`](docs/contributing/release-testing.md)
+(about 20 minutes).
+
+1. Publish an RC (`vX.Y.Z-rc.N`) as described above.
+2. Open a **Release QA** issue from the issue template, titled
+   `Release QA: vX.Y.Z-rc.N`, and run the checklist against the installed RC.
+   Anyone can run it; ideally someone who didn't write the changes.
+3. Fix failures in follow-up PRs, then cut a new RC if any fix touches the CLI.
+   Re-run only the affected cases, in a new issue or as a comment on the
+   existing one.
+4. **Don't tag the final `vX.Y.Z` until the QA issue is closed.** Link the
+   issue in the final release PR's description.
 
 `cliff.toml` sets `ignore_tags = "rc"`, so RC tags never get a changelog
 section of their own once a later tag exists. Generating the RC itself works
