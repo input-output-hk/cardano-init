@@ -14,20 +14,13 @@
 #                    here — same class of problem as tool-smoke.yml, hence
 #                    a schedule + a tracking issue, never a PR gate.
 #
-# The matrix is drawn from what deps.toml actually uses today. Not yet covered
-# (documented, not silent):
-#   • dnf, pacman   — no recipes reference them yet; add a row when one does.
-#   • winget, powershell — Windows-only installers; winget is unreliable
-#                    headless and the PowerShell recipes are `irm | iex` scripts.
-#                    Deferred until we add a Windows runner deliberately.
-#   • curl          — the download-and-run recipes (rustup, aikup) drive
-#                    interactive installers that refuse a non-interactive shell
-#                    without a `-y`-style flag the recipe doesn't pass, so they
-#                    can't be verified headless as written. Excluded so a green
-#                    run stays meaningful; revisit if the recipes gain unattended
-#                    flags.
-# The verify script no-ops cleanly for any installer with no recipes, so adding
-# a row early is harmless.
+# Coverage lives in .github/scripts/verify_installers.py, not here: its TESTED
+# table generates this workflow's matrix and the "Tested install commands" table
+# in docs/user-guide/commands.md, and its EXCLUDED table lists any installer we
+# deliberately don't run, with the reason. ci.yml runs `--check`, which fails if
+# deps.toml uses an installer that is in neither table, so coverage can't shrink
+# unnoticed. Each run also writes its scope to the job summary, so a green run
+# says what it did and didn't test.
 
 name: installer-recipes
 
@@ -45,45 +38,63 @@ permissions:
   contents: read
 
 jobs:
-  verify:
-    name: ${{ matrix.installer }} recipes
-    # Schedule and manual runs always run; PR runs only for our opt-in label
-    # (a `labeled` event fires for every label, so filter to ours).
+  plan:
     if: github.event_name != 'pull_request' || github.event.label.name == 'run-installer-recipes'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - id: matrix
+        run: echo "matrix=$(python3 .github/scripts/verify_installers.py --matrix)" >> "$GITHUB_OUTPUT"
+      - name: Write coverage to the job summary
+        run: python3 .github/scripts/verify_installers.py --scope
+
+  verify:
+    needs: plan
+    name: ${{ matrix.installer }} recipes
     runs-on: ${{ matrix.runs-on }}
-    # Empty for host rows → no container. Set only where a distro package
-    # manager needs its native image.
+    # Empty for host rows → no container. Set where a clean image matters: a
+    # distro package manager's native image, or installers whose tools the
+    # hosted image already ships.
     container: ${{ matrix.container }}
     strategy:
       fail-fast: false # one installer breaking must not mask the others
-      matrix:
-        include:
-          - installer: apt
-            runs-on: ubuntu-latest
-            container: ubuntu:24.04
-          - installer: brew
-            runs-on: macos-latest
-          - installer: nix
-            runs-on: ubuntu-latest
-          - installer: npm
-            runs-on: ubuntu-latest
-          - installer: cargo
-            runs-on: ubuntu-latest
-          - installer: go
-            runs-on: ubuntu-latest
-          - installer: aikup
-            runs-on: ubuntu-latest
-          - installer: tx3up
-            runs-on: ubuntu-latest
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       # Bare distro containers lack the basics checkout and the recipes need.
-      - name: Bootstrap container (apt)
+      - name: Bootstrap container
         if: matrix.container != ''
         run: |
           apt-get update
           apt-get install -y sudo python3 git curl ca-certificates
 
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # ghcup's documented system requirements on Ubuntu (a C toolchain and the
+      # libraries GHC links against). A developer machine has these; a bare
+      # container doesn't.
+      - name: Install ghcup prerequisites (curl)
+        if: matrix.installer == 'curl'
+        run: apt-get install -y build-essential libffi-dev libgmp-dev libncurses-dev pkg-config
+
+      # GitHub's Windows images ship winget, but its source agreement must be
+      # accepted once before it installs anything headless. This doesn't change
+      # the recipes' commands; it's the one-time prompt a user answers on first use.
+      - name: Prepare winget
+        if: matrix.installer == 'winget'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Write-Error "winget is not on this runner image"
+            exit 1
+          }
+          winget --version
+          winget list --accept-source-agreements | Out-Null
 
       # --- per-installer prerequisites: make `matrix.installer` native ---
 
@@ -125,7 +136,13 @@ jobs:
           dirname "$tx3up_bin" >> "$GITHUB_PATH"
 
       - name: Verify recipes for ${{ matrix.installer }}
-        run: python3 .github/scripts/verify_installers.py ${{ matrix.installer }}
+        shell: bash
+        run: |
+          # Container jobs run as root with HOME=/github/home. rustup treats a
+          # HOME that isn't the user's own as an error (it suspects sudo) and
+          # exits 1 after installing. A user's HOME is their own, so match that.
+          if [ "$(id -u)" = 0 ]; then export HOME=/root; fi
+          ${{ runner.os == 'Windows' && 'python' || 'python3' }} .github/scripts/verify_installers.py ${{ matrix.installer }}
 
   notify-on-failure:
     needs: verify
