@@ -144,12 +144,14 @@ jobs:
           if [ "$(id -u)" = 0 ]; then export HOME=/root; fi
           python3 .github/scripts/verify_installers.py ${{ matrix.installer }}
 
-      # From PowerShell, as a Windows user would run these. Git Bash would put
-      # GNU tar ahead of Windows' tar.exe, and GNU tar reads `C:\...` as a
-      # remote host, which breaks installers that extract an archive.
+      # From Windows PowerShell, the shell Windows ships, as a user would run
+      # these. Git Bash puts GNU tar ahead of Windows' tar.exe, and GNU tar
+      # reads `C:\...` as a remote host. PowerShell 7 (pwsh) leaks its module
+      # path into the recipes' `powershell` child, which then can't load
+      # Microsoft.PowerShell.Security. Either breaks the aikup installer.
       - name: Verify recipes for ${{ matrix.installer }}
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: powershell
         run: python .github/scripts/verify_installers.py ${{ matrix.installer }}
 
   notify-on-failure:
