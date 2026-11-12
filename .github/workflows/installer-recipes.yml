@@ -136,13 +136,21 @@ jobs:
           dirname "$tx3up_bin" >> "$GITHUB_PATH"
 
       - name: Verify recipes for ${{ matrix.installer }}
-        shell: bash
+        if: runner.os != 'Windows'
         run: |
           # Container jobs run as root with HOME=/github/home. rustup treats a
           # HOME that isn't the user's own as an error (it suspects sudo) and
           # exits 1 after installing. A user's HOME is their own, so match that.
           if [ "$(id -u)" = 0 ]; then export HOME=/root; fi
-          ${{ runner.os == 'Windows' && 'python' || 'python3' }} .github/scripts/verify_installers.py ${{ matrix.installer }}
+          python3 .github/scripts/verify_installers.py ${{ matrix.installer }}
+
+      # From PowerShell, as a Windows user would run these. Git Bash would put
+      # GNU tar ahead of Windows' tar.exe, and GNU tar reads `C:\...` as a
+      # remote host, which breaks installers that extract an archive.
+      - name: Verify recipes for ${{ matrix.installer }}
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python .github/scripts/verify_installers.py ${{ matrix.installer }}
 
   notify-on-failure:
     needs: verify
