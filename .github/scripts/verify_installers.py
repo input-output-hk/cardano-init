@@ -603,6 +603,9 @@ def verify(installer: str, deps_path: Path) -> int:
 
 
 def main() -> int:
+    # Windows consoles default to a legacy code page that can't print ✓/✗.
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("installer", nargs="?", help="installer key, e.g. apt, brew, nix")
     parser.add_argument("--deps", type=Path, default=DEPS_FILE, help="path to registry/deps.toml")
