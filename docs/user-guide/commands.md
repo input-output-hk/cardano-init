@@ -98,7 +98,7 @@ Every week, CI runs each install command that `doctor` can suggest and checks th
 | `cargo` | Ubuntu (GitHub-hosted runner) | just |
 | `curl` | Ubuntu 24.04 (clean container) | uv, cabal, ghc, aikup, tx3up, rustup, rust |
 | `go` | Ubuntu (GitHub-hosted runner) | cardano-up, process-compose |
-| `nix` | Ubuntu (GitHub-hosted runner) | just, node, uv, aiken, sbt, jvm, docker, cabal, ghc, rustup, rust, go, process-compose |
+| `nix` | Ubuntu (GitHub-hosted runner) | just, node, uv, aiken, sbt, jvm, docker, cabal, ghc, rustup, go, process-compose |
 | `npm` | Ubuntu (GitHub-hosted runner) | yaci-devkit, aikup |
 | `powershell` | Windows (GitHub-hosted runner) | aikup |
 | `tx3up` | Ubuntu (GitHub-hosted runner) | tx3 |

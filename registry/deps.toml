@@ -155,7 +155,9 @@ install = [{ brew = "rustup" }, { curl = "https://sh.rustup.rs" }, { nix = "rust
 [rust]
 binaries = ["cargo", "rustc"]
 docs = "https://www.rust-lang.org/tools/install"
-install = [{ curl = "https://sh.rustup.rs" }, { nix = "cargo" }]
+# No nix method: nixpkgs#cargo ships cargo without rustc. On nix, the [rustup]
+# recipe (nixpkgs#rustup) provides both.
+install = [{ curl = "https://sh.rustup.rs" }]
 
 [go]
 binaries = ["go"]
