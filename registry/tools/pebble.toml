@@ -2,9 +2,10 @@
 id = "pebble"
 name = "Pebble"
 description = """\
-A smart contract language with TypeScript-shaped syntax (const, if, for loops, \
-structs, generics) from Harmonic Labs, compiled to UPLC by an optimizing \
-whole-program compiler, with a built-in unit and property test runner. The \
+A TypeScript-like smart contract language. From Harmonic Labs, it has \
+TypeScript-shaped syntax (const, if, for loops, structs, generics), compiles to UPLC with an \
+optimizing whole-program compiler, and ships a built-in unit and property test \
+runner. The \
 compiler is an npm package pinned in the project. Its scripts use protocol \
 version 11 features, so they need a chain at PV11 or later."""
 website = "https://github.com/HarmonicLabs/pebble"
