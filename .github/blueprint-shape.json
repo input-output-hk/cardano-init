@@ -35,7 +35,8 @@
       },
       "compiledCode": {
         "cborLayers": 1,
-        "uplcVersion": "1.1.0"
+        "uplcVersion": "1.1.0",
+        "builtins": "protocol 10 or earlier"
       }
     },
     "redeem.spend": {
@@ -50,7 +51,8 @@
       "redeemer": "any",
       "compiledCode": {
         "cborLayers": 1,
-        "uplcVersion": "1.1.0"
+        "uplcVersion": "1.1.0",
+        "builtins": "protocol 10 or earlier"
       }
     }
   }

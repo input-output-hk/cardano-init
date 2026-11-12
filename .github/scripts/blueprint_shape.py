@@ -6,7 +6,9 @@ Usage: blueprint_shape.py BLUEPRINT [--write]
 Every off-chain template reads the same things from blueprint/plutus.json: the
 `gift_card.mint` and `redeem.spend` validators (found by title suffix), their
 parameters, applied in order, the redeemer encoding, the Plutus version, and
-`compiledCode` with its CBOR wrapping and UPLC version. This script reduces a
+`compiledCode` with its CBOR wrapping, UPLC version, and the builtins it uses
+(off-chain libraries that decode the script to apply parameters reject builtins
+newer than they know). This script reduces a
 blueprint to exactly those things (its "shape") and compares it with
 .github/blueprint-shape.json, which is Aiken's shape.
 
@@ -75,13 +77,121 @@ def cbor_bytestring(data):
     return data[start:] if len(data) - start == size else None
 
 
+# The newest builtin in Plomin (protocol 10) is ripemd_160, number 86. Later ones
+# (expModInteger, dropList, arrays, ...) arrived with protocol 11, and MeshJS's
+# @harmoniclabs/uplc 1.4.1 fails to decode a script that uses them.
+NEWEST_PLOMIN_BUILTIN = 86
+
+
+class FlatReader:
+    """Walks a Flat-encoded UPLC program (Plutus Core spec, appendix "Flat serialisation")."""
+
+    def __init__(self, program):
+        self.bits = "".join(f"{byte:08b}" for byte in program)
+        self.pos = 0
+
+    def take(self, count):
+        if self.pos + count > len(self.bits):
+            raise ValueError("truncated UPLC program")
+        value = int(self.bits[self.pos:self.pos + count], 2)
+        self.pos += count
+        return value
+
+    def natural(self):
+        value, shift = 0, 0
+        while True:
+            chunk = self.take(8)
+            value |= (chunk & 0x7F) << shift
+            shift += 7
+            if not chunk & 0x80:
+                return value
+
+    def skip_filler(self):
+        while self.take(1) == 0:
+            pass
+
+    def skip_bytes(self):
+        self.skip_filler()
+        while (length := self.take(8)) != 0:
+            self.pos += length * 8
+
+    def read_type(self, tags):
+        tag = tags.pop(0)
+        if tag != 7:  # not a type application
+            return (tag,)
+        if tags[:2] == [7, 6]:  # pair
+            del tags[:2]
+            return (6, self.read_type(tags), self.read_type(tags))
+        if tags[:1] == [5]:  # list
+            tags.pop(0)
+            return (5, self.read_type(tags))
+        raise ValueError(f"unsupported constant type application: {tags}")
+
+    def skip_value(self, kind):
+        tag = kind[0]
+        if tag == 0:  # integer
+            self.natural()
+        elif tag in (1, 2, 8):  # bytestring, string, data
+            self.skip_bytes()
+        elif tag == 4:  # bool
+            self.pos += 1
+        elif tag == 5:  # list
+            while self.take(1):
+                self.skip_value(kind[1])
+        elif tag == 6:  # pair
+            self.skip_value(kind[1])
+            self.skip_value(kind[2])
+        elif tag != 3:  # unit
+            raise ValueError(f"unsupported constant type: {tag}")
+
+    def builtins(self):
+        """The set of builtin numbers the program's term uses."""
+        for _ in range(3):  # version
+            self.natural()
+        found = set()
+        # Iterative: compiled scripts nest deeper than Python's recursion limit.
+        stack = ["term"]
+        while stack:
+            if stack.pop() == "list":
+                if self.take(1):
+                    stack += ["list", "term"]
+                continue
+            tag = self.take(4)
+            if tag == 0:  # var
+                self.natural()
+            elif tag in (1, 2, 5):  # delay, lam, force
+                stack.append("term")
+            elif tag == 3:  # apply
+                stack += ["term", "term"]
+            elif tag == 4:  # constant
+                tags = []
+                while self.take(1):
+                    tags.append(self.take(4))
+                self.skip_value(self.read_type(tags))
+            elif tag == 7:  # builtin
+                found.add(self.take(7))
+            elif tag == 8:  # constr
+                self.natural()
+                stack.append("list")
+            elif tag == 9:  # case
+                stack += ["list", "term"]
+            elif tag != 6:  # error
+                raise ValueError(f"unknown UPLC term tag: {tag}")
+        return found
+
+
 def code_shape(compiled_code):
     data = bytes.fromhex(compiled_code)
     layers = 0
     while (inner := cbor_bytestring(data)) is not None:
         data, layers = inner, layers + 1
-    # Flat-encoded UPLC opens with the program version as three byte-aligned naturals.
-    return {"cborLayers": layers, "uplcVersion": ".".join(str(b) for b in data[:3])}
+    newer = sorted(b for b in FlatReader(data).builtins() if b > NEWEST_PLOMIN_BUILTIN)
+    return {
+        "cborLayers": layers,
+        # Flat-encoded UPLC opens with the program version as three byte-aligned naturals.
+        "uplcVersion": ".".join(str(b) for b in data[:3]),
+        "builtins": f"protocol 11 or later: {newer}" if newer else "protocol 10 or earlier",
+    }
 
 
 def shape(blueprint):

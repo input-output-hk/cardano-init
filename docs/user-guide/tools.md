@@ -70,7 +70,7 @@ The other on-chain and off-chain pairs are covered by testing against two refere
 
 - Every off-chain tool is built and tested with Aiken.
 - MeshJS is tested on Yaci DevKit with every on-chain tool, so each tool's validators are checked on a live chain.
-- Every on-chain tool's `blueprint/plutus.json` must read the same way as Aiken's: the same validators, parameters, redeemer encoding, Plutus version, and script encoding. Only the compiled scripts and their hashes may differ. CI fails if they don't match.
+- Every on-chain tool's `blueprint/plutus.json` must read the same way as Aiken's: the same validators, parameters, redeemer encoding, Plutus version, and script encoding, and no builtins newer than protocol 10 (Plomin), which some off-chain libraries can't read. Only the compiled scripts and their hashes may differ. CI fails if they don't match.
 
 So any off-chain tool that works with Aiken's blueprint reads the other on-chain tools' blueprints the same way. This relies on the [interface contract](how-it-works.md#the-interface-contract), which also covers providers: every devnet or infrastructure provider writes its connection details to `.env`. `cardano-init` [refuses to generate](how-it-works.md#compatibility-checks) a combination it knows can't work, such as an off-chain tool paired with a provider that doesn't speak its protocol.
 
