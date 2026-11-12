@@ -39,6 +39,8 @@ SHARED = (
     "Cargo.lock",
     ".github/workflows/tool-smoke.yml",
     ".github/workflows/devnet-smoke.yml",
+    ".github/scripts/blueprint_shape.py",
+    ".github/blueprint-shape.json",
 )
 TOOL_PATH = re.compile(r"templates/([^/]+)/|registry/tools/([^/]+)\.toml$")
 

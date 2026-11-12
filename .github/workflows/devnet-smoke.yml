@@ -62,10 +62,11 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
 
+      # The Pebble compiler (an npm dev dependency of the template) needs Node 22+.
       - name: Install Node
         uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: ${{ matrix.toolchain == 'pebble' && 22 || 20 }}
 
       # Keep in lockstep with templates/apollo/off-chain/go.mod.jinja.
       - name: Install Go

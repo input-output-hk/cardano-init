@@ -128,6 +128,13 @@ jobs:
           $RUN just build
           $RUN just test
 
+      # Off-chain tools are tested against Aiken's blueprint, so every on-chain tool's
+      # blueprint must read the same way. See .github/scripts/blueprint_shape.py.
+      - name: Check the blueprint matches Aiken's shape
+        if: contains(matrix.flags, '--on-chain') || contains(matrix.flags, '--fullstack')
+        working-directory: ${{ runner.temp }}/smoke-${{ matrix.variant }}
+        run: python3 "$GITHUB_WORKSPACE/.github/scripts/blueprint_shape.py" blueprint/plutus.json
+
   notify-on-failure:
     needs: smoke
     # Only file an issue for the unattended scheduled run, not manual debugging.

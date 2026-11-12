@@ -1,0 +1,57 @@
+{
+  "plutusVersion": "v3",
+  "validators": {
+    "gift_card.mint": {
+      "parameters": [
+        {
+          "dataType": "bytes"
+        },
+        {
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "dataType": "bytes"
+            },
+            {
+              "dataType": "integer"
+            }
+          ]
+        }
+      ],
+      "redeemer": {
+        "anyOf": [
+          {
+            "dataType": "constructor",
+            "index": 0,
+            "fields": []
+          },
+          {
+            "dataType": "constructor",
+            "index": 1,
+            "fields": []
+          }
+        ]
+      },
+      "compiledCode": {
+        "cborLayers": 1,
+        "uplcVersion": "1.1.0"
+      }
+    },
+    "redeem.spend": {
+      "parameters": [
+        {
+          "dataType": "bytes"
+        },
+        {
+          "dataType": "bytes"
+        }
+      ],
+      "redeemer": "any",
+      "compiledCode": {
+        "cborLayers": 1,
+        "uplcVersion": "1.1.0"
+      }
+    }
+  }
+}
