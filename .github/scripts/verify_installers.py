@@ -382,8 +382,8 @@ def lookup_path(extra: list[Path] | None = None) -> str:
 class Plan:
     command: str
     extra_bin_dirs: list[Path]
-    # Directory the recipe must install into, when the installer has one
-    # (nix's throwaway profile). Proves the recipe, not a preinstalled copy.
+    # nix's throwaway profile bin dir. Every declared binary must land here,
+    # which proves the recipe, not a preinstalled copy.
     own_bin_dir: Path | None = None
     unattended: Unattended | None = None
 
@@ -472,6 +472,12 @@ def winget_lists(arg: str) -> bool:
     return rc == 0
 
 
+def brew_bin_dir(formula: str) -> Path | None:
+    """The formula's own bin dir, linked or keg-only (proof for brew)."""
+    out = subprocess.run(["brew", "--prefix", formula], capture_output=True, text=True)
+    return Path(out.stdout.strip()) / "bin" if out.returncode == 0 and out.stdout.strip() else None
+
+
 @dataclass
 class Result:
     dep_id: str
@@ -493,9 +499,10 @@ def verify_one(
     declared binary is actually missing.
 
     A binary that was already on PATH before the install proves nothing about
-    the recipe. Such a recipe passes only with installer-specific proof (the
-    binary in nix's throwaway profile, `winget list` finding the package);
-    otherwise it is reported as unproven.
+    the recipe. Where the installer has its own install location, every
+    declared binary must be there (nix's throwaway profile, the brew formula's
+    prefix); winget must list the package. Otherwise a recipe whose binary was
+    already present is reported as unproven.
     """
     print(f"::group::{dep_id} via {p.command}", flush=True)
     before = preexisting & set(binaries)
@@ -528,14 +535,18 @@ def verify_one(
                 flush=True,
             )
 
+    own_dir = p.own_bin_dir or (brew_bin_dir(arg) if installer == "brew" else None)
     result = Result(dep_id, p.command, "installed")
     if missing:
         result.status = "failed"
         result.detail = f"not found after install: {', '.join(missing)}"
-    elif p.own_bin_dir is not None:
-        if not any(shutil.which(b, path=str(p.own_bin_dir)) for b in binaries):
+    elif installer in ("nix", "brew"):
+        # Every declared binary must come from this recipe. Finding one on the
+        # runner's own PATH (rustc next to nixpkgs' cargo) doesn't count.
+        not_own = [b for b in binaries if own_dir is None or not shutil.which(b, path=str(own_dir))]
+        if not_own:
             result.status = "failed"
-            result.detail = f"nothing installed into {p.own_bin_dir}"
+            result.detail = f"the recipe doesn't provide: {', '.join(not_own)}"
     elif installer == "winget":
         if not winget_lists(arg):
             result.status = "failed"
