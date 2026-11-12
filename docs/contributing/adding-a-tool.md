@@ -270,6 +270,8 @@ build:
 
 The off-chain and devnet templates read from `../blueprint/plutus.json`. If your tool outputs to a different path, the `build` target must copy it to the canonical location. This is the primary integration seam between on-chain and off-chain.
 
+Off-chain tools are tested against Aiken's blueprint, so yours must read the same way: the same validator titles (ending in `gift_card.mint` and `redeem.spend`), parameters in the same order and encoding, the same redeemer encoding, Plutus V3, and `compiledCode` as one CBOR byte string around UPLC 1.1.0 that uses no builtins newer than protocol 10 (Plomin). Off-chain libraries that decode the script to apply parameters reject newer builtins, so if your compiler targets the newest protocol by default, pin it to protocol 10. Titles, descriptions, and whether schemas are inline or `$ref`s don't matter. CI runs `.github/scripts/blueprint_shape.py` on your blueprint after `just build`; run it locally to see any differences. Also add a `devnet` row pairing your tool with MeshJS, which checks your validators on a live chain.
+
 **Off-chain tools** should build transactions against the validators **in the blueprint**, not a private recompiled copy — parameterize the `compiledCode` read from `../blueprint/plutus.json` (applying the gift-card parameters above). That is what makes the off-chain tool composable with *any* on-chain tool rather than only its own. They must also handle the case where no blueprint exists yet (a standalone off-chain project, before an on-chain component has built) — degrade gracefully, and gate any tests that need real scripts on the blueprint being present:
 
 ```justfile
@@ -495,5 +497,7 @@ For a thorough validation, also scaffold a project with your tool combined with 
 ```json
 { "variant": "mytool", "toolchain": "node", "flags": "--off-chain mytool", "tools": ["mytool"] }
 ```
+
+After editing `smoke-matrix.json`, run `.github/scripts/tested_combinations.py` to regenerate the [tested combinations](../user-guide/tools.md#tested-combinations) table. CI fails if the table is out of date.
 
 A PR that changes `templates/mytool/` or `registry/tools/mytool.toml` then runs that row automatically, and the weekly smoke run picks it up too. If your tool needs a toolchain CI doesn't install yet, add the setup step to `.github/workflows/tool-smoke.yml`.

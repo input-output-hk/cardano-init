@@ -35,6 +35,8 @@
     { "variant": "aiken-scalus", "toolchain": "scalus", "flags": "--on-chain aiken --off-chain scalus", "tools": ["aiken", "scalus", "yaci"] },
     { "variant": "scalus-fullstack", "toolchain": "scalus", "flags": "--fullstack scalus", "tools": ["scalus", "yaci"] },
     { "variant": "plinth-meshjs", "toolchain": "haskell", "flags": "--on-chain plinth --off-chain meshjs --nix", "tools": ["plinth"] },
-    { "variant": "plutarch-meshjs", "toolchain": "haskell", "flags": "--on-chain plutarch --off-chain meshjs --nix", "tools": ["plutarch"] }
+    { "variant": "plutarch-meshjs", "toolchain": "haskell", "flags": "--on-chain plutarch --off-chain meshjs --nix", "tools": ["plutarch"] },
+    { "variant": "scalus-meshjs", "toolchain": "scalus", "flags": "--on-chain scalus --off-chain meshjs", "tools": ["scalus"] },
+    { "variant": "pebble-meshjs", "toolchain": "pebble", "flags": "--on-chain pebble --off-chain meshjs --allow-experimental", "tools": ["pebble", "meshjs", "yaci"] }
   ]
 }

@@ -73,7 +73,7 @@ cardano-init/
 │   │
 │   └── contract.rs             # Interface-contract constants (paths, env vars, dirs)
 │
-├── registry/tools/             # Embedded data: one TOML per tool (20 tools)
+├── registry/tools/             # Embedded data: one TOML per tool
 │   ├── aiken.toml  plinth.toml  plutarch.toml  scalus.toml        # on-chain
 │   ├── meshjs.toml  evolution.toml  lucid.toml                     # off-chain
 │   ├── blaze.toml  apollo.toml  pycardano.toml  tx3.toml          # off-chain
@@ -382,7 +382,7 @@ The chosen mechanism for template freshness without runtime template fetching (P
 - **PR tool checks:** the per-tool smoke tests (`tool-smoke.yml`) and Yaci devnet checks (`devnet-smoke.yml`) also run on PRs, selected from the changed paths. A change under `templates/<tool>/` or to `registry/tools/<tool>.toml` runs the rows in `.github/smoke-matrix.json` that use that tool. A change to shared scaffolding (`src/scaffold/`, `src/registry/`, `src/contract.rs`, `templates/_base/`, `_nix/`, `_spec/`, `Cargo.toml`, `Cargo.lock`) or to either workflow runs every row. Snapshots don't count as shared, because they are output from the templates. The rules are in `.github/scripts/select_checks.py`, which also fails if a registry tool has no row, apart from the listed exceptions.
 - **Scheduled maintenance gate:** the same workflows also run every row on a schedule (weekly cron + manual dispatch). This is what detects a *generated project* breaking with **no repo change** — a Cardano hardfork, a breaking upstream tool release, or an unmaintained dependency (templates pin floating version ranges). A scheduled failure opens a tracking issue.
 - **Determinism / snapshot tests:** `--dry-run` and rendered output compared against committed snapshots for a set of selections; guards §6.4.
-- **No combinatorial testing:** composition is guaranteed by the contract, so we verify each tool individually rather than every pair.
+- **Reference tools instead of combinatorial testing:** composition rests on the contract, so instead of every pair we test against two references. Every off-chain tool runs with Aiken; MeshJS runs on a Yaci devnet with every on-chain tool; and `tool-smoke` checks that every on-chain tool's blueprint has the same *shape* as Aiken's (`.github/scripts/blueprint_shape.py` against `.github/blueprint-shape.json`): the `gift_card.mint` and `redeem.spend` validators, their parameter and redeemer schemas with `$ref`s resolved and titles dropped, the Plutus version, and the CBOR wrapping, UPLC version, and builtins of `compiledCode` (nothing newer than protocol 10: MeshJS's UPLC decoder rejects protocol 11 builtins such as `dropList`). That is everything an off-chain template reads, so a matching blueprint is indistinguishable from Aiken's to every off-chain tool. The spend datum is not compared: no template reads it. To change the contract on purpose, change Aiken's template and regenerate the reference with `blueprint_shape.py <aiken blueprint> --write`.
 
 ---
 
