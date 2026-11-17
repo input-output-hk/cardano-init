@@ -1,14 +1,18 @@
 //! Loads the embedded `registry/deps.toml` into a `DepCatalog` (tech-spec §9.2).
 //!
-//! Recipes are data; the installers they reference are code. Unknown installer
-//! keys are rejected at load.
+//! Recipes are data: each method's command is a MiniJinja template rendered
+//! with the pinned `version`. The installers they reference are code (detection
+//! and bootstrap); unknown installer keys and broken templates are rejected at
+//! load.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 
 use super::installers::Installer;
+use crate::registry::version::VersionReq;
 
 #[derive(RustEmbed)]
 #[folder = "registry/"]
@@ -23,24 +27,71 @@ pub enum CatalogError {
     #[error("failed to parse registry/deps.toml: {0}")]
     Parse(#[from] toml::de::Error),
 
-    #[error("dep '{dep}' has a malformed install entry (expected a single {{ installer = arg }})")]
+    #[error(
+        "dep '{dep}' has a malformed install entry (expected a single {{ installer = \"command\" }})"
+    )]
     MalformedInstall { dep: String },
 
     #[error("unknown installer '{installer}' in dep '{dep}'")]
     UnknownInstaller { dep: String, installer: String },
+
+    #[error("dep '{dep}' has an invalid command template for '{installer}': {source}")]
+    InvalidTemplate {
+        dep: String,
+        installer: String,
+        source: minijinja::Error,
+    },
 }
 
-/// A single install method: which installer, and the arg to pass it.
+/// A single install (or upgrade) method: which installer, and the command
+/// template that runs it.
 #[derive(Debug, Clone)]
 pub struct InstallMethod {
     pub installer: Installer,
-    pub arg: String,
+    pub template: String,
+    /// The template uses `version`, so the command installs the pin rather
+    /// than whatever the installer's source has as latest.
+    pub uses_version: bool,
+}
+
+impl InstallMethod {
+    /// The command for this method, with `version` filled in (empty when
+    /// unpinned).
+    pub fn render(&self, version: Option<&VersionReq>) -> String {
+        render(&self.template, version).expect("templates are validated at load")
+    }
+}
+
+fn template_env() -> &'static minijinja::Environment<'static> {
+    static ENV: OnceLock<minijinja::Environment<'static>> = OnceLock::new();
+    ENV.get_or_init(build_template_env)
+}
+
+fn build_template_env() -> minijinja::Environment<'static> {
+    let mut env = minijinja::Environment::new();
+    env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
+    // `prefix(p)` prepends `p` to a non-empty value and keeps an empty one
+    // empty, so `pkg{{ version | prefix('@') }}` never renders a dangling `@`.
+    env.add_filter("prefix", |value: String, p: String| {
+        if value.is_empty() {
+            value
+        } else {
+            format!("{p}{value}")
+        }
+    });
+    env
+}
+
+fn render(template: &str, version: Option<&VersionReq>) -> Result<String, minijinja::Error> {
+    let version = version.map(ToString::to_string).unwrap_or_default();
+    let out = template_env().render_str(template, minijinja::context! { version })?;
+    Ok(out.trim().to_string())
 }
 
 pub use crate::registry::types::Link as SupportLink;
 
 /// How to read an installed dep's version (tech-spec §9.7). Only run for deps
-/// a selected tool sets a minimum version for.
+/// a selected tool pins.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VersionProbe {
@@ -68,11 +119,25 @@ pub struct DepRecipe {
     pub docs: String,
     /// Install methods in preference order.
     pub install: Vec<InstallMethod>,
+    /// Per-installer upgrade overrides; see [`DepRecipe::upgrade_method`].
+    pub upgrade: Vec<InstallMethod>,
     pub support: Vec<SupportLink>,
     pub version: VersionProbe,
     /// A command to run after upgrading, chained onto every upgrade command
     /// (e.g. refreshing components the dep downloaded itself).
     pub after_upgrade: Option<String>,
+}
+
+impl DepRecipe {
+    /// The method that moves an installed dep to the pinned (or latest)
+    /// version through `install`'s installer: its `upgrade` override, else the
+    /// install command itself.
+    pub fn upgrade_method<'a>(&'a self, install: &'a InstallMethod) -> &'a InstallMethod {
+        self.upgrade
+            .iter()
+            .find(|m| m.installer == install.installer)
+            .unwrap_or(install)
+    }
 }
 
 /// All dep recipes, keyed by dep id.
@@ -85,8 +150,10 @@ pub struct DepCatalog {
 struct DepRecipeToml {
     binaries: Vec<String>,
     docs: String,
-    /// Each entry is a single-key table: `{ brew = "node" }`.
+    /// Each entry is a single-key table: `{ brew = "brew install node" }`.
     install: Vec<HashMap<String, String>>,
+    #[serde(default)]
+    upgrade: Vec<HashMap<String, String>>,
     #[serde(default)]
     support: Vec<SupportLink>,
     #[serde(default)]
@@ -96,15 +163,17 @@ struct DepRecipeToml {
 
 impl DepRecipeToml {
     fn into_recipe(self, dep: &str) -> Result<DepRecipe, CatalogError> {
-        let install = self
-            .install
-            .into_iter()
-            .map(|entry| parse_install_method(dep, entry))
-            .collect::<Result<_, _>>()?;
+        let parse = |entries: Vec<HashMap<String, String>>| {
+            entries
+                .into_iter()
+                .map(|entry| parse_install_method(dep, entry))
+                .collect::<Result<Vec<_>, _>>()
+        };
         Ok(DepRecipe {
             binaries: self.binaries,
             docs: self.docs,
-            install,
+            install: parse(self.install)?,
+            upgrade: parse(self.upgrade)?,
             support: self.support,
             version: self.version,
             after_upgrade: self.after_upgrade,
@@ -117,16 +186,28 @@ fn parse_install_method(
     entry: HashMap<String, String>,
 ) -> Result<InstallMethod, CatalogError> {
     let mut pairs = entry.into_iter();
-    let (Some((key, arg)), None) = (pairs.next(), pairs.next()) else {
+    let (Some((key, template)), None) = (pairs.next(), pairs.next()) else {
         return Err(CatalogError::MalformedInstall {
             dep: dep.to_string(),
         });
     };
     let installer = Installer::from_key(&key).ok_or_else(|| CatalogError::UnknownInstaller {
         dep: dep.to_string(),
-        installer: key,
+        installer: key.clone(),
     })?;
-    Ok(InstallMethod { installer, arg })
+    let pinned = VersionReq::parse("0");
+    let (unpinned, pinned) = render(&template, None)
+        .and_then(|bare| Ok((bare, render(&template, pinned.as_ref())?)))
+        .map_err(|source| CatalogError::InvalidTemplate {
+            dep: dep.to_string(),
+            installer: key,
+            source,
+        })?;
+    Ok(InstallMethod {
+        installer,
+        template,
+        uses_version: unpinned != pinned,
+    })
 }
 
 impl DepCatalog {
@@ -181,9 +262,79 @@ mod tests {
         assert_eq!(aiken.binaries, vec!["aiken".to_string()]);
         // First method is aikup, second is nix (order = preference).
         assert_eq!(aiken.install[0].installer, Installer::Aikup);
-        // Empty arg ⇒ `aikup install` (latest); "latest" is not a valid tag.
-        assert_eq!(aiken.install[0].arg, "");
         assert_eq!(aiken.install[1].installer, Installer::Nix);
+    }
+
+    #[test]
+    fn templates_render_with_and_without_version() {
+        let cat = DepCatalog::load().unwrap();
+        let aikup = &cat.get("aiken").unwrap().install[0];
+        let pin = VersionReq::parse("1.1.24");
+        assert_eq!(aikup.render(pin.as_ref()), "aikup install v1.1.24");
+        // Unpinned ⇒ bare `aikup install` (latest), no trailing space.
+        assert_eq!(aikup.render(None), "aikup install");
+
+        let yaci = cat.get("yaci-devkit").unwrap();
+        let upgrade = yaci.upgrade_method(&yaci.install[0]);
+        let pin = VersionReq::parse("0.12");
+        assert_eq!(
+            upgrade.render(pin.as_ref()),
+            "npm install -g @bloxbean/yaci-devkit@0.12"
+        );
+        assert_eq!(
+            upgrade.render(None),
+            "npm install -g @bloxbean/yaci-devkit@latest"
+        );
+        assert_eq!(
+            yaci.install[0].render(None),
+            "npm install -g @bloxbean/yaci-devkit"
+        );
+    }
+
+    #[test]
+    fn upgrade_falls_back_to_install() {
+        let cat = DepCatalog::load().unwrap();
+        let aiken = cat.get("aiken").unwrap();
+        let aikup = &aiken.install[0];
+        assert_eq!(aiken.upgrade_method(aikup).template, aikup.template);
+        let nix = &aiken.install[1];
+        assert_eq!(
+            aiken.upgrade_method(nix).render(None),
+            "nix profile upgrade aiken"
+        );
+    }
+
+    #[test]
+    fn uses_version_tracks_the_template() {
+        let cat = DepCatalog::load().unwrap();
+        let aiken = cat.get("aiken").unwrap();
+        assert!(aiken.install[0].uses_version);
+        assert!(!aiken.install[1].uses_version);
+        assert!(!aiken.upgrade[0].uses_version);
+    }
+
+    #[test]
+    fn broken_template_is_load_error() {
+        let toml = r#"
+[foo]
+binaries = ["foo"]
+docs = "https://example.com"
+install = [{ brew = "brew install foo{{ version" }]
+"#;
+        let err = DepCatalog::from_str(toml).unwrap_err();
+        assert!(matches!(err, CatalogError::InvalidTemplate { .. }));
+    }
+
+    #[test]
+    fn unknown_template_variable_is_load_error() {
+        let toml = r#"
+[foo]
+binaries = ["foo"]
+docs = "https://example.com"
+install = [{ brew = "brew install {{ package }}" }]
+"#;
+        let err = DepCatalog::from_str(toml).unwrap_err();
+        assert!(matches!(err, CatalogError::InvalidTemplate { .. }));
     }
 
     #[test]
@@ -192,7 +343,7 @@ mod tests {
 [foo]
 binaries = ["foo"]
 docs = "https://example.com"
-install = [{ brew = "foo" }]
+install = [{ brew = "brew install foo" }]
 "#;
         let cat = DepCatalog::from_str(toml).unwrap();
         assert!(cat.get("foo").unwrap().support.is_empty());
@@ -228,7 +379,7 @@ install = [{ brew = "foo" }]
 [foo]
 binaries = ["foo"]
 docs = "https://example.com"
-install = [{ brew = "foo" }]
+install = [{ brew = "brew install foo" }]
 "#;
         let cat = DepCatalog::from_str(toml).unwrap();
         assert_eq!(cat.get("foo").unwrap().version, VersionProbe::default());
@@ -253,7 +404,7 @@ install = [{ brew = "foo" }]
 [foo]
 binaries = ["foo"]
 docs = "https://example.com"
-install = [{ snap = "foo" }]
+install = [{ snap = "snap install foo" }]
 "#;
         let err = DepCatalog::from_str(toml).unwrap_err();
         assert!(matches!(err, CatalogError::UnknownInstaller { .. }));

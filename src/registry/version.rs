@@ -1,8 +1,9 @@
-//! Dotted numeric versions for dependency floors (tech-spec §9.7).
+//! Dotted numeric versions and the version requirements tools pin
+//! (tech-spec §9.7).
 //!
 //! Deliberately lenient: tools print versions in many shapes (`v24.21.0`,
-//! `aiken v1.1.24+bacbeb3`, `go1.26.10`, `17.0.20.1`), and a floor only needs
-//! the numeric core. Pre-release and build suffixes are ignored.
+//! `aiken v1.1.24+bacbeb3`, `go1.26.10`, `17.0.20.1`), and a requirement only
+//! needs the numeric core. Pre-release and build suffixes are ignored.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -104,6 +105,58 @@ impl serde::Serialize for Version {
     }
 }
 
+/// A prefix-exact version requirement: the declared components must match the
+/// installed version's leading components. `1.1.24` is exact, `1.1` is
+/// `1.1.*`, `1` is `1.*`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionReq(Vec<u64>);
+
+impl VersionReq {
+    /// Parse a declared requirement such as `"1.1.24"`, `"0.12"` or `"1"`.
+    pub fn parse(text: &str) -> Option<Self> {
+        Version::parse(text).map(|v| VersionReq(v.0))
+    }
+
+    pub fn matches(&self, version: &Version) -> bool {
+        self.0
+            .iter()
+            .enumerate()
+            .all(|(i, c)| version.component(i) == *c)
+    }
+
+    /// Human-readable form: `1.1.24` stays as is, a partial pin reads `1.1.x`.
+    pub fn label(&self) -> String {
+        if self.0.len() >= 3 {
+            self.to_string()
+        } else {
+            format!("{self}.x")
+        }
+    }
+
+    /// The tighter of two requirements when one refines the other (`1.1` and
+    /// `1.1.24` → `1.1.24`); `None` when no version satisfies both.
+    pub fn narrow(&self, other: &VersionReq) -> Option<VersionReq> {
+        let (short, long) = if self.0.len() <= other.0.len() {
+            (self, other)
+        } else {
+            (other, self)
+        };
+        long.0.starts_with(&short.0).then(|| long.clone())
+    }
+}
+
+impl fmt::Display for VersionReq {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&Version(self.0.clone()).to_string())
+    }
+}
+
+impl serde::Serialize for VersionReq {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +217,38 @@ mod tests {
         assert!(Version::find_in("linux-x64 build 17").is_none());
         assert!(Version::find_in("Unrecognized option: --version").is_none());
         assert!(Version::find_in("").is_none());
+    }
+
+    fn req(text: &str) -> VersionReq {
+        VersionReq::parse(text).unwrap()
+    }
+
+    #[test]
+    fn req_matches_by_prefix() {
+        assert!(req("1.1.24").matches(&v("1.1.24")));
+        assert!(!req("1.1.24").matches(&v("1.1.25")));
+        assert!(req("1.1").matches(&v("1.1.0")));
+        assert!(req("1.1").matches(&v("1.1.99")));
+        assert!(!req("1.1").matches(&v("1.2.0")));
+        assert!(req("1").matches(&v("1.58.0")));
+        assert!(!req("1").matches(&v("2.0.0")));
+        assert!(!req("1.1.24").matches(&v("1.1")));
+        assert!(VersionReq::parse("latest").is_none());
+    }
+
+    #[test]
+    fn label_marks_partial_pins() {
+        assert_eq!(req("1.1.24").label(), "1.1.24");
+        assert_eq!(req("0.12").label(), "0.12.x");
+        assert_eq!(req("1").label(), "1.x");
+    }
+
+    #[test]
+    fn narrow_keeps_the_more_specific_requirement() {
+        assert_eq!(req("1.1").narrow(&req("1.1.24")), Some(req("1.1.24")));
+        assert_eq!(req("1.1.24").narrow(&req("1")), Some(req("1.1.24")));
+        assert_eq!(req("1.1").narrow(&req("1.1")), Some(req("1.1")));
+        assert_eq!(req("1.1").narrow(&req("1.2")), None);
+        assert_eq!(req("18").narrow(&req("20")), None);
     }
 }

@@ -110,6 +110,7 @@ fn finish_update(
         super::experimental_gate(new, registry)?;
     }
     super::compat_gate(new, registry, flags.ignore_warning, json)?;
+    super::era_gate(new, registry, flags.allow_mismatch_eras, json)?;
 
     let plan = update::plan_update(old, new, registry)?;
 

@@ -82,6 +82,10 @@ pub struct UpdateFlags {
     /// Allow experimental tools in the resulting selection
     #[arg(long, short = 'e', visible_alias = "experimental")]
     pub allow_experimental: bool,
+
+    /// Allow tools that target different ledger eras in the resulting selection
+    #[arg(long)]
+    pub allow_mismatch_eras: bool,
 }
 
 /// Arguments for `add`: the same role flags as init (presence assigns/replaces).
@@ -236,6 +240,11 @@ pub struct InitArgs {
     /// Scaffold a combination the compatibility check flags as incompatible
     #[arg(long, visible_alias = "ignore-warnings")]
     pub ignore_warning: bool,
+
+    /// Combine tools that target different ledger eras (e.g. Conway and
+    /// Dijkstra around a hard fork)
+    #[arg(long)]
+    pub allow_mismatch_eras: bool,
 }
 
 impl InitArgs {

@@ -14,9 +14,9 @@ community = [
   { name = "GitHub Discussions", url = "https://github.com/CardanoSolutions/ogmios/discussions" },
 ]
 languages = []
-system_deps = ["docker", "cardano-up"]
+era = "conway"
+system_deps = ["docker", { cardano-up = "0.15" }]
 # The infra Justfile targets a context with `--context`, first released in cardano-up 0.15.0.
-min_versions = { cardano-up = "0.15.0" }
 nix_packages = []
 
 [roles.infrastructure]

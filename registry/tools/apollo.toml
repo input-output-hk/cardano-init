@@ -9,6 +9,7 @@ support, and several chain backends. Choose it for Go backends, bots, and \
 services that build and submit transactions."""
 website = "https://github.com/Salvionied/apollo"
 languages = ["go"]
+era = "conway"
 system_deps = ["go"]
 nix_packages = ["go"]
 # go.mod is generic; require the Apollo module so other Go projects read as

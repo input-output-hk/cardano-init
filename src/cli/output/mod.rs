@@ -202,6 +202,31 @@ pub fn print_incompatibility_warning(inc: &Incompatibility) {
     );
 }
 
+/// Warn that the selection mixes ledger eras. `allowed` when
+/// `--allow-mismatch-eras` already accepted it; otherwise a confirm or an error
+/// follows.
+pub fn print_era_mismatch_warning(mismatch: &crate::registry::era::EraMismatch, allowed: bool) {
+    let (title, detail) = if allowed {
+        (
+            "Mixed eras (allowed):",
+            "Scaffolding anyway (--allow-mismatch-eras); tools on different eras may not work together.",
+        )
+    } else {
+        (
+            "Mixed eras:",
+            "Tools on different ledger eras may not work together across a hard fork.",
+        )
+    };
+    println!();
+    println!(
+        "  {} {} {}",
+        theme::warn_mark(),
+        theme::warn_strong(title),
+        theme::warn_strong(crate::cli::error::era_summary(mismatch)),
+    );
+    println!("    {}", theme::warn(detail));
+}
+
 /// Row labels for the non-component lines of the summary panel.
 const NETWORK_LABEL: &str = "network";
 const NIX_LABEL: &str = "nix";

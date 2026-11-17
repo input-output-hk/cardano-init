@@ -17,7 +17,8 @@ use crate::registry::types::{Network, Role, RoleAssignment, Selection, ToolDef};
 ///
 /// Unless `allow_experimental`, keeping an experimental tool needs an explicit
 /// confirm (the counterpart of the one-shot gate). `ignore_warning` makes
-/// incompatible devnets selectable.
+/// incompatible devnets selectable. Tools on different ledger eras need an
+/// explicit confirm too, unless `allow_mismatch_eras` (then only a warning).
 ///
 /// # Errors
 /// [`CliError::NoRolesSelected`] if every role is skipped,
@@ -26,6 +27,7 @@ pub fn run_interactive(
     registry: &Registry,
     allow_experimental: bool,
     ignore_warning: bool,
+    allow_mismatch_eras: bool,
 ) -> Result<Selection, CliError> {
     let theme = WizardTheme::default();
 
@@ -42,6 +44,8 @@ pub fn run_interactive(
             return Err(CliError::NoRolesSelected);
         }
     }
+
+    confirm_era_mismatch(&theme, &assignments, registry, allow_mismatch_eras)?;
 
     let project_name = prompt_project_name(&theme)?;
     let nix = Confirm::with_theme(&theme)
@@ -502,6 +506,34 @@ fn confirm_experimental(
         .into_iter()
         .filter(|a| !registry.get(&a.tool_id).is_some_and(|t| t.experimental))
         .collect())
+}
+
+/// Confirm (default No) before combining tools parked on different eras;
+/// `allowed` (`--allow-mismatch-eras`) only warns. Declining stops with the
+/// same error the one-shot gate gives.
+fn confirm_era_mismatch(
+    theme: &WizardTheme,
+    assignments: &[RoleAssignment],
+    registry: &Registry,
+    allowed: bool,
+) -> Result<(), CliError> {
+    let Some(mismatch) = crate::registry::era::check(assignments, registry) else {
+        return Ok(());
+    };
+    output::print_era_mismatch_warning(&mismatch, allowed);
+    if allowed {
+        return Ok(());
+    }
+
+    let combine = Confirm::with_theme(theme)
+        .with_prompt("Combine tools from different eras anyway?")
+        .default(false)
+        .interact()?;
+    if combine {
+        Ok(())
+    } else {
+        Err(mismatch.into())
+    }
 }
 
 fn prompt_project_name(theme: &WizardTheme) -> Result<String, CliError> {

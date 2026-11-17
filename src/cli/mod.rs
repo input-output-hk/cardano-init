@@ -158,6 +158,26 @@ fn experimental_gate(selection: &Selection, registry: &Registry) -> Result<(), C
     })
 }
 
+/// Era coherence gate: tools parked on different ledger eras need
+/// `--allow-mismatch-eras`, which downgrades the stop to a warning.
+pub(crate) fn era_gate(
+    selection: &Selection,
+    registry: &Registry,
+    allow_mismatch_eras: bool,
+    json: bool,
+) -> Result<(), CliError> {
+    let Some(mismatch) = crate::registry::era::check(&selection.assignments, registry) else {
+        return Ok(());
+    };
+    if !allow_mismatch_eras {
+        return Err(mismatch.into());
+    }
+    if !json {
+        output::print_era_mismatch_warning(&mismatch, true);
+    }
+    Ok(())
+}
+
 /// Off-chain ↔ provider compatibility gate. With `--ignore-warning` an
 /// incompatibility is only a warning (printed for human output).
 fn compat_gate(
@@ -207,9 +227,15 @@ fn run_init(args: &InitArgs, registry: &Registry, json: bool) -> Result<(), CliE
         if !args.allow_experimental {
             experimental_gate(&selection, registry)?;
         }
+        era_gate(&selection, registry, args.allow_mismatch_eras, json)?;
         selection
     } else {
-        interactive::run_interactive(registry, args.allow_experimental, args.ignore_warning)?
+        interactive::run_interactive(
+            registry,
+            args.allow_experimental,
+            args.ignore_warning,
+            args.allow_mismatch_eras,
+        )?
     };
 
     compat_gate(&selection, registry, args.ignore_warning, json)?;
@@ -375,6 +401,55 @@ mod tests {
         let registry = Registry::load().unwrap();
         let res = run_init(&init_args(None, false), &registry, true);
         assert!(res.is_ok(), "expected Ok, got {res:?}");
+    }
+
+    /// Aiken + MeshJS, with Aiken re-parked on Dijkstra.
+    fn mixed_era_case(allow_mismatch_eras: bool) -> (InitArgs, Registry) {
+        let mut registry = Registry::load().unwrap();
+        registry.set_era_for_test("aiken", crate::registry::types::Era::Dijkstra);
+        let args = InitArgs {
+            name: Some("era-gate-demo".to_string()),
+            on_chain: Some("aiken".to_string()),
+            off_chain: Some("meshjs".to_string()),
+            allow_mismatch_eras,
+            dry_run: true,
+            ..InitArgs::default()
+        };
+        (args, registry)
+    }
+
+    #[test]
+    fn mixed_eras_gated_without_flag() {
+        let (args, registry) = mixed_era_case(false);
+        let err = run_init(&args, &registry, true).unwrap_err();
+        assert_eq!(err.code(), "era_mismatch");
+        assert_eq!(err.exit_code(), 2);
+        let ctx = err.context();
+        assert_eq!(string_array(&ctx["eras"]["dijkstra"]), vec!["aiken"]);
+        assert_eq!(string_array(&ctx["eras"]["conway"]), vec!["meshjs"]);
+        assert_eq!(ctx["remedy"], "--allow-mismatch-eras");
+        let msg = err.to_string();
+        assert!(msg.contains("Dijkstra: Aiken"), "message: {msg}");
+    }
+
+    #[test]
+    fn mixed_eras_allowed_with_flag() {
+        let (args, registry) = mixed_era_case(true);
+        let res = run_init(&args, &registry, true);
+        assert!(res.is_ok(), "expected Ok, got {res:?}");
+    }
+
+    #[test]
+    fn same_era_selection_needs_no_flag() {
+        let registry = Registry::load().unwrap();
+        let args = InitArgs {
+            name: Some("era-gate-demo".to_string()),
+            on_chain: Some("aiken".to_string()),
+            off_chain: Some("meshjs".to_string()),
+            dry_run: true,
+            ..InitArgs::default()
+        };
+        assert!(run_init(&args, &registry, true).is_ok());
     }
 
     /// One-shot dry-run `InitArgs` for tx3 (experimental, so allowed) + `devnet`.

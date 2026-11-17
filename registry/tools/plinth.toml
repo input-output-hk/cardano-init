@@ -12,9 +12,9 @@ community = [
   { name = "Discord (Intersect, #wg-plutus)", url = "https://discord.gg/RJWdVsMkvR" },
 ]
 languages = ["haskell"]
+era = "conway"
 system_deps = ["cabal", "ghc"]
 # The template targets GHC 9.6 (ghc966).
-min_versions = { ghc = "9.6" }
 nix_packages = ["cabal-install", "haskell.compiler.ghc966", "pkg-config", "libsodium", "secp256k1", "blst"]
 # Plinth ships its own component-local haskell.nix flake (the recommended setup
 # from IntersectMBO/plinth-template) under `--nix`; a plain nixpkgs shell cannot

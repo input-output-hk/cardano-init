@@ -11,6 +11,7 @@ community = [
   { name = "Discord (Lantr)", url = "https://discord.gg/B6tXmBzhTn" },
 ]
 languages = ["scala"]
+era = "conway"
 system_deps = ["sbt", "jvm"]
 nix_packages = ["sbt", "jdk"]
 detect = [{ file = "build.sbt", contains = "org.scalus" }]

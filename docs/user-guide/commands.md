@@ -45,6 +45,7 @@ With `--name`, the command runs in **one-shot** mode and never prompts. Without 
 | `--allow-experimental` | `-e`, `--experimental` | Opt in to [experimental tools](how-it-works.md#experimental-tools). |
 | `--dry-run` | `--dryrun` | Show what would be generated without writing to disk. |
 | `--ignore-warning` | `--ignore-warnings` | Scaffold a combination the [compatibility check](how-it-works.md#compatibility-checks) flags as incompatible. |
+| `--allow-mismatch-eras` | | Combine tools that target different [ledger eras](how-it-works.md#ledger-eras). |
 | `--json` | | Print machine-readable JSON instead of human-readable text. |
 | `--icons[=WHEN]` | | Show an icon before each tool name: `auto` (default), `always` or `never`. Remembered between runs. |
 | `--help` / `--version` | `-h` / `-V` | Print help / version. |
@@ -72,7 +73,7 @@ With `--json`, `table` prints the same catalog as `list --json`.
 
 ## `doctor`
 
-Run `doctor` inside a generated project. It finds the project's components, checks that the toolchains they need are installed and recent enough, and prints the install command for each one that is missing and the upgrade command for each one that is too old. Add `--links` to also list the editor extensions, language servers, and community channels for the project's tools.
+Run `doctor` inside a generated project. It finds the project's components, checks that the toolchains they need are installed at the version the templates pin, and prints the install command for each one that is missing or at another version. Add `--links` to also list the editor extensions, language servers, and community channels for the project's tools.
 
 ```bash
 cd my-protocol
@@ -162,6 +163,7 @@ Plus the [shared update flags](#shared-update-flags).
 | `--force` | | Update even when the git working tree has uncommitted changes (or isn't a git repository). |
 | `--ignore-warning` | `--ignore-warnings` | Proceed even if the resulting off-chain ↔ provider combination is flagged incompatible. |
 | `--allow-experimental` | `-e`, `--experimental` | Allow experimental tools in the resulting selection. |
+| `--allow-mismatch-eras` | | Allow tools that target different [ledger eras](how-it-works.md#ledger-eras) in the resulting selection. |
 
 ## Exit codes
 

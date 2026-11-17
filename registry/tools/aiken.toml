@@ -13,9 +13,9 @@ community = [
   { name = "GitHub Discussions", url = "https://github.com/aiken-lang/aiken/discussions" },
 ]
 languages = ["aiken"]
-system_deps = ["aiken"]
+era = "conway"
 # Matches the compiler pinned in the template's aiken.toml.
-min_versions = { aiken = "1.1.24" }
+system_deps = [{ aiken = "1.1.24" }]
 nix_packages = ["aiken"]
 detect = ["aiken.toml"]
 

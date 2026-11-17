@@ -3,6 +3,7 @@
 
 use crate::doctor::catalog::CatalogError;
 use crate::registry::compat::Incompatibility;
+use crate::registry::era::EraMismatch;
 use crate::registry::loader::RegistryError;
 use crate::scaffold::ScaffoldError;
 
@@ -81,6 +82,20 @@ pub enum CliError {
         /// The role flags that selected the experimental tool(s), e.g.
         /// `["--formal-methods", "blaster"]`, so the example is copy-pasteable.
         example_flags: Vec<String>,
+    },
+
+    #[error("the selected tools target different ledger eras — {summary}")]
+    #[diagnostic(
+        code(cardano_init::era_mismatch),
+        help(
+            "tools parked on different eras may not work together across a hard fork.\nTo combine them anyway, re-run with --allow-mismatch-eras."
+        )
+    )]
+    EraMismatch {
+        /// `Conway: Mesh, Kupo; Dijkstra: Aiken`, for the message.
+        summary: String,
+        /// Era → tool ids (machine-facing `context`).
+        eras: std::collections::BTreeMap<String, Vec<String>>,
     },
 
     #[error("tool '{tool_id}' does not support fullstack (no [fullstack] template)")]
@@ -243,6 +258,35 @@ impl From<Incompatibility> for CliError {
     }
 }
 
+impl From<EraMismatch> for CliError {
+    fn from(mismatch: EraMismatch) -> Self {
+        CliError::EraMismatch {
+            summary: era_summary(&mismatch),
+            eras: mismatch
+                .groups
+                .iter()
+                .map(|(era, tools)| {
+                    let ids = tools.iter().map(|t| t.id.clone()).collect();
+                    (era.as_kebab().to_string(), ids)
+                })
+                .collect(),
+        }
+    }
+}
+
+/// `Conway: Mesh, Kupo; Dijkstra: Aiken`.
+pub(crate) fn era_summary(mismatch: &EraMismatch) -> String {
+    mismatch
+        .groups
+        .iter()
+        .map(|(era, tools)| {
+            let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+            format!("{era}: {}", names.join(", "))
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 impl CliError {
     /// Process exit code (tech spec §2.3): `2` for usage/validation errors,
     /// `1` for runtime errors, `0` for an interactive abort (a user choice).
@@ -252,6 +296,7 @@ impl CliError {
             | CliError::ToolRoleMismatch { .. }
             | CliError::NoRolesSelected
             | CliError::ExperimentalNotAllowed { .. }
+            | CliError::EraMismatch { .. }
             | CliError::FullstackUnsupported { .. }
             | CliError::FullstackConflict
             | CliError::IncompatibleTools(_)
@@ -283,6 +328,7 @@ impl CliError {
             CliError::ToolRoleMismatch { .. } => "tool_role_mismatch",
             CliError::NoRolesSelected => "no_roles_selected",
             CliError::ExperimentalNotAllowed { .. } => "experimental_not_allowed",
+            CliError::EraMismatch { .. } => "era_mismatch",
             CliError::FullstackUnsupported { .. } => "fullstack_unsupported",
             CliError::FullstackConflict => "fullstack_conflict",
             CliError::IncompatibleTools(_) => "incompatible_tools",
@@ -328,6 +374,9 @@ impl CliError {
             }
             CliError::ExperimentalNotAllowed { tools, .. } => {
                 json!({ "tools": tools, "remedy": "--allow-experimental" })
+            }
+            CliError::EraMismatch { eras, .. } => {
+                json!({ "eras": eras, "remedy": "--allow-mismatch-eras" })
             }
             CliError::IncompatibleTools(e) => json!({
                 "tools": e.ids,

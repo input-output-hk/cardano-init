@@ -70,6 +70,15 @@ A tool is **experimental** when the tool itself is still in development, or when
 
 `cardano-init list` marks these tools as `experimental · needs --allow-experimental`, and `cardano-init table` marks them with 🧪.
 
+## Ledger eras
+
+Each tool's template targets one Cardano ledger era, such as Conway or Dijkstra. Around a hard fork, tools move to the new era at different times, and tools on different eras might not work together. If the tools you select target different eras, `cardano-init` **stops before generating the project** and lists each era with its tools.
+
+- Pass `--allow-mismatch-eras` to generate the project anyway. The error becomes a warning.
+- In interactive mode, you are asked to confirm. The default answer is **No**.
+
+`cardano-init list` shows the era of each tool.
+
 ## Networks
 
 Generated projects use the **preview** testnet. To change the network, edit `CARDANO_NETWORK` in the generated `.env`.

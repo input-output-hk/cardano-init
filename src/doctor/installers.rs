@@ -2,6 +2,7 @@
 //!
 //! An installer is itself a kind of dependency: its `bootstrap` list names the
 //! dep ids that provide it. Empty means terminal (detected, never installed).
+//! The commands an installer runs are recipe data (`registry/deps.toml`).
 
 use std::fmt;
 
@@ -110,55 +111,6 @@ impl Installer {
             | Installer::PowerShell => &[],
         }
     }
-
-    /// Render the install command for `arg`: a package name, installer-script
-    /// URL, or target, depending on the installer.
-    pub fn command(self, arg: &str) -> String {
-        match self {
-            Installer::Brew => format!("brew install {arg}"),
-            Installer::Apt => format!("sudo apt install -y {arg}"),
-            Installer::Dnf => format!("sudo dnf install -y {arg}"),
-            Installer::Pacman => format!("sudo pacman -S --noconfirm {arg}"),
-            Installer::Winget => format!("winget install {arg}"),
-            Installer::Nix => format!("nix profile install nixpkgs#{arg}"),
-            Installer::Go => format!("go install {arg}"),
-            Installer::Cargo => format!("cargo install {arg}"),
-            Installer::Npm => format!("npm install -g {arg}"),
-            // An empty arg installs the latest release / active channel; avoid a
-            // trailing space.
-            Installer::Aikup | Installer::Tx3up if arg.is_empty() => {
-                format!("{} install", self.key())
-            }
-            Installer::Aikup => format!("aikup install {arg}"),
-            Installer::CardanoUp => format!("cardano-up install {arg}"),
-            Installer::Tx3up => format!("tx3up install {arg}"),
-            Installer::Curl => format!("curl -sSfL {arg} | sh"),
-            Installer::PowerShell => format!("powershell -c \"irm {arg} | iex\""),
-        }
-    }
-
-    /// Render the command that upgrades an installed dep to the latest
-    /// version. Installers whose install command already fetches the latest
-    /// (re-running an installer script, `go install …@latest`, `cargo install`,
-    /// `aikup install`) reuse it.
-    pub fn upgrade_command(self, arg: &str) -> String {
-        match self {
-            Installer::Brew => format!("brew upgrade {arg}"),
-            Installer::Apt => format!("sudo apt install --only-upgrade -y {arg}"),
-            Installer::Dnf => format!("sudo dnf upgrade -y {arg}"),
-            Installer::Winget => format!("winget upgrade {arg}"),
-            Installer::Nix => format!("nix profile upgrade {arg}"),
-            Installer::Npm => format!("npm install -g {arg}@latest"),
-            Installer::Pacman
-            | Installer::Go
-            | Installer::Cargo
-            | Installer::Aikup
-            | Installer::CardanoUp
-            | Installer::Tx3up
-            | Installer::Curl
-            | Installer::PowerShell => self.command(arg),
-        }
-    }
 }
 
 impl fmt::Display for Installer {
@@ -202,39 +154,5 @@ mod tests {
     fn bootstrappable_have_deps() {
         assert_eq!(Installer::Npm.bootstrap(), &["node"]);
         assert_eq!(Installer::Aikup.bootstrap(), &["aikup"]);
-    }
-
-    #[test]
-    fn command_templates() {
-        assert_eq!(Installer::Brew.command("just"), "brew install just");
-        assert_eq!(
-            Installer::Npm.command("@aiken-lang/aikup"),
-            "npm install -g @aiken-lang/aikup"
-        );
-        assert_eq!(
-            Installer::Nix.command("aiken"),
-            "nix profile install nixpkgs#aiken"
-        );
-        assert_eq!(
-            Installer::Curl.command("https://sh.rustup.rs"),
-            "curl -sSfL https://sh.rustup.rs | sh"
-        );
-        // Empty aikup arg renders bare `aikup install` (latest), no trailing space.
-        assert_eq!(Installer::Aikup.command(""), "aikup install");
-        assert_eq!(Installer::Aikup.command("v1.1.0"), "aikup install v1.1.0");
-    }
-
-    #[test]
-    fn upgrade_command_templates() {
-        assert_eq!(Installer::Brew.upgrade_command("node"), "brew upgrade node");
-        assert_eq!(
-            Installer::Npm.upgrade_command("@bloxbean/yaci-devkit"),
-            "npm install -g @bloxbean/yaci-devkit@latest"
-        );
-        // An installer script always installs the latest: re-run it.
-        assert_eq!(
-            Installer::Curl.upgrade_command("https://sh.rustup.rs"),
-            Installer::Curl.command("https://sh.rustup.rs")
-        );
     }
 }

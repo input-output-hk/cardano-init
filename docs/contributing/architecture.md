@@ -55,7 +55,7 @@ cardano-init/
 │   │   ├── types.rs            # Role, ToolDef, RoleConfig, Selection, Network, Seam, …
 │   │   ├── loader.rs           # rust-embed → Registry (indexed by id and by role)
 │   │   ├── compat.rs           # off-chain ↔ provider (devnet+infra) seam compatibility
-│   │   ├── version.rs          # dotted versions: tool floors + parsing tool output
+│   │   ├── version.rs          # dotted versions: tool pins (VersionReq) + parsing tool output
 │   │   └── view.rs             # read-only projections of the registry (for `list`)
 │   │
 │   ├── scaffold/               # Pure: project generation pipeline
@@ -222,8 +222,8 @@ name = "Aiken"
 description = "…newcomer-friendly explanation…"
 website = "https://aiken-lang.org"
 languages = ["aiken"]
-system_deps = ["aiken"]    # abstract dep ids → resolved via registry/deps.toml (§8)
-min_versions = { aiken = "1.1.24" }  # optional floors the doctor checks (TECH_SPEC §9.7)
+era = "conway"             # ledger era the template targets; mixing eras is gated (TECH_SPEC §3.2.3)
+system_deps = [{ aiken = "1.1.24" }]  # dep ids → registry/deps.toml (§8), bare or pinned (TECH_SPEC §9.7)
 nix_packages = ["aiken"]       # packages for the generated Nix dev shell
 
 [roles.on-chain]
@@ -313,20 +313,20 @@ To serve both humans and agents without scattering format branches:
 
 ## 8. Dependency doctor (`doctor/`)
 
-Scope (DX.02, implemented): the standalone **`cardano-init doctor`** command plus **check + advise** after generation. The doctor is a **dependency checker/advisor, not a project validator** — it reports presence and minimum versions and prints install or upgrade plans; it never asserts a component actually builds (that's `just build`/`just test`, §7), and never offers alternative runtimes (templates fix their toolchain). Version checks are opt-in per dependency: a tool sets `min_versions` for the deps its template needs a floor for, and only those are version-probed (TECH_SPEC §9.7). **Auto-install** (running the resolved plan with consent) is a later nice-to-have install command (DX.05); see ROADMAP and the scope note in TECH_SPEC §9. The dependency catalog is a small **graph**, split between code and data along the purity invariant:
+Scope (DX.02, implemented): the standalone **`cardano-init doctor`** command plus **check + advise** after generation. The doctor is a **dependency checker/advisor, not a project validator** — it reports presence and pinned versions and prints install plans; it never asserts a component actually builds (that's `just build`/`just test`, §7), and never offers alternative runtimes (templates fix their toolchain). Version checks are opt-in per dependency: a tool pins a `system_deps` entry (`{ aiken = "1.1.24" }`, prefix-exact) when its template is tied to that toolchain line, and only pinned deps are version-probed (TECH_SPEC §9.7). **Auto-install** (running the resolved plan with consent) is a later nice-to-have install command (DX.05); see ROADMAP and the scope note in TECH_SPEC §9. The dependency catalog is a small **graph**, split between code and data along the purity invariant:
 
 ```
 doctor/
 ├── mod.rs         Pure: resolve(targets, catalog, env) -> Report   (recursive, cycle-safe)
 ├── installers.rs  Pure (code): the closed `Installer` vocabulary. Per installer: detect binaries, command template, and a `bootstrap` list of dep ids
 ├── catalog.rs     Loads embedded registry/deps.toml -> DepCatalog (dep id → recipe)
-└── probe.rs       Impure: detect OS + which installers are on PATH + floored deps' versions -> Environment
+└── probe.rs       Impure: detect OS + which installers are on PATH + pinned deps' versions -> Environment
 ```
 
 - **Two-tier inputs.** The selection yields **required** deps = `{just}` (universal task runner) ∪ the `system_deps` of all selected tools (unioned, deduped); and **recommended** deps (soft notes, never blocking). The two-tier mechanism stands, but there is **currently no recommended dep**: the former `process-compose`/≥2-infra case existed only to smooth a multi-service top-level `just dev`, which no longer exists (the top level no longer aggregates `dev`; long-running services start per-component — TECH_SPEC §7.2/§9.1). `just` is a base/derived dep owned by no tool.
 - **Installers vs deps: the key model.** An **installer** is just another dependency. Code owns a *closed* `Installer` vocabulary (`Brew`, `Apt`, `Dnf`, `Pacman`, `Winget`, `Nix`, `Go`, `Cargo`, `Npm`, `Aikup`, `CardanoUp`, `Tx3up`, `Curl`, `PowerShell`); each declares its detect-binaries, a command template (`brew install {arg}`, `npm install -g {arg}`, `curl -sSfL {arg} | sh`, …), and a **`bootstrap` list of dep ids**. An **empty `bootstrap` list ⇒ terminal** (we detect it, never install it: system package managers, `nix`, the OS shells); a **non-empty list ⇒ bootstrappable** by installing any one of those deps in order (`npm`→`["node"]`, `aikup`→`["aikup"]`, `cargo`→`["rustup","rust"]`). This is what makes the catalog a graph rather than a flat list.
 - **Recipes live in data.** Per-dep recipes are an embedded TOML file (`registry/deps.toml`), keyed by dep id: `binaries` (presence check), `docs` (universal fallback), an ordered `install` list of `{ installer = arg }` methods, and an optional `version` probe (how to read the installed version; default `<binary> --version`). Installer names are validated against the code enum at load (unknown installer → load error, like an unknown `Role`). See §8.1 for why code/data split this way.
-- **Resolver (`resolve`, pure, recursive).** A dep is present if  any of its `binaries` is on `PATH`. For a missing dep, the walk is **two-pass over the ordered `install` methods**: Pass 1 returns the first method whose installer is **detected** (a one-step command); only if none is directly available does Pass 2 walk the methods again and, for the first **bootstrappable** installer, recurse to satisfy one of its `bootstrap` deps and prepend those steps. The result is an ordered, possibly multi-step **plan** (e.g. `aiken` missing with no `nix`/`aikup` → install `aikup` via `npm`, then `aikup install`). Two passes — rather than bootstrapping each method before trying later ones — are exactly why the `nix` path needs no `aikup` when `nix` is present (a single method is still chosen per dep). Cycle detection guards the walk; `docs` is the fallback when nothing resolves (advice never empty, FR-20). A present dep below the selected tools' highest `min_versions` floor is reported **outdated**, with each method's upgrade command instead of an install plan; a version that can't be read never fails the check (TECH_SPEC §9.7). Doctor output is **host-dependent by design** (not part of the byte-identical generation contract). Full algorithm in TECH_SPEC §9.4.
+- **Resolver (`resolve`, pure, recursive).** A dep is present if  any of its `binaries` is on `PATH`. For a missing dep, the walk is **two-pass over the ordered `install` methods**: Pass 1 returns the first method whose installer is **detected** (a one-step command); only if none is directly available does Pass 2 walk the methods again and, for the first **bootstrappable** installer, recurse to satisfy one of its `bootstrap` deps and prepend those steps. The result is an ordered, possibly multi-step **plan** (e.g. `aiken` missing with no `nix`/`aikup` → install `aikup` via `npm`, then `aikup install`). Two passes — rather than bootstrapping each method before trying later ones — are exactly why the `nix` path needs no `aikup` when `nix` is present (a single method is still chosen per dep). Cycle detection guards the walk; `docs` is the fallback when nothing resolves (advice never empty, FR-20). A present dep that doesn't match the selected tools' merged pin is reported as a **version mismatch**, with each method's upgrade command (rendered with the pin) instead of an install plan; a method whose command ignores the pin is flagged `unpinned`; a version that can't be read never fails the check (TECH_SPEC §9.7). Doctor output is **host-dependent by design** (not part of the byte-identical generation contract). Full algorithm in TECH_SPEC §9.4.
 - **Infrastructure deps** install via `cardano-up` (the `CardanoUp` installer); `cardano-up` is itself a dep in `registry/deps.toml` (bootstrappable via its own installer methods). Auto-installing it arrives with the DX.05 install command; bootstrapping `cardano-up` when absent may follow post-RC (ROADMAP).
 - **Project scan (no metadata file).** The standalone doctor derives its target set by scanning the cwd: each contract role directory present is matched against the `detect` signatures of the tools that fill that role; an identified tool contributes its `system_deps`, and an unmatched directory is reported as *unrecognized*. A **`protocol/`** directory (the fullstack fused component, §3.2) is scanned by a dedicated branch against the tools that declare a `[fullstack]` template; the identified tool is a real registry tool, so its `system_deps` feed the required set through the normal `registry.get` path (unlike the synthetic infra driver). Signatures are tool-author **data** in `registry/tools/<tool>.toml` (`detect = [...]`), either a bare path (existence) or `{ file, contains }` (content) — the content form keeps generic filenames like `package.json` from mislabeling foreign projects without claiming to validate viability. Full algorithm + schema in TECH_SPEC §9.6.
 - **Boundary:** `mod.rs`/`installers.rs`/`catalog.rs` are pure and unit-tested with synthetic `Environment`s; only `probe.rs` touches the system (PATH/OS probes + the project scan). `doctor` depends on `registry`/`contract`, never on `cli`.
@@ -335,27 +335,28 @@ doctor/
 
 The catalog is a graph with two kinds of node, split by what each kind *is*:
 
-- **Installers are code** (`installers.rs`). Detection, command templating, and the `bootstrap` edges are *logic*, and the set is a closed vocabulary, so it earns compile-time safety (installer references are un-typo-able; a removed installer fails to compile) and one tested home for platform quirks. Adding an installer is a deliberate code change, done only when a real recipe needs it on a supported platform.
-- **Recipes are data** (`registry/deps.toml`). This is what honors the project's extensibility promise: a tool author adds a tool by writing `system_deps = [...]` and, if a dep is new, a `registry/deps.toml` entry that *chooses from* the existing installer vocabulary, with **no Rust**. Recipes are deduplicated by dep id (shared deps like `node`/`jvm` are defined once and referenced by many tools), and installer names are validated against the enum at load.
+- **Installers are code** (`installers.rs`). Detection and the `bootstrap` edges are *logic*, and the set is a closed vocabulary, so it earns compile-time safety (installer references are un-typo-able; a removed installer fails to compile) and one tested home for platform quirks. Adding an installer is a deliberate code change, done only when a real recipe needs it on a supported platform.
+- **Recipes are data** (`registry/deps.toml`). This is what honors the project's extensibility promise: a tool author adds a tool by writing `system_deps = [...]` and, if a dep is new, a `registry/deps.toml` entry that *chooses from* the existing installer vocabulary and spells out each command, with **no Rust**. Commands are MiniJinja templates with one variable, the dep's pinned `version`, so a recipe can install exactly the version a tool pins. Recipes are deduplicated by dep id (shared deps like `node`/`jvm` are defined once and referenced by many tools); installer names are validated against the enum, and every template is test-rendered, at load.
 
-This split is the reversal of the earlier "in-code catalog" : the common case (a new tool whose deps install via existing installers) becomes pure data, which is the whole point of the registry model. The narrow case that still needs code (a brand-new installer) is rare and benefits from maintainer review anyway. Safety is preserved because data only ever names a closed, code-defined installer plus an `arg`; it never carries free-form command logic.
+This split is the reversal of the earlier "in-code catalog" : the common case (a new tool whose deps install via existing installers) becomes pure data, which is the whole point of the registry model. The narrow case that still needs code (a brand-new installer) is rare and benefits from maintainer review anyway. The installer key stays a closed, code-defined vocabulary, so detection and bootstrapping are never data; the command text is data because it is exactly what `doctor` prints for the user to run, and the weekly installer workflow runs those same rendered commands.
 
 ```toml
-# registry/deps.toml: keyed by dep id; install = ordered [{ installer = arg }]
+# registry/deps.toml: keyed by dep id; install = ordered [{ installer = "command" }]
 [node]
 binaries = ["node"]
 docs     = "https://nodejs.org/en/download"
-install  = [ { brew = "node" }, { apt = "nodejs" }, { winget = "OpenJS.NodeJS" }, { nix = "nodejs" } ]
+install  = [ { brew = "brew install node" }, { apt = "sudo apt install -y nodejs" }, { nix = "nix profile install nixpkgs#nodejs" } ]
+upgrade  = [ { brew = "brew upgrade node" }, { nix = "nix profile upgrade nodejs" } ]
 
 [aikup]
 binaries = ["aikup"]
 docs     = "https://aiken-lang.org/installation-instructions"
-install  = [ { npm = "@aiken-lang/aikup" }, { curl = "https://install.aiken-lang.org" }, { powershell = "https://windows.aiken-lang.org" } ]
+install  = [ { npm = "npm install -g @aiken-lang/aikup" }, { curl = "curl -sSfL https://install.aiken-lang.org | sh" } ]
 
 [aiken]
 binaries = ["aiken"]
 docs     = "https://aiken-lang.org/installation-instructions"
-install  = [ { aikup = "" }, { nix = "aiken" } ]
+install  = [ { aikup = "aikup install {{ version | prefix('v') }}" }, { nix = "nix profile install nixpkgs#aiken" } ]
 ```
 
 **Referential integrity (tests):** every `system_deps` id (plus the base dep `just`) has a `registry/deps.toml` entry; every installer named in the data exists in the `Installer` enum; every dep id in an installer's `bootstrap` list exists. The full field-by-field schema and the resolver algorithm are in TECH_SPEC §9.

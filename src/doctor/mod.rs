@@ -19,31 +19,43 @@ use probe::Environment;
 
 use crate::registry::loader::Registry;
 use crate::registry::types::Role;
-use crate::registry::version::Version;
+use crate::registry::version::{Version, VersionReq};
 
 /// The task runner every project needs. Owned by no tool.
 pub const BASE_DEP: &str = "just";
 
-/// The oldest `just` the generated Justfiles run on: they use the terminal
-/// escape constants (`{{BOLD + CYAN}}`), added in just 1.37.0.
-pub const BASE_DEP_MIN_VERSION: &str = "1.37.0";
+/// The `just` major the generated Justfiles run on (tech-spec §9.7). Pins are
+/// prefix-exact, so the 1.37.0 the Justfiles' terminal escape constants
+/// (`{{BOLD + CYAN}}`) need is not checked; package managers ship a newer 1.x.
+pub const BASE_DEP_VERSION: &str = "1";
 
 /// Component id the project scan reports for the aggregated `infra/`
 /// component; its required deps are the union of all infra tools'
 /// `system_deps`.
 pub const INFRA_DRIVER_ID: &str = "cardano-up";
 
-/// A dependency the project needs, with the lowest version that works when
-/// any selected tool sets one.
+/// One tool's version pin on a dep.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Pin {
+    pub tool: String,
+    pub version: VersionReq,
+}
+
+/// A dependency the project needs, with the version the selected tools pin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Requirement {
     pub id: String,
-    pub min_version: Option<Version>,
+    /// The tightest pin every selected tool agrees on, if any sets one.
+    pub version: Option<VersionReq>,
+    /// Every pin, when no single version satisfies them all (then `version`
+    /// is `None`): tools parked on different eras can disagree.
+    pub conflicts: Vec<Pin>,
 }
 
 /// The required dependencies for a set of tool ids (tech-spec §9.1): the base
-/// dep `just` plus each tool's `system_deps`, deduplicated and sorted. When
-/// several tools set a minimum version for the same dep, the highest wins.
+/// dep `just` plus each tool's `system_deps`, deduplicated and sorted. Pins on
+/// the same dep merge into the most specific one (`1.1` + `1.1.24` →
+/// `1.1.24`); pins that can't merge are reported as conflicts.
 ///
 /// The scan reports the aggregated infra component under [`INFRA_DRIVER_ID`];
 /// it needs the union of every infra tool's deps.
@@ -51,16 +63,25 @@ pub fn requirements<'a>(
     tool_ids: impl IntoIterator<Item = &'a str>,
     registry: &Registry,
 ) -> Vec<Requirement> {
-    let mut floors: BTreeMap<String, Option<Version>> = BTreeMap::new();
-    let mut require = |id: &str, min: Option<&Version>| {
-        let floor = floors.entry(id.to_string()).or_default();
-        if let Some(min) = min.filter(|min| floor.as_ref().is_none_or(|f| *min > f)) {
-            *floor = Some(min.clone());
+    let mut pins: BTreeMap<String, Vec<Pin>> = BTreeMap::new();
+    let mut require = |id: &str, tool: &str, version: Option<&VersionReq>| {
+        let dep = pins.entry(id.to_string()).or_default();
+        if let Some(version) = version {
+            let pin = Pin {
+                tool: tool.to_string(),
+                version: version.clone(),
+            };
+            if !dep.contains(&pin) {
+                dep.push(pin);
+            }
         }
     };
 
-    let base_min = Version::parse(BASE_DEP_MIN_VERSION);
-    require(BASE_DEP, base_min.as_ref());
+    require(
+        BASE_DEP,
+        BASE_DEP,
+        VersionReq::parse(BASE_DEP_VERSION).as_ref(),
+    );
     for id in tool_ids {
         let tools = if id == INFRA_DRIVER_ID {
             registry.tools_for_role(Role::Infrastructure)
@@ -69,15 +90,35 @@ pub fn requirements<'a>(
         };
         for tool in tools {
             for dep in &tool.system_deps {
-                require(dep, tool.min_versions.get(dep));
+                require(&dep.id, &tool.id, dep.version.as_ref());
             }
         }
     }
 
-    floors
-        .into_iter()
-        .map(|(id, min_version)| Requirement { id, min_version })
+    pins.into_iter()
+        .map(|(id, pins)| merge_pins(id, pins))
         .collect()
+}
+
+fn merge_pins(id: String, pins: Vec<Pin>) -> Requirement {
+    let merged = pins.iter().try_fold(None::<VersionReq>, |acc, pin| {
+        Some(Some(match acc {
+            None => pin.version.clone(),
+            Some(acc) => acc.narrow(&pin.version)?,
+        }))
+    });
+    match merged {
+        Some(version) => Requirement {
+            id,
+            version,
+            conflicts: Vec::new(),
+        },
+        None => Requirement {
+            id,
+            version: None,
+            conflicts: pins,
+        },
+    }
 }
 
 /// One step of an install plan.
@@ -85,25 +126,37 @@ pub fn requirements<'a>(
 pub struct Step {
     pub installer: Installer,
     pub command: String,
+    /// The dep is pinned but this command installs the installer's latest,
+    /// which may not match the pin.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub unpinned: bool,
 }
 
 impl Step {
-    fn new(method: &InstallMethod) -> Self {
+    fn new(method: &InstallMethod, version: Option<&VersionReq>) -> Self {
         Step {
             installer: method.installer,
-            command: method.installer.command(&method.arg),
+            command: method.render(version),
+            unpinned: ignores_pin(method, version),
         }
     }
 }
 
-/// A recipe method other than the one the recommended plan uses (or, for an
-/// outdated dep, an upgrade command). `available` is whether its installer is
-/// present on this host.
+fn ignores_pin(method: &InstallMethod, version: Option<&VersionReq>) -> bool {
+    version.is_some() && !method.uses_version
+}
+
+/// A recipe method other than the one the recommended plan uses (or, for a
+/// mismatched dep, an upgrade command). `available` is whether its installer
+/// is present on this host.
 #[derive(Debug, Clone, Serialize)]
 pub struct AltMethod {
     pub installer: Installer,
     pub command: String,
     pub available: bool,
+    /// See [`Step::unpinned`].
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub unpinned: bool,
 }
 
 /// The resolved status of a single dependency.
@@ -113,21 +166,25 @@ pub struct DepStatus {
     pub required: bool,
     /// On `PATH`, at any version.
     pub present: bool,
-    /// The installed version, when the dep has a minimum and it was readable.
+    /// The installed version, when the dep is pinned and it was readable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<Version>,
-    /// The lowest version the selected tools work with, if any sets one.
+    /// The version the selected tools pin (prefix-exact: `1.1` is `1.1.*`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_version: Option<Version>,
-    /// Present, but older than `min_version`. A version that can't be read is
-    /// never outdated: the doctor does not block on what it can't verify.
+    pub required_version: Option<VersionReq>,
+    /// Present, but not matching `required_version`. A version that can't be
+    /// read never mismatches: the doctor does not block on what it can't
+    /// verify.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub outdated: bool,
+    pub version_mismatch: bool,
+    /// The selected tools pin versions no single install satisfies.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub version_conflict: Vec<Pin>,
     /// Ordered install steps for this host. Empty when present or unresolved.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub plan: Vec<Step>,
-    /// Other recipe methods beyond `plan`, available ones first. For an
-    /// outdated dep: every method's upgrade command, available ones first.
+    /// Other recipe methods beyond `plan`, available ones first. For a
+    /// mismatched dep: every method's upgrade command, available ones first.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub alternatives: Vec<AltMethod>,
     /// Docs URL, the fallback so advice is never empty. `None` when the dep
@@ -143,20 +200,20 @@ pub struct DepStatus {
 pub struct Report {
     /// Every required dep is on `PATH`, at any version.
     pub all_required_present: bool,
-    /// Every required dep is on `PATH` and none is outdated.
+    /// Every required dep is on `PATH` and matches its pinned version.
     pub all_required_satisfied: bool,
     pub deps: Vec<DepStatus>,
 }
 
 impl DepStatus {
-    /// Present and not outdated.
+    /// Present and matching its pinned version.
     pub fn satisfied(&self) -> bool {
-        self.present && !self.outdated
+        self.present && !self.version_mismatch
     }
 }
 
 impl Report {
-    /// The required deps that are missing or outdated, in report order.
+    /// The required deps that are missing or mismatched, in report order.
     pub fn unsatisfied_required(&self) -> impl Iterator<Item = &DepStatus> {
         self.deps.iter().filter(|d| d.required && !d.satisfied())
     }
@@ -174,6 +231,7 @@ fn dep_present(recipe: &DepRecipe, env: &Environment) -> bool {
 /// `bootstrap` edges; `seen` guards against cycles.
 fn resolve(
     dep_id: &str,
+    version: Option<&VersionReq>,
     env: &Environment,
     catalog: &DepCatalog,
     seen: &HashSet<String>,
@@ -187,13 +245,17 @@ fn resolve(
     }
 
     // Prefer any method whose installer is usable right now, so e.g. `aiken`
-    // resolves directly via `nix` without bootstrapping `aikup`.
+    // resolves directly via `nix` without bootstrapping `aikup`. For a pinned
+    // dep, a usable method that installs the pin goes first.
+    let usable = |m: &&InstallMethod| env.installers.contains(&m.installer);
     if let Some(method) = recipe
         .install
         .iter()
-        .find(|m| env.installers.contains(&m.installer))
+        .filter(usable)
+        .find(|m| !ignores_pin(m, version))
+        .or_else(|| recipe.install.iter().find(usable))
     {
-        return Some(vec![Step::new(method)]);
+        return Some(vec![Step::new(method, version)]);
     }
 
     // Otherwise bootstrap an installer, in recipe order.
@@ -201,52 +263,61 @@ fn resolve(
     seen.insert(dep_id.to_string());
     recipe.install.iter().find_map(|method| {
         method.installer.bootstrap().iter().find_map(|bdep| {
-            let mut steps = resolve(bdep, env, catalog, &seen)?;
-            steps.push(Step::new(method));
+            let mut steps = resolve(bdep, None, env, catalog, &seen)?;
+            steps.push(Step::new(method, version));
             Some(steps)
         })
     })
 }
 
-/// Every recipe method whose installer differs from `chosen`, rendered by
-/// `render` (install or upgrade), available ones first, each group in recipe
-/// preference order.
-fn alt_methods(
-    recipe: &DepRecipe,
+/// Every recipe method whose installer differs from `chosen`, as the method
+/// `effective` maps it to (install or upgrade): available ones first, then
+/// within each group the ones that install the pin, in recipe order.
+fn alt_methods<'a>(
+    recipe: &'a DepRecipe,
     chosen: Option<Installer>,
     env: &Environment,
-    render: fn(Installer, &str) -> String,
+    version: Option<&VersionReq>,
+    effective: impl Fn(&'a InstallMethod) -> &'a InstallMethod,
 ) -> Vec<AltMethod> {
-    let (available, needs_installer): (Vec<_>, Vec<_>) = recipe
+    let mut alts: Vec<AltMethod> = recipe
         .install
         .iter()
         .filter(|method| Some(method.installer) != chosen)
-        .map(|method| AltMethod {
-            installer: method.installer,
-            command: render(method.installer, &method.arg),
-            available: env.installers.contains(&method.installer),
+        .map(|method| {
+            let m = effective(method);
+            AltMethod {
+                installer: method.installer,
+                command: m.render(version),
+                available: env.installers.contains(&method.installer),
+                unpinned: ignores_pin(m, version),
+            }
         })
-        .partition(|alt| alt.available);
-    available.into_iter().chain(needs_installer).collect()
+        .collect();
+    alts.sort_by_key(|alt| (!alt.available, alt.unpinned));
+    alts
 }
 
 fn dep_status(req: &Requirement, catalog: &DepCatalog, env: &Environment) -> DepStatus {
     let recipe = catalog.get(&req.id);
     let present = recipe.is_some_and(|r| dep_present(r, env));
-    let version = req
-        .min_version
-        .as_ref()
-        .and(env.versions.get(&req.id))
-        .filter(|_| present)
+    let pinned = req.version.is_some() || !req.conflicts.is_empty();
+    let version = env
+        .versions
+        .get(&req.id)
+        .filter(|_| present && pinned)
         .cloned();
-    let outdated = matches!((&version, &req.min_version), (Some(v), Some(min)) if v < min);
+    let version_mismatch =
+        matches!((&version, &req.version), (Some(v), Some(want)) if !want.matches(v));
+    let want = req.version.as_ref();
     let mut status = DepStatus {
         id: req.id.clone(),
         required: true,
         present,
         version,
-        min_version: req.min_version.clone(),
-        outdated,
+        required_version: req.version.clone(),
+        version_mismatch,
+        version_conflict: req.conflicts.clone(),
         plan: Vec::new(),
         alternatives: Vec::new(),
         docs: None,
@@ -256,14 +327,14 @@ fn dep_status(req: &Requirement, catalog: &DepCatalog, env: &Environment) -> Dep
         return status;
     };
     if !present {
-        status.plan = resolve(&status.id, env, catalog, &HashSet::new()).unwrap_or_default();
+        status.plan = resolve(&status.id, want, env, catalog, &HashSet::new()).unwrap_or_default();
         let chosen = status.plan.last().map(|s| s.installer);
-        status.alternatives = alt_methods(recipe, chosen, env, Installer::command);
+        status.alternatives = alt_methods(recipe, chosen, env, want, |m| m);
         status.docs = Some(recipe.docs.clone());
-    } else if outdated {
+    } else if version_mismatch {
         // Which installer put it there is unknown, so offer every method's
-        // upgrade, available ones first, rather than one recommended plan.
-        status.alternatives = alt_methods(recipe, None, env, Installer::upgrade_command);
+        // upgrade to the pin, available ones first, rather than one plan.
+        status.alternatives = alt_methods(recipe, None, env, want, |m| recipe.upgrade_method(m));
         if let Some(after) = &recipe.after_upgrade {
             for alt in &mut status.alternatives {
                 alt.command = format!("{} && {after}", alt.command);
@@ -302,7 +373,7 @@ pub fn present_tooling(
             registry
                 .all_tools()
                 .iter()
-                .flat_map(|t| t.system_deps.iter().cloned()),
+                .flat_map(|t| t.system_deps.iter().map(|d| d.id.clone())),
         )
         .filter(|id| catalog.get(id).is_some_and(|r| dep_present(r, env)))
         .collect();
@@ -325,20 +396,29 @@ mod tests {
         }
     }
 
-    /// Requirements with no minimum version.
+    /// Requirements with no pinned version.
     fn reqs(ids: &[&str]) -> Vec<Requirement> {
         ids.iter()
             .map(|id| Requirement {
                 id: (*id).to_string(),
-                min_version: None,
+                version: None,
+                conflicts: Vec::new(),
             })
             .collect()
     }
 
-    fn floor(id: &str, min: &str) -> Requirement {
+    fn pinned(id: &str, version: &str) -> Requirement {
         Requirement {
             id: id.to_string(),
-            min_version: Version::parse(min),
+            version: VersionReq::parse(version),
+            conflicts: Vec::new(),
+        }
+    }
+
+    fn pin(tool: &str, version: &str) -> Pin {
+        Pin {
+            tool: tool.to_string(),
+            version: VersionReq::parse(version).unwrap(),
         }
     }
 
@@ -395,6 +475,61 @@ mod tests {
         assert_eq!(aiken.plan[0].command, "npm install -g @aiken-lang/aikup");
         assert_eq!(aiken.plan[1].installer, Installer::Aikup);
         assert_eq!(aiken.plan[1].command, "aikup install");
+    }
+
+    #[test]
+    fn pinned_aiken_installs_the_pinned_version() {
+        let report = resolve_all(
+            &[pinned("aiken", "1.1.24")],
+            &catalog(),
+            &env(&[Installer::Aikup], &[]),
+        );
+        let aiken = status(&report, "aiken");
+        assert_eq!(aiken.plan.len(), 1);
+        assert_eq!(aiken.plan[0].command, "aikup install v1.1.24");
+    }
+
+    #[test]
+    fn pinned_dep_flags_a_method_that_ignores_the_pin() {
+        let report = resolve_all(
+            &[pinned("aiken", "1.1.24")],
+            &catalog(),
+            &env(&[Installer::Nix], &[]),
+        );
+        let aiken = status(&report, "aiken");
+        assert_eq!(aiken.plan[0].command, "nix profile install nixpkgs#aiken");
+        assert!(aiken.plan[0].unpinned);
+        let aikup = aiken
+            .alternatives
+            .iter()
+            .find(|a| a.installer == Installer::Aikup)
+            .unwrap();
+        assert_eq!(aikup.command, "aikup install v1.1.24");
+        assert!(!aikup.unpinned);
+    }
+
+    #[test]
+    fn unpinned_dep_never_flags_methods() {
+        let report = resolve_all(&reqs(&["aiken"]), &catalog(), &env(&[Installer::Nix], &[]));
+        let aiken = status(&report, "aiken");
+        assert!(!aiken.plan[0].unpinned);
+        let value = serde_json::to_value(aiken).unwrap();
+        assert!(value["plan"][0].get("unpinned").is_none());
+    }
+
+    #[test]
+    fn mismatch_lists_pin_honoring_upgrades_first() {
+        let env = with_version(
+            env(&[Installer::Nix, Installer::Aikup], &["aiken"]),
+            "aiken",
+            "1.1.21",
+        );
+        let report = resolve_all(&[pinned("aiken", "1.1.24")], &catalog(), &env);
+        let alts = &status(&report, "aiken").alternatives;
+        assert_eq!(alts[0].command, "aikup install v1.1.24");
+        assert!(!alts[0].unpinned);
+        assert_eq!(alts[1].command, "nix profile upgrade aiken");
+        assert!(alts[1].unpinned);
     }
 
     #[test]
@@ -463,41 +598,50 @@ mod tests {
     }
 
     #[test]
-    fn requirements_dedup_sort_and_include_base_floor() {
+    fn requirements_dedup_sort_and_include_base_pin() {
         let registry = Registry::load().unwrap();
         // aiken → ["aiken"], meshjs → ["node"]; plus the base dep "just".
         let required = requirements(["meshjs", "aiken", "meshjs"], &registry);
         let ids: Vec<&str> = required.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids, vec!["aiken", "just", "node"]);
         let just = required.iter().find(|r| r.id == BASE_DEP).unwrap();
-        assert_eq!(just.min_version, Version::parse(BASE_DEP_MIN_VERSION));
+        assert_eq!(just.version, VersionReq::parse(BASE_DEP_VERSION));
+        let aiken = required.iter().find(|r| r.id == "aiken").unwrap();
+        assert_eq!(aiken.version, VersionReq::parse("1.1.24"));
     }
 
     #[test]
-    fn requirements_for_yaci_include_its_cli_floor() {
+    fn requirements_for_yaci_include_its_cli_pin() {
         let registry = Registry::load().unwrap();
         let required = requirements(["yaci"], &registry);
         let yaci = required.iter().find(|r| r.id == "yaci-devkit").unwrap();
-        assert_eq!(yaci.min_version, Version::parse("0.12.0"));
+        assert_eq!(yaci.version, VersionReq::parse("0.12"));
         assert!(required.iter().any(|r| r.id == "node"));
     }
 
     #[test]
-    fn requirements_take_the_highest_floor_across_tools() {
-        // Plinth needs GHC 9.6, Plutarch 9.8: together, 9.8 wins.
+    fn pins_merge_into_the_most_specific() {
+        let req = merge_pins("aiken".into(), vec![pin("a", "1.1"), pin("b", "1.1.24")]);
+        assert_eq!(req.version, VersionReq::parse("1.1.24"));
+        assert!(req.conflicts.is_empty());
+    }
+
+    #[test]
+    fn disagreeing_pins_are_a_conflict() {
+        let req = merge_pins("aiken".into(), vec![pin("a", "1.1.24"), pin("b", "1.2")]);
+        assert!(req.version.is_none());
+        assert_eq!(req.conflicts.len(), 2);
+    }
+
+    #[test]
+    fn runtimes_are_unpinned() {
         let registry = Registry::load().unwrap();
-        let ghc = |tools: &[&str]| {
-            requirements(tools.iter().copied(), &registry)
-                .into_iter()
-                .find(|r| r.id == "ghc")
-                .unwrap()
-                .min_version
-                .unwrap()
-                .to_string()
-        };
-        assert_eq!(ghc(&["plinth"]), "9.6");
-        assert_eq!(ghc(&["plinth", "plutarch"]), "9.8");
-        assert_eq!(ghc(&["plutarch", "plinth"]), "9.8");
+        let required = requirements(["plinth", "plutarch", "meshjs", "tx3"], &registry);
+        for id in ["ghc", "node"] {
+            let req = required.iter().find(|r| r.id == id).unwrap();
+            assert!(req.version.is_none(), "{id}");
+            assert!(req.conflicts.is_empty(), "{id}");
+        }
     }
 
     #[test]
@@ -511,16 +655,16 @@ mod tests {
     }
 
     #[test]
-    fn old_version_is_outdated_with_upgrade_advice() {
+    fn other_version_mismatches_with_upgrade_advice() {
         let env = with_version(
             env(&[Installer::Npm], &["yaci-devkit"]),
             "yaci-devkit",
             "0.10.6",
         );
-        let report = resolve_all(&[floor("yaci-devkit", "0.12.0")], &catalog(), &env);
+        let report = resolve_all(&[pinned("yaci-devkit", "0.12")], &catalog(), &env);
         let yaci = status(&report, "yaci-devkit");
         assert!(yaci.present);
-        assert!(yaci.outdated);
+        assert!(yaci.version_mismatch);
         assert!(!yaci.satisfied());
         assert!(report.all_required_present);
         assert!(!report.all_required_satisfied);
@@ -528,7 +672,7 @@ mod tests {
         // The upgrade also refreshes the components the old CLI downloaded.
         assert_eq!(
             yaci.alternatives[0].command,
-            "npm install -g @bloxbean/yaci-devkit@latest && yaci-devkit download --overwrite"
+            "npm install -g @bloxbean/yaci-devkit@0.12 && yaci-devkit download --overwrite"
         );
         assert!(yaci.alternatives[0].available);
         assert!(yaci.docs.is_some());
@@ -536,9 +680,16 @@ mod tests {
     }
 
     #[test]
-    fn new_enough_version_is_satisfied() {
+    fn newer_version_than_the_pin_also_mismatches() {
+        let env = with_version(env(&[], &["aiken"]), "aiken", "1.2.0");
+        let report = resolve_all(&[pinned("aiken", "1.1.24")], &catalog(), &env);
+        assert!(status(&report, "aiken").version_mismatch);
+    }
+
+    #[test]
+    fn matching_version_is_satisfied() {
         let env = with_version(env(&[], &["ghc"]), "ghc", "9.8.4");
-        let report = resolve_all(&[floor("ghc", "9.8")], &catalog(), &env);
+        let report = resolve_all(&[pinned("ghc", "9.8")], &catalog(), &env);
         let ghc = status(&report, "ghc");
         assert!(ghc.satisfied());
         assert_eq!(ghc.version.as_ref().unwrap().to_string(), "9.8.4");
@@ -548,10 +699,10 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_version_is_not_outdated() {
+    fn unreadable_version_is_not_a_mismatch() {
         // `cardano-up` built with `go install` reports `devel`: never block on it.
         let report = resolve_all(
-            &[floor("cardano-up", "0.15.0")],
+            &[pinned("cardano-up", "0.15")],
             &catalog(),
             &env(&[], &["cardano-up"]),
         );
@@ -562,18 +713,19 @@ mod tests {
     }
 
     #[test]
-    fn outdated_json_shape() {
+    fn mismatch_json_shape() {
         let env = with_version(
             env(&[Installer::Npm], &["yaci-devkit"]),
             "yaci-devkit",
             "0.10.6",
         );
-        let report = resolve_all(&[floor("yaci-devkit", "0.12.0")], &catalog(), &env);
+        let report = resolve_all(&[pinned("yaci-devkit", "0.12")], &catalog(), &env);
         let value = serde_json::to_value(&report).unwrap();
         let dep = &value["deps"][0];
         assert_eq!(dep["version"], "0.10.6");
-        assert_eq!(dep["min_version"], "0.12.0");
-        assert_eq!(dep["outdated"], true);
+        assert_eq!(dep["required_version"], "0.12");
+        assert_eq!(dep["version_mismatch"], true);
+        assert!(dep.get("version_conflict").is_none());
         assert_eq!(value["all_required_present"], true);
         assert_eq!(value["all_required_satisfied"], false);
     }
@@ -584,7 +736,7 @@ mod tests {
         let cat = catalog();
         let env = env(&[], &[]);
         for id in cat.dep_ids() {
-            let _ = resolve(id, &env, &cat, &HashSet::new()); // must return, not hang
+            let _ = resolve(id, None, &env, &cat, &HashSet::new()); // must return, not hang
         }
     }
 
@@ -604,8 +756,8 @@ mod tests {
         assert_eq!(just["present"], true);
         assert!(just.get("plan").is_none(), "present dep must omit plan");
         assert!(
-            just.get("outdated").is_none(),
-            "a false `outdated` is omitted"
+            just.get("version_mismatch").is_none(),
+            "a false `version_mismatch` is omitted"
         );
         assert!(just.get("docs").is_none(), "present dep must omit docs");
 
@@ -643,10 +795,10 @@ mod tests {
         for tool in registry.all_tools() {
             for dep in &tool.system_deps {
                 assert!(
-                    cat.get(dep).is_some(),
+                    cat.get(&dep.id).is_some(),
                     "tool '{}' requires dep '{}' with no registry/deps.toml entry",
                     tool.id,
-                    dep
+                    dep.id
                 );
             }
         }

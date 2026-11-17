@@ -36,7 +36,7 @@ cd my-protocol
 cardano-init doctor
 ```
 
-It finds the components in the project, checks which toolchains are installed and recent enough, and prints the install command for each one that is missing and the upgrade command for each one that is too old. Add `--links` to also see the editor extensions and community channels for your stack.
+It finds the components in the project, checks which toolchains are installed at the version the templates pin, and prints the install command for each one that is missing or at another version. Add `--links` to also see the editor extensions and community channels for your stack.
 
 ## 3. Build and test
 
