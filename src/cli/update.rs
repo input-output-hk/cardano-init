@@ -407,4 +407,38 @@ mod tests {
                 .any(|x| x.role == Role::OffChain && x.tool_id == "meshjs")
         );
     }
+
+    #[test]
+    fn mixed_eras_refused_without_flag() {
+        let mut registry = reg();
+        registry.set_era_for_test("aiken", crate::registry::types::Era::Dijkstra);
+        let old = sel(vec![a(Role::OnChain, "aiken")]);
+        let (_tmp, root) = scaffolded(&old);
+        let new = add_offchain(&old);
+
+        let flags = UpdateFlags {
+            dry_run: true,
+            ..UpdateFlags::default()
+        };
+        let err = finish_update(&root, &old, &new, &flags, &registry, true).unwrap_err();
+        assert_eq!(err.code(), "era_mismatch");
+        assert_eq!(err.exit_code(), 2);
+    }
+
+    #[test]
+    fn mixed_eras_allowed_with_flag() {
+        let mut registry = reg();
+        registry.set_era_for_test("aiken", crate::registry::types::Era::Dijkstra);
+        let old = sel(vec![a(Role::OnChain, "aiken")]);
+        let (_tmp, root) = scaffolded(&old);
+        let new = add_offchain(&old);
+
+        let flags = UpdateFlags {
+            dry_run: true,
+            allow_mismatch_eras: true,
+            ..UpdateFlags::default()
+        };
+        finish_update(&root, &old, &new, &flags, &registry, true)
+            .expect("--allow-mismatch-eras allows mixed-era update");
+    }
 }

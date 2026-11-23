@@ -92,10 +92,19 @@ impl Ord for Version {
     }
 }
 
+fn fmt_components(components: &[u64], f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    for (i, part) in components.iter().enumerate() {
+        if i > 0 {
+            f.write_str(".")?;
+        }
+        write!(f, "{part}")?;
+    }
+    Ok(())
+}
+
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let parts: Vec<String> = self.0.iter().map(u64::to_string).collect();
-        f.write_str(&parts.join("."))
+        fmt_components(&self.0, f)
     }
 }
 
@@ -147,7 +156,7 @@ impl VersionReq {
 
 impl fmt::Display for VersionReq {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&Version(self.0.clone()).to_string())
+        fmt_components(&self.0, f)
     }
 }
 

@@ -49,8 +49,8 @@ pub struct Environment {
     pub installers: HashSet<Installer>,
     /// Dependency and installer binaries found on `PATH`.
     pub present_binaries: HashSet<String>,
-    /// Installed versions of the present deps that have a minimum version,
-    /// keyed by dep id. A dep whose version can't be read is absent.
+    /// Installed versions of the present pinned deps, keyed by dep id. A dep
+    /// whose version can't be read is absent.
     pub versions: HashMap<String, Version>,
 }
 
@@ -61,9 +61,9 @@ pub fn detect_environment(catalog: &DepCatalog, required: &[Requirement]) -> Env
         .dep_ids()
         .filter_map(|id| catalog.get(id))
         .flat_map(|recipe| recipe.binaries.iter().map(String::as_str));
-    let installer_binaries = Installer::ALL
-        .iter()
-        .flat_map(|i| i.detect().iter().copied());
+    let installer_binaries = catalog
+        .installers()
+        .flat_map(|(_, def)| def.detect.iter().map(String::as_str));
     let candidates: HashSet<&str> = dep_binaries.chain(installer_binaries).collect();
 
     let present_binaries: HashSet<String> = candidates
@@ -72,10 +72,10 @@ pub fn detect_environment(catalog: &DepCatalog, required: &[Requirement]) -> Env
         .map(str::to_string)
         .collect();
 
-    let installers = Installer::ALL
-        .iter()
-        .copied()
-        .filter(|inst| inst.detect().iter().any(|b| present_binaries.contains(*b)))
+    let installers = catalog
+        .installers()
+        .filter(|(_, def)| def.detect.iter().any(|b| present_binaries.contains(b)))
+        .map(|(installer, _)| installer.clone())
         .collect();
 
     Environment {

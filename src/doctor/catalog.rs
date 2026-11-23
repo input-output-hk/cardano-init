@@ -1,39 +1,61 @@
-//! Loads the embedded `registry/deps.toml` into a `DepCatalog` (tech-spec §9.2).
+//! Loads the embedded `registry/deps.toml` and `registry/installers.toml` into
+//! a `DepCatalog` (tech-spec §9.2).
 //!
-//! Recipes are data: each method's command is a MiniJinja template rendered
-//! with the pinned `version`. The installers they reference are code (detection
-//! and bootstrap); unknown installer keys and broken templates are rejected at
-//! load.
+//! Both are data: each recipe method names a declared installer and a MiniJinja
+//! command template rendered with the pinned `version`. Undeclared installers,
+//! bootstrap ids without a recipe, and broken templates are rejected at load.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 
-use super::installers::Installer;
+use super::installers::{Installer, InstallerDef};
 use crate::registry::version::VersionReq;
 
 #[derive(RustEmbed)]
 #[folder = "registry/"]
 #[include = "deps.toml"]
+#[include = "installers.toml"]
 struct DepsAsset;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
-    #[error("registry/deps.toml is missing or not valid UTF-8")]
-    Missing,
+    #[error("registry/{0} is missing or not valid UTF-8")]
+    Missing(&'static str),
 
     #[error("failed to parse registry/deps.toml: {0}")]
     Parse(#[from] toml::de::Error),
+
+    #[error("failed to parse registry/installers.toml: {0}")]
+    ParseInstallers(#[source] toml::de::Error),
+
+    #[error("installer '{installer}' has an empty detect list")]
+    EmptyDetect { installer: String },
+
+    #[error(
+        "installer '{installer}' bootstraps via dep '{dep}', which has no registry/deps.toml entry"
+    )]
+    UnknownBootstrapDep { installer: String, dep: String },
+
+    #[error("installer '{installer}' is declared but no registry/deps.toml method uses it")]
+    UnusedInstaller { installer: String },
 
     #[error(
         "dep '{dep}' has a malformed install entry (expected a single {{ installer = \"command\" }})"
     )]
     MalformedInstall { dep: String },
 
-    #[error("unknown installer '{installer}' in dep '{dep}'")]
+    #[error(
+        "dep '{dep}' uses installer '{installer}', which registry/installers.toml doesn't declare"
+    )]
     UnknownInstaller { dep: String, installer: String },
+
+    #[error(
+        "dep '{dep}' has an upgrade override for '{installer}', which is not in its install list"
+    )]
+    UpgradeWithoutInstall { dep: String, installer: String },
 
     #[error("dep '{dep}' has an invalid command template for '{installer}': {source}")]
     InvalidTemplate {
@@ -67,11 +89,12 @@ fn template_env() -> &'static minijinja::Environment<'static> {
     ENV.get_or_init(build_template_env)
 }
 
+/// Build the strict MiniJinja environment with a `prefix(p)` filter that
+/// prepends `p` only to non-empty values so optional version flags never leave
+/// a dangling separator.
 fn build_template_env() -> minijinja::Environment<'static> {
     let mut env = minijinja::Environment::new();
     env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
-    // `prefix(p)` prepends `p` to a non-empty value and keeps an empty one
-    // empty, so `pkg{{ version | prefix('@') }}` never renders a dangling `@`.
     env.add_filter("prefix", |value: String, p: String| {
         if value.is_empty() {
             value
@@ -86,6 +109,11 @@ fn render(template: &str, version: Option<&VersionReq>) -> Result<String, miniji
     let version = version.map(ToString::to_string).unwrap_or_default();
     let out = template_env().render_str(template, minijinja::context! { version })?;
     Ok(out.trim().to_string())
+}
+
+fn embedded(file: &'static str) -> Result<String, CatalogError> {
+    let data = DepsAsset::get(file).ok_or(CatalogError::Missing(file))?;
+    String::from_utf8(data.data.into_owned()).map_err(|_| CatalogError::Missing(file))
 }
 
 pub use crate::registry::types::Link as SupportLink;
@@ -140,10 +168,11 @@ impl DepRecipe {
     }
 }
 
-/// All dep recipes, keyed by dep id.
+/// All dep recipes, keyed by dep id, and the installers they use.
 #[derive(Debug, Clone)]
 pub struct DepCatalog {
     recipes: HashMap<String, DepRecipe>,
+    installers: BTreeMap<Installer, InstallerDef>,
 }
 
 #[derive(Deserialize)]
@@ -162,18 +191,33 @@ struct DepRecipeToml {
 }
 
 impl DepRecipeToml {
-    fn into_recipe(self, dep: &str) -> Result<DepRecipe, CatalogError> {
+    fn into_recipe(
+        self,
+        dep: &str,
+        installers: &BTreeMap<Installer, InstallerDef>,
+    ) -> Result<DepRecipe, CatalogError> {
         let parse = |entries: Vec<HashMap<String, String>>| {
             entries
                 .into_iter()
-                .map(|entry| parse_install_method(dep, entry))
+                .map(|entry| parse_install_method(dep, entry, installers))
                 .collect::<Result<Vec<_>, _>>()
         };
+        let install = parse(self.install)?;
+        let upgrade = parse(self.upgrade)?;
+        if let Some(m) = upgrade
+            .iter()
+            .find(|u| !install.iter().any(|i| i.installer == u.installer))
+        {
+            return Err(CatalogError::UpgradeWithoutInstall {
+                dep: dep.to_string(),
+                installer: m.installer.to_string(),
+            });
+        }
         Ok(DepRecipe {
             binaries: self.binaries,
             docs: self.docs,
-            install: parse(self.install)?,
-            upgrade: parse(self.upgrade)?,
+            install,
+            upgrade,
             support: self.support,
             version: self.version,
             after_upgrade: self.after_upgrade,
@@ -184,6 +228,7 @@ impl DepRecipeToml {
 fn parse_install_method(
     dep: &str,
     entry: HashMap<String, String>,
+    installers: &BTreeMap<Installer, InstallerDef>,
 ) -> Result<InstallMethod, CatalogError> {
     let mut pairs = entry.into_iter();
     let (Some((key, template)), None) = (pairs.next(), pairs.next()) else {
@@ -191,10 +236,13 @@ fn parse_install_method(
             dep: dep.to_string(),
         });
     };
-    let installer = Installer::from_key(&key).ok_or_else(|| CatalogError::UnknownInstaller {
-        dep: dep.to_string(),
-        installer: key.clone(),
-    })?;
+    let installer = Installer::new(key.clone());
+    if !installers.contains_key(&installer) {
+        return Err(CatalogError::UnknownInstaller {
+            dep: dep.to_string(),
+            installer: key,
+        });
+    }
     let pinned = VersionReq::parse("0");
     let (unpinned, pinned) = render(&template, None)
         .and_then(|bare| Ok((bare, render(&template, pinned.as_ref())?)))
@@ -211,24 +259,81 @@ fn parse_install_method(
 }
 
 impl DepCatalog {
-    /// Load and validate the embedded `registry/deps.toml`.
+    /// Load and validate the embedded `registry/deps.toml` and
+    /// `registry/installers.toml`.
     pub fn load() -> Result<Self, CatalogError> {
-        let data = DepsAsset::get("deps.toml").ok_or(CatalogError::Missing)?;
-        let text = std::str::from_utf8(&data.data).map_err(|_| CatalogError::Missing)?;
-        Self::from_str(text)
+        Self::from_parts(&embedded("deps.toml")?, &embedded("installers.toml")?)
     }
 
-    /// Parse and validate a catalog from TOML text.
-    pub fn from_str(text: &str) -> Result<Self, CatalogError> {
-        let raw: HashMap<String, DepRecipeToml> = toml::from_str(text)?;
-        let recipes = raw
+    /// Parse and validate recipes from TOML text, with a detect-only `brew`
+    /// installer (enough for the small catalogs tests build).
+    #[cfg(test)]
+    pub fn from_str(deps: &str) -> Result<Self, CatalogError> {
+        Self::from_parts(deps, "[brew]\ndetect = [\"brew\"]\n")
+    }
+
+    /// Parse and validate a catalog from `deps.toml` and `installers.toml` text.
+    pub fn from_parts(deps: &str, installers: &str) -> Result<Self, CatalogError> {
+        let installers: BTreeMap<String, InstallerDef> =
+            toml::from_str(installers).map_err(CatalogError::ParseInstallers)?;
+        let installers: BTreeMap<Installer, InstallerDef> = installers
+            .into_iter()
+            .map(|(key, def)| (Installer::new(key), def))
+            .collect();
+        let raw: HashMap<String, DepRecipeToml> = toml::from_str(deps)?;
+        let recipes: HashMap<String, DepRecipe> = raw
             .into_iter()
             .map(|(dep, recipe)| {
-                let recipe = recipe.into_recipe(&dep)?;
+                let recipe = recipe.into_recipe(&dep, &installers)?;
                 Ok((dep, recipe))
             })
             .collect::<Result<_, CatalogError>>()?;
-        Ok(DepCatalog { recipes })
+        for (installer, def) in &installers {
+            if def.detect.is_empty() {
+                return Err(CatalogError::EmptyDetect {
+                    installer: installer.to_string(),
+                });
+            }
+            if let Some(dep) = def.bootstrap.iter().find(|d| !recipes.contains_key(*d)) {
+                return Err(CatalogError::UnknownBootstrapDep {
+                    installer: installer.to_string(),
+                    dep: dep.clone(),
+                });
+            }
+            let used = recipes
+                .values()
+                .any(|r| r.install.iter().any(|m| &m.installer == installer));
+            if !used {
+                return Err(CatalogError::UnusedInstaller {
+                    installer: installer.to_string(),
+                });
+            }
+        }
+        Ok(DepCatalog {
+            recipes,
+            installers,
+        })
+    }
+
+    /// Keep only `installer`'s method in `dep`'s recipe, for tests of the
+    /// fallback when nothing installs a pin.
+    #[cfg(test)]
+    pub fn retain_install_for_test(&mut self, dep: &str, installer: &str) {
+        if let Some(recipe) = self.recipes.get_mut(dep) {
+            recipe.install.retain(|m| m.installer == installer);
+        }
+    }
+
+    /// The declared installers, in id order.
+    pub fn installers(&self) -> impl Iterator<Item = (&Installer, &InstallerDef)> {
+        self.installers.iter()
+    }
+
+    /// Dep ids that provide `installer`; empty when it is detect-only.
+    pub fn bootstrap(&self, installer: &Installer) -> &[String] {
+        self.installers
+            .get(installer)
+            .map_or(&[][..], |def| &def.bootstrap)
     }
 
     /// Look up a recipe by dep id.
@@ -261,8 +366,8 @@ mod tests {
         let aiken = cat.get("aiken").unwrap();
         assert_eq!(aiken.binaries, vec!["aiken".to_string()]);
         // First method is aikup, second is nix (order = preference).
-        assert_eq!(aiken.install[0].installer, Installer::Aikup);
-        assert_eq!(aiken.install[1].installer, Installer::Nix);
+        assert_eq!(aiken.install[0].installer, "aikup");
+        assert_eq!(aiken.install[1].installer, "nix");
     }
 
     #[test]
@@ -271,7 +376,6 @@ mod tests {
         let aikup = &cat.get("aiken").unwrap().install[0];
         let pin = VersionReq::parse("1.1.24");
         assert_eq!(aikup.render(pin.as_ref()), "aikup install v1.1.24");
-        // Unpinned ⇒ bare `aikup install` (latest), no trailing space.
         assert_eq!(aikup.render(None), "aikup install");
 
         let yaci = cat.get("yaci-devkit").unwrap();
@@ -311,6 +415,66 @@ mod tests {
         assert!(aiken.install[0].uses_version);
         assert!(!aiken.install[1].uses_version);
         assert!(!aiken.upgrade[0].uses_version);
+    }
+
+    const FOO: &str = r#"
+[foo]
+binaries = ["foo"]
+docs = "https://example.com"
+install = [{ fooup = "fooup install" }]
+"#;
+
+    #[test]
+    fn embedded_installers_load_with_bootstraps() {
+        let cat = DepCatalog::load().unwrap();
+        assert_eq!(cat.bootstrap(&Installer::new("npm")), ["node"]);
+        assert!(cat.bootstrap(&Installer::new("brew")).is_empty());
+        let (_, ps) = cat.installers().find(|(i, _)| **i == "powershell").unwrap();
+        assert_eq!(ps.detect, ["powershell", "pwsh"]);
+    }
+
+    #[test]
+    fn a_declared_installer_needs_no_code() {
+        let cat = DepCatalog::from_parts(
+            FOO,
+            "[fooup]\ndetect = [\"fooup\"]\nbootstrap = [\"foo\"]\n",
+        )
+        .unwrap();
+        assert_eq!(cat.get("foo").unwrap().install[0].installer, "fooup");
+        assert_eq!(cat.bootstrap(&Installer::new("fooup")), ["foo"]);
+    }
+
+    #[test]
+    fn bootstrap_without_recipe_is_load_error() {
+        let err = DepCatalog::from_parts(
+            FOO,
+            "[fooup]\ndetect = [\"fooup\"]\nbootstrap = [\"bar\"]\n",
+        )
+        .unwrap_err();
+        assert!(matches!(err, CatalogError::UnknownBootstrapDep { .. }));
+    }
+
+    #[test]
+    fn empty_detect_is_load_error() {
+        let err = DepCatalog::from_parts(FOO, "[fooup]\ndetect = []\n").unwrap_err();
+        assert!(matches!(err, CatalogError::EmptyDetect { .. }));
+    }
+
+    #[test]
+    fn unused_installer_is_load_error() {
+        let err = DepCatalog::from_parts(
+            FOO,
+            "[fooup]\ndetect = [\"fooup\"]\n[snap]\ndetect = [\"snap\"]\n",
+        )
+        .unwrap_err();
+        assert!(matches!(err, CatalogError::UnusedInstaller { installer } if installer == "snap"));
+    }
+
+    #[test]
+    fn unknown_installer_field_is_load_error() {
+        let err = DepCatalog::from_parts(FOO, "[fooup]\ndetect = [\"fooup\"]\nbootstap = []\n")
+            .unwrap_err();
+        assert!(matches!(err, CatalogError::ParseInstallers(_)));
     }
 
     #[test]
@@ -420,5 +584,23 @@ install = [{ brew = "foo", apt = "foo" }]
 "#;
         let err = DepCatalog::from_str(toml).unwrap_err();
         assert!(matches!(err, CatalogError::MalformedInstall { .. }));
+    }
+
+    #[test]
+    fn upgrade_without_matching_install_is_load_error() {
+        let toml = r#"
+[foo]
+binaries = ["foo"]
+docs = "https://example.com"
+install = [{ brew = "brew install foo" }]
+upgrade = [{ apt = "sudo apt install --only-upgrade -y foo" }]
+"#;
+        let installers = "[brew]\ndetect = [\"brew\"]\n[apt]\ndetect = [\"apt\"]\n";
+        let err = DepCatalog::from_parts(toml, installers).unwrap_err();
+        assert!(matches!(
+            err,
+            CatalogError::UpgradeWithoutInstall { dep, installer }
+            if dep == "foo" && installer == "apt"
+        ));
     }
 }

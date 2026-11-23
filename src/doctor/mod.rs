@@ -135,7 +135,7 @@ pub struct Step {
 impl Step {
     fn new(method: &InstallMethod, version: Option<&VersionReq>) -> Self {
         Step {
-            installer: method.installer,
+            installer: method.installer.clone(),
             command: method.render(version),
             unpinned: ignores_pin(method, version),
         }
@@ -229,6 +229,10 @@ fn dep_present(recipe: &DepRecipe, env: &Environment) -> bool {
 /// Resolve a dep to an ordered install plan for this host (empty when already
 /// present), or `None` when no plan exists. Recurses over installer
 /// `bootstrap` edges; `seen` guards against cycles.
+///
+/// For a pinned dep, pin-honoring methods are tried first (bootstrapping if
+/// needed) before falling back to methods that install latest; within each
+/// group, an already-available installer beats bootstrapping one.
 fn resolve(
     dep_id: &str,
     version: Option<&VersionReq>,
@@ -244,29 +248,45 @@ fn resolve(
         return Some(Vec::new());
     }
 
-    // Prefer any method whose installer is usable right now, so e.g. `aiken`
-    // resolves directly via `nix` without bootstrapping `aikup`. For a pinned
-    // dep, a usable method that installs the pin goes first.
-    let usable = |m: &&InstallMethod| env.installers.contains(&m.installer);
-    if let Some(method) = recipe
+    let mut seen = seen.clone();
+    seen.insert(dep_id.to_string());
+    let (honoring, fallback): (Vec<&InstallMethod>, Vec<&InstallMethod>) = recipe
         .install
         .iter()
-        .filter(usable)
-        .find(|m| !ignores_pin(m, version))
-        .or_else(|| recipe.install.iter().find(usable))
+        .partition(|m| !ignores_pin(m, version));
+    if let Some(steps) = plan_with(&honoring, version, env, catalog, &seen) {
+        return Some(steps);
+    }
+    if fallback.is_empty() {
+        return None;
+    }
+    plan_with(&fallback, version, env, catalog, &seen)
+}
+
+/// The first of `methods` usable right now, else the first whose installer a
+/// bootstrap dep can provide, in recipe order.
+fn plan_with(
+    methods: &[&InstallMethod],
+    version: Option<&VersionReq>,
+    env: &Environment,
+    catalog: &DepCatalog,
+    seen: &HashSet<String>,
+) -> Option<Vec<Step>> {
+    if let Some(method) = methods
+        .iter()
+        .find(|m| env.installers.contains(&m.installer))
     {
         return Some(vec![Step::new(method, version)]);
     }
-
-    // Otherwise bootstrap an installer, in recipe order.
-    let mut seen = seen.clone();
-    seen.insert(dep_id.to_string());
-    recipe.install.iter().find_map(|method| {
-        method.installer.bootstrap().iter().find_map(|bdep| {
-            let mut steps = resolve(bdep, None, env, catalog, &seen)?;
-            steps.push(Step::new(method, version));
-            Some(steps)
-        })
+    methods.iter().find_map(|method| {
+        catalog
+            .bootstrap(&method.installer)
+            .iter()
+            .find_map(|bdep| {
+                let mut steps = resolve(bdep, None, env, catalog, seen)?;
+                steps.push(Step::new(method, version));
+                Some(steps)
+            })
     })
 }
 
@@ -275,7 +295,7 @@ fn resolve(
 /// within each group the ones that install the pin, in recipe order.
 fn alt_methods<'a>(
     recipe: &'a DepRecipe,
-    chosen: Option<Installer>,
+    chosen: Option<&Installer>,
     env: &Environment,
     version: Option<&VersionReq>,
     effective: impl Fn(&'a InstallMethod) -> &'a InstallMethod,
@@ -283,11 +303,11 @@ fn alt_methods<'a>(
     let mut alts: Vec<AltMethod> = recipe
         .install
         .iter()
-        .filter(|method| Some(method.installer) != chosen)
+        .filter(|method| Some(&method.installer) != chosen)
         .map(|method| {
             let m = effective(method);
             AltMethod {
-                installer: method.installer,
+                installer: method.installer.clone(),
                 command: m.render(version),
                 available: env.installers.contains(&method.installer),
                 unpinned: ignores_pin(m, version),
@@ -328,12 +348,10 @@ fn dep_status(req: &Requirement, catalog: &DepCatalog, env: &Environment) -> Dep
     };
     if !present {
         status.plan = resolve(&status.id, want, env, catalog, &HashSet::new()).unwrap_or_default();
-        let chosen = status.plan.last().map(|s| s.installer);
+        let chosen = status.plan.last().map(|s| &s.installer);
         status.alternatives = alt_methods(recipe, chosen, env, want, |m| m);
         status.docs = Some(recipe.docs.clone());
     } else if version_mismatch {
-        // Which installer put it there is unknown, so offer every method's
-        // upgrade to the pin, available ones first, rather than one plan.
         status.alternatives = alt_methods(recipe, None, env, want, |m| recipe.upgrade_method(m));
         if let Some(after) = &recipe.after_upgrade {
             for alt in &mut status.alternatives {
@@ -387,10 +405,10 @@ mod tests {
     use super::*;
     use crate::doctor::probe::Os;
 
-    fn env(installers: &[Installer], present_bins: &[&str]) -> Environment {
+    fn env(installers: &[&str], present_bins: &[&str]) -> Environment {
         Environment {
             os: Os::Linux,
-            installers: installers.iter().copied().collect(),
+            installers: installers.iter().map(|i| Installer::new(*i)).collect(),
             present_binaries: present_bins.iter().map(ToString::to_string).collect(),
             versions: std::collections::HashMap::new(),
         }
@@ -453,11 +471,11 @@ mod tests {
     #[test]
     fn single_step_when_installer_detected() {
         // node missing, brew available → one-step `brew install node`.
-        let report = resolve_all(&reqs(&["node"]), &catalog(), &env(&[Installer::Brew], &[]));
+        let report = resolve_all(&reqs(&["node"]), &catalog(), &env(&["brew"], &[]));
         let node = status(&report, "node");
         assert!(!node.present);
         assert_eq!(node.plan.len(), 1);
-        assert_eq!(node.plan[0].installer, Installer::Brew);
+        assert_eq!(node.plan[0].installer, "brew");
         assert_eq!(node.plan[0].command, "brew install node");
         assert!(node.docs.is_some());
         assert!(!report.all_required_present);
@@ -467,13 +485,13 @@ mod tests {
     fn multi_step_bootstrap_aiken_via_npm() {
         // aiken missing, no nix/aikup, but npm present → bootstrap aikup via npm,
         // then `aikup install` (bare ⇒ latest).
-        let report = resolve_all(&reqs(&["aiken"]), &catalog(), &env(&[Installer::Npm], &[]));
+        let report = resolve_all(&reqs(&["aiken"]), &catalog(), &env(&["npm"], &[]));
         let aiken = status(&report, "aiken");
         assert!(!aiken.present);
         assert_eq!(aiken.plan.len(), 2);
-        assert_eq!(aiken.plan[0].installer, Installer::Npm);
+        assert_eq!(aiken.plan[0].installer, "npm");
         assert_eq!(aiken.plan[0].command, "npm install -g @aiken-lang/aikup");
-        assert_eq!(aiken.plan[1].installer, Installer::Aikup);
+        assert_eq!(aiken.plan[1].installer, "aikup");
         assert_eq!(aiken.plan[1].command, "aikup install");
     }
 
@@ -482,7 +500,7 @@ mod tests {
         let report = resolve_all(
             &[pinned("aiken", "1.1.24")],
             &catalog(),
-            &env(&[Installer::Aikup], &[]),
+            &env(&["aikup"], &[]),
         );
         let aiken = status(&report, "aiken");
         assert_eq!(aiken.plan.len(), 1);
@@ -494,23 +512,76 @@ mod tests {
         let report = resolve_all(
             &[pinned("aiken", "1.1.24")],
             &catalog(),
-            &env(&[Installer::Nix], &[]),
+            &env(&["aikup", "nix"], &[]),
         );
+        let aiken = status(&report, "aiken");
+        assert_eq!(aiken.plan[0].command, "aikup install v1.1.24");
+        assert!(!aiken.plan[0].unpinned);
+        let nix = aiken
+            .alternatives
+            .iter()
+            .find(|a| a.installer == "nix")
+            .unwrap();
+        assert_eq!(nix.command, "nix profile install nixpkgs#aiken");
+        assert!(nix.unpinned);
+    }
+
+    #[test]
+    fn nix_alone_still_reaches_the_pin_through_node_and_aikup() {
+        let report = resolve_all(
+            &[pinned("aiken", "1.1.24")],
+            &catalog(),
+            &env(&["nix"], &[]),
+        );
+        let commands: Vec<&str> = status(&report, "aiken")
+            .plan
+            .iter()
+            .map(|s| s.command.as_str())
+            .collect();
+        assert_eq!(
+            commands,
+            [
+                "nix profile install nixpkgs#nodejs",
+                "npm install -g @aiken-lang/aikup",
+                "aikup install v1.1.24"
+            ]
+        );
+    }
+
+    #[test]
+    fn pin_falls_back_to_a_method_that_ignores_it_when_nothing_else_resolves() {
+        let mut cat = catalog();
+        cat.retain_install_for_test("aiken", "nix");
+        let report = resolve_all(&[pinned("aiken", "1.1.24")], &cat, &env(&["nix"], &[]));
         let aiken = status(&report, "aiken");
         assert_eq!(aiken.plan[0].command, "nix profile install nixpkgs#aiken");
         assert!(aiken.plan[0].unpinned);
-        let aikup = aiken
-            .alternatives
+    }
+
+    #[test]
+    fn pinned_dep_bootstraps_rather_than_ignore_the_pin() {
+        let report = resolve_all(
+            &[pinned("aiken", "1.1.24")],
+            &catalog(),
+            &env(&["nix", "curl"], &[]),
+        );
+        let commands: Vec<&str> = status(&report, "aiken")
+            .plan
             .iter()
-            .find(|a| a.installer == Installer::Aikup)
-            .unwrap();
-        assert_eq!(aikup.command, "aikup install v1.1.24");
-        assert!(!aikup.unpinned);
+            .map(|s| s.command.as_str())
+            .collect();
+        assert_eq!(
+            commands,
+            [
+                "curl -sSfL https://install.aiken-lang.org | sh",
+                "aikup install v1.1.24"
+            ]
+        );
     }
 
     #[test]
     fn unpinned_dep_never_flags_methods() {
-        let report = resolve_all(&reqs(&["aiken"]), &catalog(), &env(&[Installer::Nix], &[]));
+        let report = resolve_all(&reqs(&["aiken"]), &catalog(), &env(&["nix"], &[]));
         let aiken = status(&report, "aiken");
         assert!(!aiken.plan[0].unpinned);
         let value = serde_json::to_value(aiken).unwrap();
@@ -519,11 +590,7 @@ mod tests {
 
     #[test]
     fn mismatch_lists_pin_honoring_upgrades_first() {
-        let env = with_version(
-            env(&[Installer::Nix, Installer::Aikup], &["aiken"]),
-            "aiken",
-            "1.1.21",
-        );
+        let env = with_version(env(&["nix", "aikup"], &["aiken"]), "aiken", "1.1.21");
         let report = resolve_all(&[pinned("aiken", "1.1.24")], &catalog(), &env);
         let alts = &status(&report, "aiken").alternatives;
         assert_eq!(alts[0].command, "aikup install v1.1.24");
@@ -535,10 +602,10 @@ mod tests {
     #[test]
     fn nix_short_circuits_aiken_to_one_step() {
         // With nix present, aiken resolves directly (no aikup needed).
-        let report = resolve_all(&reqs(&["aiken"]), &catalog(), &env(&[Installer::Nix], &[]));
+        let report = resolve_all(&reqs(&["aiken"]), &catalog(), &env(&["nix"], &[]));
         let aiken = status(&report, "aiken");
         assert_eq!(aiken.plan.len(), 1);
-        assert_eq!(aiken.plan[0].installer, Installer::Nix);
+        assert_eq!(aiken.plan[0].installer, "nix");
         assert_eq!(aiken.plan[0].command, "nix profile install nixpkgs#aiken");
     }
 
@@ -559,11 +626,11 @@ mod tests {
     fn alternatives_offer_other_methods_available_first() {
         // sbt recipe = [brew, nix]. With only nix present: plan uses nix, and
         // brew is offered as an alternative flagged unavailable.
-        let report = resolve_all(&reqs(&["sbt"]), &catalog(), &env(&[Installer::Nix], &[]));
+        let report = resolve_all(&reqs(&["sbt"]), &catalog(), &env(&["nix"], &[]));
         let sbt = status(&report, "sbt");
-        assert_eq!(sbt.plan[0].installer, Installer::Nix);
+        assert_eq!(sbt.plan[0].installer, "nix");
         assert_eq!(sbt.alternatives.len(), 1);
-        assert_eq!(sbt.alternatives[0].installer, Installer::Brew);
+        assert_eq!(sbt.alternatives[0].installer, "brew");
         assert!(!sbt.alternatives[0].available);
         assert_eq!(sbt.alternatives[0].command, "brew install sbt");
     }
@@ -573,27 +640,19 @@ mod tests {
         // just recipe = [brew, apt, cargo, nix]. With cargo + nix present: plan
         // uses cargo (first available); the other available method (nix) is
         // offered before the ones that still need their installer (brew, apt).
-        let report = resolve_all(
-            &reqs(&["just"]),
-            &catalog(),
-            &env(&[Installer::Cargo, Installer::Nix], &[]),
-        );
+        let report = resolve_all(&reqs(&["just"]), &catalog(), &env(&["cargo", "nix"], &[]));
         let just = status(&report, "just");
-        assert_eq!(just.plan[0].installer, Installer::Cargo);
+        assert_eq!(just.plan[0].installer, "cargo");
         // The chosen installer is never repeated as an alternative.
-        assert!(
-            just.alternatives
-                .iter()
-                .all(|a| a.installer != Installer::Cargo)
-        );
+        assert!(just.alternatives.iter().all(|a| a.installer != "cargo"));
         // First alternative is the other available installer.
-        assert_eq!(just.alternatives[0].installer, Installer::Nix);
+        assert_eq!(just.alternatives[0].installer, "nix");
         assert!(just.alternatives[0].available);
         // Unavailable ones come after and are flagged.
         assert!(
             just.alternatives
                 .iter()
-                .any(|a| a.installer == Installer::Brew && !a.available)
+                .any(|a| a.installer == "brew" && !a.available)
         );
     }
 
@@ -656,11 +715,7 @@ mod tests {
 
     #[test]
     fn other_version_mismatches_with_upgrade_advice() {
-        let env = with_version(
-            env(&[Installer::Npm], &["yaci-devkit"]),
-            "yaci-devkit",
-            "0.10.6",
-        );
+        let env = with_version(env(&["npm"], &["yaci-devkit"]), "yaci-devkit", "0.10.6");
         let report = resolve_all(&[pinned("yaci-devkit", "0.12")], &catalog(), &env);
         let yaci = status(&report, "yaci-devkit");
         assert!(yaci.present);
@@ -714,11 +769,7 @@ mod tests {
 
     #[test]
     fn mismatch_json_shape() {
-        let env = with_version(
-            env(&[Installer::Npm], &["yaci-devkit"]),
-            "yaci-devkit",
-            "0.10.6",
-        );
+        let env = with_version(env(&["npm"], &["yaci-devkit"]), "yaci-devkit", "0.10.6");
         let report = resolve_all(&[pinned("yaci-devkit", "0.12")], &catalog(), &env);
         let value = serde_json::to_value(&report).unwrap();
         let dep = &value["deps"][0];
@@ -747,7 +798,7 @@ mod tests {
         let report = resolve_all(
             &reqs(&["just", "node"]),
             &catalog(),
-            &env(&[Installer::Brew], &["just"]),
+            &env(&["brew"], &["just"]),
         );
         let value = serde_json::to_value(&report).unwrap();
         let deps = value["deps"].as_array().unwrap();
@@ -799,19 +850,6 @@ mod tests {
                     "tool '{}' requires dep '{}' with no registry/deps.toml entry",
                     tool.id,
                     dep.id
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn every_bootstrap_dep_has_a_recipe() {
-        let cat = catalog();
-        for installer in Installer::ALL {
-            for bdep in installer.bootstrap() {
-                assert!(
-                    cat.get(bdep).is_some(),
-                    "installer '{installer}' bootstraps via dep '{bdep}' with no recipe"
                 );
             }
         }

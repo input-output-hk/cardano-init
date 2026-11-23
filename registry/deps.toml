@@ -19,10 +19,10 @@
 #   after_upgrade  optional command chained onto every upgrade command, for
 #             deps that download their own components.
 #
-# Installer keys are validated against the closed `Installer` enum in
-# src/doctor/installers.rs at load (unknown installer → load error); it decides
-# how an installer is detected and bootstrapped. Shared deps (node, jvm) are
-# defined once and referenced by many tools' `system_deps`.
+# Installer keys must be declared in registry/installers.toml (undeclared →
+# load error), which says how each installer is detected and bootstrapped.
+# Shared deps (node, jvm) are defined once and referenced by many tools'
+# `system_deps`.
 
 # --- base / derived dep (owned by no tool) ---
 

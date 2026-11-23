@@ -17,7 +17,6 @@ community = [
 languages = ["tx3", "typescript", "rust", "go", "python"]
 era = "conway"
 system_deps = ["node", "tx3"]
-# vitest 4 needs Node 20.
 nix_packages = []
 # A trix.toml is the tx3 project manifest 
 detect = ["trix.toml"]

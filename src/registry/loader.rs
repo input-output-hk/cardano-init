@@ -674,8 +674,6 @@ mod tests {
 
     #[test]
     fn aiken_pin_matches_template_compiler_pin() {
-        // The aiken template pins `compiler = "vX.Y.Z"` in aiken.toml; the
-        // doctor's pin must move with it.
         let template = include_str!("../../templates/aiken/on-chain/aiken.toml.jinja");
         let pin = template
             .lines()

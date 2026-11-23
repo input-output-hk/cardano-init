@@ -73,7 +73,7 @@ With `--json`, `table` prints the same catalog as `list --json`.
 
 ## `doctor`
 
-Run `doctor` inside a generated project. It finds the project's components, checks that the toolchains they need are installed at the version the templates pin, and prints the install command for each one that is missing or at another version. Add `--links` to also list the editor extensions, language servers, and community channels for the project's tools.
+Run `doctor` inside a generated project. It finds the project's components, checks that the toolchains they need are installed at the version the templates pin, and prints the install command for each one that is missing or at another version. Add `--links` to also list the editor extensions, language servers, and community channels for the project's tools. It exits with `1` when anything required is missing or at another version, so scripts and CI can check the result.
 
 ```bash
 cd my-protocol
@@ -170,7 +170,7 @@ Plus the [shared update flags](#shared-update-flags).
 | Code | Meaning |
 |------|---------|
 | `0` | Success. Also returned for `--dry-run`, and when you answer No to the interactive confirmation. |
-| `1` | Runtime error: the target directory exists, a dirty git tree, I/O or rendering failures. |
+| `1` | Runtime error: the target directory exists, a dirty git tree, I/O or rendering failures. `doctor` also returns `1` when a required toolchain is missing or isn't at the pinned version, after printing its full report. |
 | `2` | Usage or validation error: unknown tool, tool in the wrong role, invalid project name, missing `--name`, incompatible tools, … |
 
 For the exact error, use `--json` and read `error.code`. See [Error codes](agents.md#error-codes).

@@ -49,7 +49,7 @@ Only tools that declare a role are tested against that role's directory, so sign
 
 **Version pins.** If your template is tied to a specific toolchain line (a compiler, a devnet CLI, anything that changes with the ledger era), pin it in `system_deps` as `{ dep = "version" }`. Matching is prefix-exact: `"1.1.24"` means exactly 1.1.24, `"1.1"` means any 1.1.x, `"1"` any 1.x. A newer version mismatches just like an older one. `doctor` reads the installed version, flags a mismatch, and prints the command that installs the pinned version. Leave general runtimes (`node`, `ghc`, `jvm`) as bare entries: a pin there would refuse versions that work and block combining with tools that pin another line. When two selected tools pin the same dep, the more specific pin wins (`1.1` + `1.1.24` → `1.1.24`); pins that disagree are reported as a conflict.
 
-**Install commands.** Each `registry/deps.toml` method is `{ installer = "command" }`, where the key is one of the known installers and the command is exactly what `doctor` prints. Commands are MiniJinja templates with one variable, `version`: the pin, or empty when no selected tool pins the dep. Use the `prefix` filter so an empty version renders nothing:
+**Install commands.** Each `registry/deps.toml` method is `{ installer = "command" }`, where the key is an installer declared in `registry/installers.toml` and the command is exactly what `doctor` prints. If your dep needs an installer that isn't there yet, add it: its `detect` binaries and, if a dep can provide it, a `bootstrap` list (e.g. `[pipx]` `detect = ["pipx"]`, `bootstrap = ["pipx"]`), then add it to `TESTED` or `EXCLUDED` in `.github/scripts/verify_installers.py`. Commands are MiniJinja templates with one variable, `version`: the pin, or empty when no selected tool pins the dep. Use the `prefix` filter so an empty version renders nothing:
 
 ```toml
 [mytool-cli]
@@ -82,7 +82,7 @@ If your dep downloads its own components that an upgrade leaves behind, add `aft
 [mytool-cli]
 binaries = ["mytool"]
 docs = "https://mytool.dev/install"
-install = [{ npm = "mytool-cli" }]
+install = [{ npm = "npm install -g mytool-cli" }]
 support = [
   { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=acme.mytool" },
   { name = "Neovim plugin", url = "https://github.com/acme/mytool.nvim" },

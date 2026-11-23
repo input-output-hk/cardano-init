@@ -87,13 +87,8 @@ pub fn print_doctor(
 }
 
 /// Sorted installer keys detected on this host.
-fn detected_installers(env: &Environment) -> Vec<&'static str> {
-    let mut keys: Vec<&'static str> = Installer::ALL
-        .iter()
-        .filter(|i| env.installers.contains(i))
-        .copied()
-        .map(Installer::key)
-        .collect();
+fn detected_installers(env: &Environment) -> Vec<&str> {
+    let mut keys: Vec<&str> = env.installers.iter().map(Installer::key).collect();
     keys.sort_unstable();
     keys
 }
@@ -306,9 +301,15 @@ fn print_unsatisfied_dep(dep: &DepStatus) {
 
     let has_methods = !dep.plan.is_empty() || !dep.alternatives.is_empty();
     let lead_in = match (dep.version_mismatch, &dep.version, &dep.required_version) {
-        (true, Some(version), Some(want)) => {
+        (true, Some(version), Some(want)) if has_methods => {
             format!(
                 "{version} installed, needs {} — install it with any of:",
+                want.label()
+            )
+        }
+        (true, Some(version), Some(want)) => {
+            format!(
+                "{version} installed, needs {} — no automatic install method for this system",
                 want.label()
             )
         }

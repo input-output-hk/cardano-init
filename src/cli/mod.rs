@@ -58,7 +58,12 @@ pub fn run() -> i32 {
     }
 
     let result = match cli.command {
-        Some(Command::Doctor(args)) => run_doctor(&registry, json, args.links),
+        Some(Command::Doctor(args)) => {
+            return match run_doctor(&registry, json, args.links) {
+                Ok(satisfied) => i32::from(!satisfied),
+                Err(e) => fail(&e, json),
+            };
+        }
         Some(Command::List) => DepCatalog::load()
             .map_err(CliError::from)
             .map(|catalog| output::print_list(&registry, &catalog, json)),
@@ -105,8 +110,9 @@ fn with_spinner<T>(message: &str, json: bool, work: impl FnOnce() -> T) -> T {
 }
 
 /// `doctor`: scan the current directory for generated components, then report
-/// dependency status and install plans.
-fn run_doctor(registry: &Registry, json: bool, links: bool) -> Result<(), CliError> {
+/// dependency status and install plans. Returns whether every required dep is
+/// present at its pinned version; `run` exits `1` when not, after the report.
+fn run_doctor(registry: &Registry, json: bool, links: bool) -> Result<bool, CliError> {
     let catalog = DepCatalog::load()?;
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let scan = probe::scan_project(&cwd, registry);
@@ -130,7 +136,7 @@ fn run_doctor(registry: &Registry, json: bool, links: bool) -> Result<(), CliErr
     });
 
     output::print_doctor(&scan, &report, &env, &tooling, registry, json, links);
-    Ok(())
+    Ok(report.all_required_satisfied)
 }
 
 /// Fail if `selection` includes an experimental tool. Callers skip it when

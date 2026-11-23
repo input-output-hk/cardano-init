@@ -15,8 +15,8 @@ community = [
 ]
 languages = []
 era = "conway"
-system_deps = ["docker", { cardano-up = "0.15" }]
 # The infra Justfile targets a context with `--context`, first released in cardano-up 0.15.0.
+system_deps = ["docker", { cardano-up = "0.15" }]
 nix_packages = []
 
 [roles.infrastructure]

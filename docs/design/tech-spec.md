@@ -9,7 +9,7 @@
 ## 1. Conventions & versioning
 
 - **Schema version.** All machine-readable (`--json`) output carries a single integer `schema_version`, starting at **1**, global across every command. Additive fields do **not** bump it; removing/renaming/retyping a field or changing semantics does. Agents should tolerate unknown additive fields.
-- **Embedded data is versioned with the binary.** The registry (tools + `registry/deps.toml`), templates, and the code-side installer table are compiled in; there is no on-disk schema-version negotiation. A given binary is the single source of truth for what it generates (PRD A-3).
+- **Embedded data is versioned with the binary.** The registry (tools, `registry/deps.toml`, `registry/installers.toml`) and templates are compiled in; there is no on-disk schema-version negotiation. A given binary is the single source of truth for what it generates (PRD A-3).
 - **Determinism (§11) is a hard contract**, relied on by snapshot tests and agents.
 
 ---
@@ -27,7 +27,7 @@ cardano-init add [ROLE_FLAGS]        # add/swap tools in the project in the cwd 
 cardano-init remove [ROLE_FLAGS]     # remove a role / infra provider from the cwd project
 ```
 
-The `add`/`remove` commands operate on the project in the current directory: they reconstruct its `Selection` by **detection** (no metadata file; §9.6), apply the change at the component-directory level, and re-wire the shared top-level files. They accept `--dry-run` (preview only), `--force` (update despite a dirty git tree), `--ignore-warning`, and `--allow-experimental`. `add` takes the same role flags as init (`--on-chain`, `--off-chain`, `--fullstack`, `--infra` (repeatable), `--devnet`, `--formal-methods`); `remove` takes bare role flags plus `--infra <id>`. The full algorithm and edge-case matrix are in §15.
+The `add`/`remove` commands operate on the project in the current directory: they reconstruct its `Selection` by **detection** (no metadata file; §9.6), apply the change at the component-directory level, and re-wire the shared top-level files. They accept `--dry-run` (preview only), `--force` (update despite a dirty git tree), `--ignore-warning`, `--allow-experimental`, and `--allow-mismatch-eras`. `add` takes the same role flags as init (`--on-chain`, `--off-chain`, `--fullstack`, `--infra` (repeatable), `--devnet`, `--formal-methods`); `remove` takes bare role flags plus `--infra <id>`. The full algorithm and edge-case matrix are in §15.
 
 `--json` is a global flag; without it, output is human-readable. `--json` **implies non-interactive**: it never prompts; if required input is missing it errors instead.
 
@@ -68,7 +68,7 @@ pair is what triggers the collapse into a single `protocol/` component (§3.2, �
 |------|---------|----------|
 | `0` | Success (incl. `--dry-run`, and interactive abort-by-choice) | generated |
 | `2` | **Usage / validation** error | bad flag, `unknown_tool`, `tool_role_mismatch`, `no_roles_selected`, `invalid_project_name`, `name_required` |
-| `1` | **Runtime** error | `dir_exists` (non-empty), registry load failure, render/IO error |
+| `1` | **Runtime** error | `dir_exists` (non-empty), registry load failure, render/IO error; `doctor` when a required dep is missing or doesn't match its pin (the full report is still printed, `ok: true` in JSON) |
 
 
 The fine-grained "what" is the JSON `error.code` (§2.5); exit code is only the category. Interactive **abort** (user declines the confirmation prompt) exits `0` with no error, and never occurs in `json`/non-interactive mode.
@@ -218,7 +218,7 @@ RoleConfig { template }
 EnvMapping { from, to }
 InfraConfig { cardano_up_package, env: Vec<EnvMapping> }
 CompatConfig { consumes: Vec<Seam>, serves: Vec<Seam>, self_contained_devnet: bool }
-ToolDef { id, name, description, website, languages, nix_packages, nix_self_contained: bool, detect, roles: HashMap<Role, RoleConfig>, infra: Option<InfraConfig>, fullstack: Option<RoleConfig>, experimental: bool, compat: CompatConfig }
+ToolDef { id, name, description, website, community, languages, era: Era, system_deps: Vec<SystemDep>, nix_packages, nix_self_contained: bool, detect, roles: HashMap<Role, RoleConfig>, infra: Option<InfraConfig>, fullstack: Option<RoleConfig>, experimental: bool, compat: CompatConfig }
 ```
 
 #### 3.2.1 Experimental tools
@@ -525,10 +525,10 @@ A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) 
   "tools": [
     { "id": "aiken", "name": "Aiken", "description": "…", "website": "https://…",
       "community": [ { "name": "Discord (PRAGMA)", "url": "https://discord.gg/…" } ],
-      "languages": ["aiken"], "roles": ["on-chain"], "fullstack": false, "experimental": false,
+      "languages": ["aiken"], "roles": ["on-chain"], "era": "conway", "fullstack": false, "experimental": false,
       "support": [ { "name": "VS Code extension", "url": "https://marketplace.visualstudio.com/…" } ] },
     { "id": "blaster", "name": "Blaster", "description": "…", "website": "https://…", "community": [],
-      "languages": ["blaster-spec"], "roles": ["formal-methods"], "fullstack": false, "experimental": true, "support": [] }
+      "languages": ["blaster-spec"], "roles": ["formal-methods"], "era": "conway", "fullstack": false, "experimental": true, "support": [] }
     /* … tools sorted by id; each tool's roles sorted … */
   ]
 }}
@@ -563,44 +563,35 @@ recommended_deps = {}                                        // see note
 - **Required** deps gate the build/test acceptance bar (SM-1); their absence is reported prominently. `just` is a base/derived required dep (every project needs the task runner).
 - **Recommended** deps improve the experience but are **never required** (soft notes only). The two-tier mechanism remains for future use, but there is **currently no recommended dep**: the former `process-compose` case existed only to smooth a multi-service top-level `just dev`, and the top level no longer aggregates `dev` (§7.2), so that rationale is gone. Long-running services are now started per-component.
 
-`just` is a **base/derived dep owned by no tool**; it has an entry in `registry/deps.toml` like any dep. (`cardano-up` is reached as an *installer* and is itself a dep entry, rather than added to either set directly.)
+`just` is a **base/derived dep owned by no tool**; it has an entry in `registry/deps.toml` like any dep. (`cardano-up` is a dep in `registry/deps.toml`, required via the infrastructure tools' `system_deps`.)
 
-### 9.2 Catalog = installers (code) + recipes (data)
+### 9.2 Catalog = installers + recipes (both data)
 
-The catalog is a small **graph**. An *installer* is itself a kind of dependency, so the two node types are: code-defined installers, and data-defined dep recipes that reference them.
+The catalog is a small **graph**. An *installer* is itself a kind of dependency, so the two node types are installers and dep recipes, both data.
 
-**Installers (code, `installers.rs`)**: a closed vocabulary. Per installer: the binaries that mean "available", a command template, and a `bootstrap` list of dep ids (**empty ⇒ terminal**, i.e. detect-only/never auto-installed; **non-empty ⇒ bootstrappable** by installing any one of those deps, tried in order):
+**Installers (data, `registry/installers.toml`)**: keyed by installer id (the key a recipe method uses and the JSON `installer` value). Per installer: the `detect` binaries that mean "available" (at least one), and a `bootstrap` list of dep ids (**omitted/empty ⇒ terminal**, i.e. detect-only/never auto-installed; **non-empty ⇒ bootstrappable** by installing any one of those deps, tried in order). Unknown keys are a load error.
 
-```rust
-enum Installer { Brew, Apt, Dnf, Pacman, Winget, Nix, Go, Cargo, Npm, Aikup, CardanoUp, Curl, PowerShell }
+```toml
+[npm]
+detect = ["npm"]
+bootstrap = ["node"]
 
-struct InstallerDef {
-    detect:    &[&str],                 // ["npm"]: installer available if one is on PATH
-    template:  fn(arg: &str) -> String, // Brew → "brew install {arg}"; Curl → "curl -sSfL {arg} | sh"
-    bootstrap: &[&str],                 // dep ids that provide this installer; [] ⇒ terminal
-}
+[powershell]
+detect = ["powershell", "pwsh"]   # terminal: no bootstrap
 ```
 
+| Installer | `bootstrap` |
+|-----------|-------------|
+| `brew`, `apt`, `winget`, `nix`, `curl`, `powershell` | none (terminal) |
+| `npm` | `["node"]` |
+| `cargo` | `["rustup", "rust"]` |
+| `go` | `["go"]` |
+| `aikup` | `["aikup"]` |
+| `tx3up` | `["tx3up"]` |
 
-| Installer | template (`{arg}`) | `bootstrap` |
-|-----------|--------------------|-------------|
-| `Brew` | `brew install {arg}` | `[]` (terminal) |
-| `Apt` | `sudo apt install -y {arg}` | `[]` |
-| `Dnf`/`Pacman`/`Winget` | native install of `{arg}` | `[]` |
-| `Nix` | `nix profile install nixpkgs#{arg}` | `[]` |
-| `Curl` | `curl -sSfL {arg} \| sh` | `[]` |
-| `PowerShell` | `powershell -c "irm {arg} \| iex"` | `[]` |
-| `Npm` | `npm install -g {arg}` | `["node"]` |
-| `Cargo` | `cargo install {arg}` | `["rustup", "rust"]` |
-| `Go` | `go install {arg}` | `["go"]` |
-| `Aikup` | `aikup install {arg}` | `["aikup"]` |
-| `CardanoUp` | `cardano-up install {arg}` | `["cardano-up"]` |
-| `Tx3up` | `tx3up install {arg}` | `["tx3up"]` |
+In code, `Installer` is the id (a string newtype) and `InstallerDef { detect, bootstrap }` its definition (`installers.rs`). Adding an installer is a data change: declare it here, then use it in a recipe. The commands it runs live in the recipes.
 
-
-The `arg`'s meaning is the installer's: a package name for managers, an installer-script URL for `Curl`/`PowerShell`, a target for `Aikup`/`CardanoUp`. Adding an installer is a deliberate code change, only when a real recipe needs it (same discipline as roles).
-
-**Recipes (data, `registry/deps.toml`)**: keyed by dep id; `install` is an ordered list of single-key `{ installer = "command" }` methods (order = preference). The command is a **MiniJinja template** rendered with one variable, `version`: the dep's merged pin (§9.7), or empty when unpinned. A `prefix(p)` filter prepends `p` only to a non-empty value, so `pkg{{ version | prefix('@') }}` never renders a dangling `@`. The optional `upgrade` list holds per-installer overrides used for a version mismatch; an installer without one re-runs its install command. Installer keys are validated against the `Installer` enum at load (unknown → load error), and every template is test-rendered at load (syntax error or unknown variable → load error):
+**Recipes (data, `registry/deps.toml`)**: keyed by dep id; `install` is an ordered list of single-key `{ installer = "command" }` methods (order = preference). The command is a **MiniJinja template** rendered with one variable, `version`: the dep's merged pin (§9.7), or empty when unpinned. A `prefix(p)` filter prepends `p` only to a non-empty value, so `pkg{{ version | prefix('@') }}` never renders a dangling `@`. The optional `upgrade` list holds per-installer overrides used for a version mismatch; an installer without one re-runs its install command. Installer keys must be declared in `registry/installers.toml` (undeclared → load error), and every template is test-rendered at load (syntax error or unknown variable → load error):
 
 ```toml
 [node]  
@@ -633,14 +624,16 @@ install=[ {brew="brew install f1bonacc1/tap/process-compose"}, {go="go install g
 ```
 
 ```rust
-struct InstallMethod { installer: Installer, template: String }   // render(version) -> command
+struct Installer(String);                                         // id declared in registry/installers.toml
+struct InstallerDef { detect: Vec<String>, bootstrap: Vec<String> } // bootstrap [] ⇒ terminal
+struct InstallMethod { installer: Installer, template: String, uses_version: bool }   // render(version) -> command
 struct DepRecipe { binaries: Vec<String>, docs: String, install: Vec<InstallMethod>, upgrade: Vec<InstallMethod>, support: Vec<SupportLink>, version: VersionProbe, after_upgrade: Option<String> } // ordered
 enum VersionProbe { Args(Vec<String>) /* default ["--version"] */, Npm(String) }   // §9.7
 struct SupportLink { name: String, url: String }   // optional `support` list; defaults to empty
-type DepCatalog = HashMap<String, DepRecipe>;   // dep id → recipe (loaded from registry/deps.toml)
+struct DepCatalog { recipes: HashMap<String, DepRecipe>, installers: BTreeMap<Installer, InstallerDef> }   // deps.toml + installers.toml
 ```
 
-Installers (detection and bootstrap, closed vocab) are code; recipes (which installer + command per dep) are data, so a new tool whose deps install via existing installers is **pure data** (ARCHITECTURE §8.1). Shared deps (`node`, `jvm`) are defined once and referenced by many tools' `system_deps`.
+Installers (`registry/installers.toml`: detection and bootstrap) and recipes (`registry/deps.toml`: which installer + command per dep) are both data, so a new tool, even one needing a new installer, is **pure data** (ARCHITECTURE §8.1). Shared deps (`node`, `jvm`) are defined once and referenced by many tools' `system_deps`.
 
 ### 9.3 Environment (impure probe)
 
@@ -659,16 +652,18 @@ resolve(dep_id, version, env, catalog, seen) -> Plan | Unresolved:
     rec = catalog[dep_id]
     if any(rec.binaries on PATH):      return Plan([])            // already present
 
-    // Pass 1 (preferred): the first method whose installer is usable right now.
-    for method in rec.install:                                    // ordered preference
-        if method.installer ∈ env.installers:                     // usable right now
-            return Plan([ {method.installer, method.render(version)} ])
+    // A pinned dep tries the methods that install the pin first, then all.
+    for methods in [ rec.install where uses_version or version is None, rec.install ]:
+        // Pass 1 (preferred): the first method whose installer is usable right now.
+        for method in methods:                                    // ordered preference
+            if method.installer ∈ env.installers:                 // usable right now
+                return Plan([ {method.installer, method.render(version)} ])
 
-    // Pass 2: no installer is directly available — bootstrap one, in order.
-    for method in rec.install:
-        for bdep in method.installer.bootstrap:                   // [] ⇒ skip (terminal)
-            sub = resolve(bdep, None, env, catalog, seen ∪ {dep_id})   // installers are unpinned
-            if sub is Plan:            return Plan(sub.steps + [ {method.installer, method.render(version)} ])
+        // Pass 2: no installer is directly available — bootstrap one, in order.
+        for method in methods:
+            for bdep in catalog.installers[method.installer].bootstrap:   // [] ⇒ skip (terminal)
+                sub = resolve(bdep, None, env, catalog, seen ∪ {dep_id})  // installers are unpinned
+                if sub is Plan:        return Plan(sub.steps + [ {method.installer, method.render(version)} ])
     return Unresolved                                             // → docs fallback
 
 all_required_present = every required dep resolves to Plan([])   // i.e. already present
@@ -688,7 +683,7 @@ The two passes are what make a directly-usable installer win over bootstrapping 
     { "id": "aiken", "required": true,  "present": false, "required_version": "1.1.24",
       "plan": [ { "installer": "npm",   "command": "npm install -g @aiken-lang/aikup" },
                 { "installer": "aikup", "command": "aikup install v1.1.24" } ],
-      "alternatives": [ { "installer": "nix", "command": "nix profile install nixpkgs#aiken", "available": false } ],
+      "alternatives": [ { "installer": "nix", "command": "nix profile install nixpkgs#aiken", "available": false, "unpinned": true } ],
       "docs": "https://aiken-lang.org/installation-instructions",
       "support": [ { "name": "VS Code extension", "url": "https://marketplace.visualstudio.com/items?itemName=TxPipe.aiken" } ] }
   ]
@@ -707,8 +702,7 @@ The two passes are what make a directly-usable installer win over bootstrapping 
 ### 9.5 Referential integrity (tests)
 
 - Every `system_deps` id (plus the base dep `just`) has a `registry/deps.toml` entry.
-- Every installer named in any recipe is an `Installer` enum variant (also enforced at load).
-- Every dep id in any installer's `bootstrap` list has a recipe entry.
+- Every installer named in any recipe is declared in `registry/installers.toml`, every declared installer is used by an `install` method, every `upgrade` installer also appears in the recipe's `install` list, every `bootstrap` id has a recipe, and every installer has a `detect` binary (all enforced at load).
 - The dep graph resolves without infinite recursion (the resolver's cycle guard is exercised by a test).
 - Every pinned `system_deps` entry is a single-key table whose value parses as a version (enforced at load).
 - Every recipe command template renders, both pinned and unpinned (enforced at load).
@@ -761,7 +755,7 @@ version = { npm = "@bloxbean/yaci-devkit" }   # default: { args = ["--version"] 
 - **Probing (impure, `probe.rs`).** Only required deps that are pinned (or in conflict) and are present are probed, in parallel. `Args` runs the first present binary with those args (5 s timeout, stdin closed) and takes the first dotted version (`major.minor[.patch…]`) from stdout + stderr: `aiken v1.1.24+bacbeb3` → `1.1.24`, `go1.26.10` → `1.26.10`. `Npm` never runs the binary: it reads `version` from the named package's `package.json`, found by walking up from the binary's resolved path (or next to the bin dir for shims). Use it when running the binary has side effects: `yaci-devkit --version` boots the CLI, which kills a running devnet.
 - **Comparison.** Prefix-exact against the pin, missing installed components read as zero (`1.1` installed satisfies a `1.1.0` pin); pre-release and build suffixes are dropped (`0.12.0-beta5` reads as `0.12.0`).
 - **Unknown is not a failure.** When no version can be read (no output match, timeout, a `go install` build reporting `devel`), the dep counts as satisfied and `version` is omitted. The doctor never blocks on what it can't verify.
-- **Methods that ignore the pin.** A command whose template doesn't use `version` (e.g. `nix profile install nixpkgs#aiken`) installs whatever the installer's source has, so for a pinned dep it is flagged `unpinned` (`· installs latest` in human output). The resolver prefers a usable method that installs the pin over one that doesn't, and alternatives list pin-honoring methods first within each availability group. Whether a template uses `version` is computed once at load.
+- **Methods that ignore the pin.** A command whose template doesn't use `version` (e.g. `nix profile install nixpkgs#aiken`) installs whatever the installer's source has, so for a pinned dep it is flagged `unpinned` (`· installs latest` in human output). For a pinned dep, the resolver first considers only methods that install the pin, bootstrapping their installer if needed (with only `nix`: `nix profile install nixpkgs#nodejs` → `npm install -g @aiken-lang/aikup` → `aikup install v1.1.24`), and falls back to a method that ignores the pin only when none resolves; and alternatives list pin-honoring methods first within each availability group. Whether a template uses `version` is computed once at load.
 - **Upgrade advice.** A recipe's optional `after_upgrade` command is chained onto every upgrade command, for deps that download their own components (`yaci-devkit download --overwrite`: the CLI keeps the cardano-node it downloaded under `~/.yaci-cli` across upgrades, and a newer CLI fails to start a devnet with the old node). Upgrade commands come from the recipe's `upgrade` overrides (e.g. `brew upgrade node`), rendered with the pin; an installer without an override re-runs its install command, which for a pinned dep installs exactly the pinned version (`aikup install v1.1.24`) whether that's an upgrade or a downgrade.
 
 ---
