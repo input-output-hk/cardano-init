@@ -11,7 +11,7 @@ use super::layout::{borderless_table, print_dim_rule, print_panel, print_table};
 use crate::cli::theme;
 use crate::doctor::installers::Installer;
 use crate::doctor::probe::{Environment, ScanResult};
-use crate::doctor::{DepStatus, Report};
+use crate::doctor::{self, DepStatus, Report};
 use crate::registry::loader::Registry;
 use crate::registry::types::Link;
 
@@ -133,14 +133,12 @@ fn print_components(scan: &ScanResult, report: &Report, registry: &Registry) {
     for comp in &scan.components {
         let tool = registry.get(&comp.tool_id);
         let name = tool.map_or(comp.tool_id.as_str(), |t| t.name.as_str());
-        let tool_deps: Vec<&DepStatus> = tool
-            .map(|t| {
-                t.system_deps
-                    .iter()
-                    .filter_map(|d| deps.get(d.id.as_str()).copied())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut tool_deps: Vec<&DepStatus> = doctor::component_deps(&comp.tool_id, registry)
+            .into_iter()
+            .filter_map(|(_, d)| deps.get(d.id.as_str()).copied())
+            .collect();
+        tool_deps.sort_by_key(|d| d.id.as_str());
+        tool_deps.dedup_by_key(|d| d.id.as_str());
         let missing: Vec<&str> = tool_deps
             .iter()
             .filter(|d| !d.present)

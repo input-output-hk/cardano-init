@@ -133,6 +133,17 @@ impl VersionReq {
             .all(|(i, c)| version.component(i) == *c)
     }
 
+    /// `version` is newer than every version this requirement allows
+    /// (`1.2.0` or `2.0` against `1.1`).
+    pub fn is_below(&self, version: &Version) -> bool {
+        self.0
+            .iter()
+            .enumerate()
+            .map(|(i, c)| version.component(i).cmp(c))
+            .find(|ord| ord.is_ne())
+            == Some(Ordering::Greater)
+    }
+
     /// Human-readable form: `1.1.24` stays as is, a partial pin reads `1.1.x`.
     pub fn label(&self) -> String {
         if self.0.len() >= 3 {
@@ -250,6 +261,18 @@ mod tests {
         assert_eq!(req("1.1.24").label(), "1.1.24");
         assert_eq!(req("0.12").label(), "0.12.x");
         assert_eq!(req("1").label(), "1.x");
+    }
+
+    #[test]
+    fn is_below_only_when_the_version_is_past_the_pin() {
+        assert!(req("1.1.24").is_below(&v("1.2.0")));
+        assert!(req("1.1.24").is_below(&v("1.1.25")));
+        assert!(req("1").is_below(&v("2.0.1")));
+        assert!(req("0.12").is_below(&v("0.13.0")));
+        assert!(!req("1.1.24").is_below(&v("1.1.24")));
+        assert!(!req("1.1.24").is_below(&v("1.1.21")));
+        assert!(!req("1").is_below(&v("1.40.0")));
+        assert!(!req("0.12").is_below(&v("0.11.3")));
     }
 
     #[test]

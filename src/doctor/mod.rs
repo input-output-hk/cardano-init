@@ -18,7 +18,7 @@ use installers::Installer;
 use probe::Environment;
 
 use crate::registry::loader::Registry;
-use crate::registry::types::Role;
+use crate::registry::types::{Role, SystemDep};
 use crate::registry::version::{Version, VersionReq};
 
 /// The task runner every project needs. Owned by no tool.
@@ -83,20 +83,32 @@ pub fn requirements<'a>(
         VersionReq::parse(BASE_DEP_VERSION).as_ref(),
     );
     for id in tool_ids {
-        let tools = if id == INFRA_DRIVER_ID {
-            registry.tools_for_role(Role::Infrastructure)
-        } else {
-            registry.get(id).into_iter().collect()
-        };
-        for tool in tools {
-            for dep in &tool.system_deps {
-                require(&dep.id, &tool.id, dep.version.as_ref());
-            }
+        for (tool, dep) in component_deps(id, registry) {
+            require(&dep.id, tool, dep.version.as_ref());
         }
     }
 
     pins.into_iter()
         .map(|(id, pins)| merge_pins(id, pins))
+        .collect()
+}
+
+pub fn component_deps<'a>(
+    component_id: &str,
+    registry: &'a Registry,
+) -> Vec<(&'a str, &'a SystemDep)> {
+    let tools = if component_id == INFRA_DRIVER_ID {
+        registry.tools_for_role(Role::Infrastructure)
+    } else {
+        registry.get(component_id).into_iter().collect()
+    };
+    tools
+        .into_iter()
+        .flat_map(|tool| {
+            tool.system_deps
+                .iter()
+                .map(move |dep| (tool.id.as_str(), dep))
+        })
         .collect()
 }
 
@@ -180,11 +192,13 @@ pub struct DepStatus {
     /// The selected tools pin versions no single install satisfies.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub version_conflict: Vec<Pin>,
-    /// Ordered install steps for this host. Empty when present or unresolved.
+    /// Ordered install (or, for a mismatched dep, upgrade) steps for this
+    /// host. Empty when satisfied or unresolved.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub plan: Vec<Step>,
-    /// Other recipe methods beyond `plan`, available ones first. For a
-    /// mismatched dep: every method's upgrade command, available ones first.
+    /// Other recipe methods beyond `plan`, available ones first (upgrade
+    /// commands for a mismatched dep, minus those that install latest when
+    /// the installed version is already past the pin).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub alternatives: Vec<AltMethod>,
     /// Docs URL, the fallback so advice is never empty. `None` when the dep
@@ -250,17 +264,28 @@ fn resolve(
 
     let mut seen = seen.clone();
     seen.insert(dep_id.to_string());
-    let (honoring, fallback): (Vec<&InstallMethod>, Vec<&InstallMethod>) = recipe
-        .install
-        .iter()
-        .partition(|m| !ignores_pin(m, version));
-    if let Some(steps) = plan_with(&honoring, version, env, catalog, &seen) {
+    plan_methods(recipe.install.iter(), version, true, env, catalog, &seen)
+}
+
+/// Pin-honoring `methods` first, then (when `allow_unpinned`) the ones that
+/// install latest.
+fn plan_methods<'a>(
+    methods: impl Iterator<Item = &'a InstallMethod>,
+    version: Option<&VersionReq>,
+    allow_unpinned: bool,
+    env: &Environment,
+    catalog: &DepCatalog,
+    seen: &HashSet<String>,
+) -> Option<Vec<Step>> {
+    let (honoring, fallback): (Vec<&InstallMethod>, Vec<&InstallMethod>) =
+        methods.partition(|m| !ignores_pin(m, version));
+    if let Some(steps) = plan_with(&honoring, version, env, catalog, seen) {
         return Some(steps);
     }
-    if fallback.is_empty() {
+    if !allow_unpinned || fallback.is_empty() {
         return None;
     }
-    plan_with(&fallback, version, env, catalog, &seen)
+    plan_with(&fallback, version, env, catalog, seen)
 }
 
 /// The first of `methods` usable right now, else the first whose installer a
@@ -352,10 +377,30 @@ fn dep_status(req: &Requirement, catalog: &DepCatalog, env: &Environment) -> Dep
         status.alternatives = alt_methods(recipe, chosen, env, want, |m| m);
         status.docs = Some(recipe.docs.clone());
     } else if version_mismatch {
-        status.alternatives = alt_methods(recipe, None, env, want, |m| recipe.upgrade_method(m));
+        // Past the pin, a command that installs latest can't get back to it.
+        let too_new = matches!((&status.version, want), (Some(v), Some(w)) if w.is_below(v));
+        let seen = HashSet::from([status.id.clone()]);
+        status.plan = plan_methods(
+            recipe.install.iter().map(|m| recipe.upgrade_method(m)),
+            want,
+            !too_new,
+            env,
+            catalog,
+            &seen,
+        )
+        .unwrap_or_default();
+        let chosen = status.plan.last().map(|s| &s.installer);
+        status.alternatives = alt_methods(recipe, chosen, env, want, |m| recipe.upgrade_method(m));
+        status.alternatives.retain(|alt| !(too_new && alt.unpinned));
         if let Some(after) = &recipe.after_upgrade {
-            for alt in &mut status.alternatives {
-                alt.command = format!("{} && {after}", alt.command);
+            let commands = status
+                .plan
+                .last_mut()
+                .map(|s| &mut s.command)
+                .into_iter()
+                .chain(status.alternatives.iter_mut().map(|a| &mut a.command));
+            for command in commands {
+                *command = format!("{command} && {after}");
             }
         }
         status.docs = Some(recipe.docs.clone());
@@ -592,11 +637,58 @@ mod tests {
     fn mismatch_lists_pin_honoring_upgrades_first() {
         let env = with_version(env(&["nix", "aikup"], &["aiken"]), "aiken", "1.1.21");
         let report = resolve_all(&[pinned("aiken", "1.1.24")], &catalog(), &env);
-        let alts = &status(&report, "aiken").alternatives;
-        assert_eq!(alts[0].command, "aikup install v1.1.24");
-        assert!(!alts[0].unpinned);
-        assert_eq!(alts[1].command, "nix profile upgrade aiken");
-        assert!(alts[1].unpinned);
+        let aiken = status(&report, "aiken");
+        assert_eq!(aiken.plan[0].command, "aikup install v1.1.24");
+        assert!(!aiken.plan[0].unpinned);
+        assert_eq!(aiken.alternatives[0].command, "nix profile upgrade aiken");
+        assert!(aiken.alternatives[0].unpinned);
+    }
+
+    #[test]
+    fn mismatch_bootstraps_a_missing_installer() {
+        let env = with_version(env(&["npm"], &["aiken"]), "aiken", "1.1.21");
+        let report = resolve_all(&[pinned("aiken", "1.1.24")], &catalog(), &env);
+        let commands: Vec<&str> = status(&report, "aiken")
+            .plan
+            .iter()
+            .map(|s| s.command.as_str())
+            .collect();
+        assert_eq!(
+            commands,
+            ["npm install -g @aiken-lang/aikup", "aikup install v1.1.24"]
+        );
+    }
+
+    #[test]
+    fn past_the_pin_drops_commands_that_install_latest() {
+        let env = with_version(env(&["nix"], &["aiken"]), "aiken", "1.2.0");
+        let report = resolve_all(&[pinned("aiken", "1.1.24")], &catalog(), &env);
+        let aiken = status(&report, "aiken");
+        // nix → node → aikup, rather than `nix profile upgrade aiken`.
+        let last = aiken.plan.last().unwrap();
+        assert_eq!(last.command, "aikup install v1.1.24");
+        assert!(!last.unpinned);
+        assert!(aiken.alternatives.iter().all(|a| !a.unpinned));
+    }
+
+    #[test]
+    fn past_a_partial_pin_leaves_only_docs() {
+        let env = with_version(env(&["brew"], &["just"]), "just", "2.0.1");
+        let report = resolve_all(&[pinned("just", "1")], &catalog(), &env);
+        let just = status(&report, "just");
+        assert!(just.version_mismatch);
+        assert!(just.plan.is_empty());
+        assert!(just.alternatives.is_empty());
+        assert!(just.docs.is_some());
+    }
+
+    #[test]
+    fn below_the_pin_still_offers_install_latest() {
+        let env = with_version(env(&["brew"], &["just"]), "just", "0.9.0");
+        let report = resolve_all(&[pinned("just", "1")], &catalog(), &env);
+        let just = status(&report, "just");
+        assert_eq!(just.plan[0].command, "brew upgrade just");
+        assert!(just.plan[0].unpinned);
     }
 
     #[test]
@@ -723,13 +815,12 @@ mod tests {
         assert!(!yaci.satisfied());
         assert!(report.all_required_present);
         assert!(!report.all_required_satisfied);
-        assert!(yaci.plan.is_empty());
         // The upgrade also refreshes the components the old CLI downloaded.
         assert_eq!(
-            yaci.alternatives[0].command,
+            yaci.plan[0].command,
             "npm install -g @bloxbean/yaci-devkit@0.12 && yaci-devkit download --overwrite"
         );
-        assert!(yaci.alternatives[0].available);
+        assert!(yaci.alternatives.is_empty());
         assert!(yaci.docs.is_some());
         assert_eq!(report.unsatisfied_required().count(), 1);
     }
@@ -817,6 +908,17 @@ mod tests {
         assert_eq!(node["plan"][0]["installer"], "brew");
         assert_eq!(node["plan"][0]["command"], "brew install node");
         assert!(node["docs"].is_string());
+    }
+
+    #[test]
+    fn infra_component_needs_every_infra_tools_deps() {
+        let registry = crate::registry::loader::Registry::load().unwrap();
+        let ids: Vec<&str> = component_deps(INFRA_DRIVER_ID, &registry)
+            .into_iter()
+            .map(|(_, dep)| dep.id.as_str())
+            .collect();
+        assert!(ids.contains(&"docker"));
+        assert!(ids.contains(&"cardano-up"));
     }
 
     #[test]
