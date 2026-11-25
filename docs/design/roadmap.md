@@ -84,7 +84,7 @@ Deliverables below are tracked as checklists (`[ ]` = not yet done).
 - [X] **CI/CD pipeline** improvements: per-tool build smoke tests (toolchains or Nix), snapshot/determinism gates, contract-compliance gates, release artifacts.
 - [X] **Scheduled maintenance smoke run** (weekly cron): re-runs the per-tool build+test matrix to catch generated projects breaking from a hardfork / upstream release / dependency bitrot *between* commits, opening a tracking issue on failure. Distinct from PR gates (ARCHITECTURE §10).
 - [X] Version-update check (pre-generation notice, §10 TECH_SPEC).
-- [x] Version checks in `doctor`: per-tool pins in `system_deps` (prefix-exact), mismatched deps reported with the command that installs the pinned version (§9.7 TECH_SPEC). Replaced the earlier `min_versions` floors.
+- [x] Version checks in `doctor`: per-tool pins (prefix-exact) and floors (`>=`) in `system_deps`, mismatched deps reported with the command that installs a matching version (§9.7 TECH_SPEC). Replaced the earlier `min_versions` table.
 - [x] Ledger eras: each tool is parked on an era (`era` in its registry file); combining tools from different eras is gated behind `--allow-mismatch-eras` / an interactive confirm (§3.2.3 TECH_SPEC). Recipe commands are templates rendered with the pinned version.
 
 ### Success criteria

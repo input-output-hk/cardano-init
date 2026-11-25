@@ -166,7 +166,7 @@ fn experimental_gate(selection: &Selection, registry: &Registry) -> Result<(), C
 
 /// Era coherence gate: tools parked on different ledger eras need
 /// `--allow-mismatch-eras`, which downgrades the stop to a warning.
-pub(crate) fn era_gate(
+fn era_gate(
     selection: &Selection,
     registry: &Registry,
     allow_mismatch_eras: bool,
@@ -179,7 +179,7 @@ pub(crate) fn era_gate(
         return Err(mismatch.into());
     }
     if !json {
-        output::print_era_mismatch_warning(&mismatch, true);
+        output::print_era_mismatch_warning(&mismatch, output::EraWarning::Allowed);
     }
     Ok(())
 }
@@ -488,5 +488,13 @@ mod tests {
         let registry = Registry::load().unwrap();
         let res = run_init(&tx3_devnet_args("yaci", true), &registry, true);
         assert!(res.is_ok(), "expected Ok, got {res:?}");
+    }
+
+    #[test]
+    fn era_mismatch_is_reported_before_incompatibility() {
+        let mut registry = Registry::load().unwrap();
+        registry.set_era_for_test("tx3", crate::registry::types::Era::Dijkstra);
+        let err = run_init(&tx3_devnet_args("yaci", false), &registry, true).unwrap_err();
+        assert_eq!(err.code(), "era_mismatch");
     }
 }

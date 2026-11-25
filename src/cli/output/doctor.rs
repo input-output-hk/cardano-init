@@ -230,7 +230,7 @@ pub(super) fn print_dep_advice(report: &Report) {
     let conflicts = print_version_conflicts(report);
     if report.all_required_satisfied {
         let note = if conflicts {
-            " (version pins conflict, see above)"
+            " (version requirements conflict, see above)"
         } else {
             ""
         };
@@ -242,7 +242,7 @@ pub(super) fn print_dep_advice(report: &Report) {
     }
 
     let (badge, lead_in) = if report.all_required_present {
-        ("DEPS MISMATCH", "install the pinned versions below")
+        ("DEPS MISMATCH", "install the required versions below")
     } else if report.deps.iter().any(|d| d.version_mismatch) {
         ("DEPS MISSING", "install or upgrade the dependencies below")
     } else {
@@ -254,7 +254,7 @@ pub(super) fn print_dep_advice(report: &Report) {
     }
 }
 
-/// Deps whose selected tools pin versions no single install satisfies —
+/// Deps whose selected tools need versions no single install satisfies —
 /// typically tools parked on different eras. Returns whether any was printed.
 fn print_version_conflicts(report: &Report) -> bool {
     let mut any = false;
@@ -264,7 +264,7 @@ fn print_version_conflicts(report: &Report) -> bool {
         .filter(|d| !d.version_conflict.is_empty())
     {
         any = true;
-        let pins = dep
+        let needs = dep
             .version_conflict
             .iter()
             .map(|p| format!("{} needs {}", p.tool, p.version.label()))
@@ -274,7 +274,7 @@ fn print_version_conflicts(report: &Report) -> bool {
             "  {} {}  {}",
             theme::caution(),
             theme::strong(&dep.id),
-            theme::warn(format!("conflicting version pins: {pins}"))
+            theme::warn(format!("conflicting version requirements: {needs}"))
         );
     }
     any

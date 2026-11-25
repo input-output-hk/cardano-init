@@ -3,7 +3,8 @@
 # Purpose: prove the `cardano-init doctor` install recipes in
 # `registry/deps.toml` still WORK against the live world. For each installer,
 # this runs every recipe that offers it (in an environment where that installer
-# is native) and checks the dep's declared binaries end up on PATH.
+# is native) and checks the dep's declared binaries end up on PATH, at the pinned
+# version when the command installs one.
 #
 # Two-tier design (the other tier is the PR gate in ci.yml → `cargo test`):
 #   • PR gate      — `src/doctor/catalog.rs` tests prove every recipe PARSES and

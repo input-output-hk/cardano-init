@@ -12,7 +12,7 @@ community = [
 ]
 languages = ["haskell"]
 era = "conway"
-system_deps = ["cabal", "ghc"]
+system_deps = ["cabal", { ghc = "9.8" }]
 # Plutarch 1.15 is built and tested upstream with GHC 9.8.
 nix_packages = ["cabal-install", "haskell.compiler.ghc984", "pkg-config", "libsodium", "secp256k1", "blst"]
 # Like Plinth, Plutarch ships its own component-local haskell.nix flake under

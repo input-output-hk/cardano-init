@@ -13,7 +13,7 @@ community = [
 ]
 languages = ["haskell"]
 era = "conway"
-system_deps = ["cabal", "ghc"]
+system_deps = ["cabal", { ghc = "9.6" }]
 # The template targets GHC 9.6 (ghc966).
 nix_packages = ["cabal-install", "haskell.compiler.ghc966", "pkg-config", "libsodium", "secp256k1", "blst"]
 # Plinth ships its own component-local haskell.nix flake (the recommended setup

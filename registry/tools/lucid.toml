@@ -13,7 +13,7 @@ community = [
 ]
 languages = ["typescript"]
 era = "conway"
-system_deps = ["node"]
+system_deps = [{ node = ">=20" }]
 nix_packages = ["nodejs"]
 # A package.json alone is ambiguous (any JS project has one); require the
 # Lucid Evolution dependency so foreign projects read as "unrecognized" instead.

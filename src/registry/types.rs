@@ -132,8 +132,8 @@ impl Serialize for Era {
 #[error("unknown era: '{0}'")]
 pub struct UnknownEraError(pub String);
 
-/// A dependency a tool requires, optionally pinned to a version (tech-spec
-/// §9.7). The id has a `registry/deps.toml` entry.
+/// A dependency a tool requires, optionally at a pinned or minimum version
+/// (tech-spec §9.7). The id has a `registry/deps.toml` entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemDep {
     pub id: String,

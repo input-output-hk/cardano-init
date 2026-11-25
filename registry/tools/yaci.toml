@@ -19,7 +19,8 @@ community = [
 languages = ["typescript"]
 era = "conway"
 # yaci-devkit: the test readiness probe uses /devnet/tip (0.12.0 is the release CI runs).
-system_deps = ["node", { yaci-devkit = "0.12" }]
+# node: what the yaci-devkit package needs.
+system_deps = [{ node = ">=20.8" }, { yaci-devkit = "0.12" }]
 nix_packages = []
 detect = [{ file = "scripts/set-env.mjs", contains = "Yaci" }]
 

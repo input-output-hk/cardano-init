@@ -79,7 +79,7 @@ No CI check starts an infrastructure provider, so combinations with `--infra` ar
 ## Notes
 
 - **Scalus** fills both on-chain and off-chain and supports `--fullstack`, which generates a single `protocol/` component. See [Fullstack tools](how-it-works.md#fullstack-tools).
-- **Plinth** and **Plutarch** are both Haskell. Plinth targets GHC 9.6; Plutarch targets GHC 9.8. With `--nix`, each component ships a Nix flake that provides the right GHC.
+- **Plinth** and **Plutarch** are both Haskell. Plinth targets GHC 9.6; Plutarch targets GHC 9.8, and `doctor` checks for that version. With `--nix`, each component ships a Nix flake that provides the right GHC.
 - **PyCardano** generates a Python project managed by [uv](https://docs.astral.sh/uv/), which installs the Python version and packages the project needs. It connects through a Blockfrost-compatible API, such as Yaci DevKit or Blockfrost itself.
 - **Pebble** scripts use protocol version 11 features, so they run on mainnet, preview, preprod, and Yaci DevKit 0.12 or later, but not on older devnets.
 - **Experimental** (🧪) and **placeholder** (🚧) tools require `--allow-experimental` in one-shot mode. See [Experimental tools](how-it-works.md#experimental-tools).

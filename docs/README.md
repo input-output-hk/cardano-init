@@ -29,7 +29,7 @@ $ cd my-protocol && just test
 - **One command to a working project.** The generated monorepo builds and passes its tests immediately.
 - **Combine tools freely.** Components share a common *contract*, so a tool from one role works with any tool from another.
 - **Built for coding agents.** Every command can print JSON, and every project includes an `AGENTS.md` that tells an agent what the project is and what to do next.
-- **Help with setup.** The built-in `doctor` checks your toolchains and prints the install command for anything missing or at a version other than the one the templates pin.
+- **Help with setup.** The built-in `doctor` checks your toolchains and prints the install command for anything missing or at a version the templates don't support.
 - **Change the stack later.** `add` and `remove` swap a tool or a role in an existing project, and every change is a reviewable `git diff`.
 - **A real example.** Every stack ships the same gift-card scenario, and it runs end to end.
 

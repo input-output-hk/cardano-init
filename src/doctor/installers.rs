@@ -51,4 +51,7 @@ pub struct InstallerDef {
     /// Dep ids that provide this installer. Empty ⇒ terminal (detect-only).
     #[serde(default)]
     pub bootstrap: Vec<String>,
+    /// Can't move an installed dep to a newer version.
+    #[serde(default)]
+    pub install_only: bool,
 }

@@ -16,7 +16,8 @@ community = [
 ]
 languages = ["tx3", "typescript", "rust", "go", "python"]
 era = "conway"
-system_deps = ["node", "tx3"]
+# vitest 4 can install vite 8, which needs Node 20.19.
+system_deps = [{ node = ">=20.19" }, "tx3"]
 nix_packages = []
 # A trix.toml is the tx3 project manifest 
 detect = ["trix.toml"]

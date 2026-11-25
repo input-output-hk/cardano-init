@@ -5,8 +5,10 @@
 
 use std::path::{Path, PathBuf};
 
+use super::output::EraWarning;
 use super::{AddArgs, CliError, RemoveArgs, UpdateFlags, output, theme};
 use crate::doctor::probe;
+use crate::registry::era::{self, EraChange, EraMismatch};
 use crate::registry::loader::Registry;
 use crate::registry::types::{Role, Selection};
 use crate::scaffold::update::{self, Mutation, SlotOp};
@@ -90,6 +92,23 @@ fn detect_selection(cwd: &Path, registry: &Registry, json: bool) -> Result<Selec
     Ok(recon.selection)
 }
 
+/// The era gate on a change: an error, or the warning to print.
+fn check_eras(
+    old: &Selection,
+    new: &Selection,
+    allow_mismatch_eras: bool,
+    registry: &Registry,
+) -> Result<Option<(EraMismatch, EraWarning)>, CliError> {
+    match era::check_change(&old.assignments, &new.assignments, registry) {
+        None => Ok(None),
+        Some(EraChange::AlreadyMixed(mismatch)) => Ok(Some((mismatch, EraWarning::AlreadyMixed))),
+        Some(EraChange::NewEra(mismatch)) if allow_mismatch_eras => {
+            Ok(Some((mismatch, EraWarning::Allowed)))
+        }
+        Some(EraChange::NewEra(mismatch)) => Err(mismatch.into()),
+    }
+}
+
 /// Gate the new selection, plan the change, then preview it (`--dry-run`) or
 /// apply it behind the git clean-tree check, and report.
 fn finish_update(
@@ -109,8 +128,13 @@ fn finish_update(
     if !flags.allow_experimental {
         super::experimental_gate(new, registry)?;
     }
+    let era_warning = check_eras(old, new, flags.allow_mismatch_eras, registry)?;
+    if let Some((mismatch, warning)) = era_warning
+        && !json
+    {
+        output::print_era_mismatch_warning(&mismatch, warning);
+    }
     super::compat_gate(new, registry, flags.ignore_warning, json)?;
-    super::era_gate(new, registry, flags.allow_mismatch_eras, json)?;
 
     let plan = update::plan_update(old, new, registry)?;
 
@@ -176,7 +200,7 @@ mod tests {
     use std::process::Command;
 
     use super::*;
-    use crate::registry::types::{Network, RoleAssignment};
+    use crate::registry::types::{Era, Network, RoleAssignment};
 
     fn reg() -> Registry {
         Registry::load().expect("registry loads")
@@ -440,5 +464,86 @@ mod tests {
         };
         finish_update(&root, &old, &new, &flags, &registry, true)
             .expect("--allow-mismatch-eras allows mixed-era update");
+    }
+
+    #[test]
+    fn era_mismatch_is_reported_before_incompatibility() {
+        let mut registry = reg();
+        registry.set_era_for_test("tx3", Era::Dijkstra);
+        let old = sel(vec![a(Role::Devnet, "yaci")]);
+        let (_tmp, root) = scaffolded(&old);
+        let new = update::apply(&old, &Mutation::Add(a(Role::OffChain, "tx3")));
+
+        let flags = UpdateFlags {
+            dry_run: true,
+            allow_experimental: true,
+            ..UpdateFlags::default()
+        };
+        let err = finish_update(&root, &old, &new, &flags, &registry, true).unwrap_err();
+        assert_eq!(err.code(), "era_mismatch");
+    }
+
+    fn update_without_flag(
+        dijkstra: &[&str],
+        old: &Selection,
+        new: &Selection,
+    ) -> Result<(), CliError> {
+        let mut registry = reg();
+        for id in dijkstra {
+            registry.set_era_for_test(id, Era::Dijkstra);
+        }
+        let (_tmp, root) = scaffolded(old);
+        let flags = UpdateFlags {
+            dry_run: true,
+            ..UpdateFlags::default()
+        };
+        finish_update(&root, old, new, &flags, &registry, true)
+    }
+
+    #[test]
+    fn era_warning_says_why_it_is_only_a_warning() {
+        let mut registry = reg();
+        registry.set_era_for_test("aiken", Era::Dijkstra);
+        let conway = sel(vec![a(Role::OffChain, "meshjs")]);
+        let mixed = update::apply(&conway, &Mutation::Add(a(Role::OnChain, "aiken")));
+        let more = update::apply(&mixed, &Mutation::Add(a(Role::Devnet, "yaci")));
+        let warning = |old, new, allow| {
+            check_eras(old, new, allow, &registry)
+                .unwrap()
+                .map(|(_, warning)| warning)
+        };
+
+        assert_eq!(warning(&conway, &mixed, true), Some(EraWarning::Allowed));
+        assert_eq!(
+            warning(&mixed, &more, false),
+            Some(EraWarning::AlreadyMixed)
+        );
+        assert_eq!(warning(&mixed, &conway, false), None);
+        assert!(check_eras(&conway, &mixed, false, &registry).is_err());
+    }
+
+    #[test]
+    fn mixed_project_can_add_within_its_eras() {
+        let old = sel(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
+        let new = update::apply(&old, &Mutation::Add(a(Role::Devnet, "yaci")));
+        update_without_flag(&["aiken"], &old, &new).expect("adds no new era");
+    }
+
+    #[test]
+    fn remove_that_leaves_eras_mixed_needs_no_flag() {
+        let old = sel(vec![
+            a(Role::OnChain, "aiken"),
+            a(Role::OffChain, "meshjs"),
+            a(Role::Devnet, "yaci"),
+        ]);
+        let new = update::apply(&old, &Mutation::Remove(Role::Devnet));
+        update_without_flag(&["aiken", "yaci"], &old, &new).expect("adds no new era");
+    }
+
+    #[test]
+    fn remove_that_leaves_one_era_needs_no_flag() {
+        let old = sel(vec![a(Role::OnChain, "aiken"), a(Role::OffChain, "meshjs")]);
+        let new = update::apply(&old, &Mutation::Remove(Role::OnChain));
+        update_without_flag(&["aiken"], &old, &new).expect("one era left");
     }
 }

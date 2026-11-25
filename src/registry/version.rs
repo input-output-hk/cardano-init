@@ -114,60 +114,93 @@ impl serde::Serialize for Version {
     }
 }
 
-/// A prefix-exact version requirement: the declared components must match the
-/// installed version's leading components. `1.1.24` is exact, `1.1` is
-/// `1.1.*`, `1` is `1.*`.
+/// A version requirement.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VersionReq(Vec<u64>);
+pub enum VersionReq {
+    /// Prefix-exact: `1.1.24` is exact, `1.1` is `1.1.*`, `1` is `1.*`.
+    Pin(Vec<u64>),
+    /// That version or newer (`>=20`).
+    Floor(Version),
+}
 
 impl VersionReq {
-    /// Parse a declared requirement such as `"1.1.24"`, `"0.12"` or `"1"`.
+    /// Parse a declared requirement such as `"1.1.24"`, `"0.12"` or `">=20"`.
     pub fn parse(text: &str) -> Option<Self> {
-        Version::parse(text).map(|v| VersionReq(v.0))
+        match text.trim().strip_prefix(">=") {
+            Some(floor) => Version::parse(floor).map(VersionReq::Floor),
+            None => Version::parse(text).map(|v| VersionReq::Pin(v.0)),
+        }
     }
 
     pub fn matches(&self, version: &Version) -> bool {
-        self.0
-            .iter()
-            .enumerate()
-            .all(|(i, c)| version.component(i) == *c)
+        match self {
+            VersionReq::Pin(pin) => cmp_prefix(version, pin).is_eq(),
+            VersionReq::Floor(min) => version >= min,
+        }
     }
 
     /// `version` is newer than every version this requirement allows
-    /// (`1.2.0` or `2.0` against `1.1`).
+    /// (`1.2.0` or `2.0` against `1.1`). Never the case for a floor.
     pub fn is_below(&self, version: &Version) -> bool {
-        self.0
-            .iter()
-            .enumerate()
-            .map(|(i, c)| version.component(i).cmp(c))
-            .find(|ord| ord.is_ne())
-            == Some(Ordering::Greater)
+        match self {
+            VersionReq::Pin(pin) => cmp_prefix(version, pin).is_gt(),
+            VersionReq::Floor(_) => false,
+        }
     }
 
-    /// Human-readable form: `1.1.24` stays as is, a partial pin reads `1.1.x`.
+    /// The pinned version, for install commands. `None` for a floor, which
+    /// the latest version satisfies.
+    pub fn pin(&self) -> Option<String> {
+        match self {
+            VersionReq::Pin(_) => Some(self.to_string()),
+            VersionReq::Floor(_) => None,
+        }
+    }
+
+    /// Human-readable form: `1.1.24` stays as is, a partial pin reads `1.1.x`,
+    /// a floor `>= 20`.
     pub fn label(&self) -> String {
-        if self.0.len() >= 3 {
-            self.to_string()
-        } else {
-            format!("{self}.x")
+        match self {
+            VersionReq::Pin(pin) if pin.len() >= 3 => self.to_string(),
+            VersionReq::Pin(_) => format!("{self}.x"),
+            VersionReq::Floor(min) => format!(">= {min}"),
         }
     }
 
     /// The tighter of two requirements when one refines the other (`1.1` and
-    /// `1.1.24` → `1.1.24`); `None` when no version satisfies both.
+    /// `1.1.24` → `1.1.24`, `>=20` and `>=22` → `>=22`, `>=20` and `24` → `24`);
+    /// `None` otherwise.
     pub fn narrow(&self, other: &VersionReq) -> Option<VersionReq> {
-        let (short, long) = if self.0.len() <= other.0.len() {
-            (self, other)
-        } else {
-            (other, self)
-        };
-        long.0.starts_with(&short.0).then(|| long.clone())
+        use VersionReq::{Floor, Pin};
+        match (self, other) {
+            (Floor(a), Floor(b)) => Some(Floor(a.max(b).clone())),
+            (Pin(pin), Floor(min)) | (Floor(min), Pin(pin)) => {
+                (Version(pin.clone()) >= *min).then(|| Pin(pin.clone()))
+            }
+            (Pin(a), Pin(b)) => {
+                let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+                long.starts_with(short).then(|| Pin(long.clone()))
+            }
+        }
     }
+}
+
+/// Compare `version` with `prefix`, over the components `prefix` has.
+fn cmp_prefix(version: &Version, prefix: &[u64]) -> Ordering {
+    prefix
+        .iter()
+        .enumerate()
+        .map(|(i, c)| version.component(i).cmp(c))
+        .find(|ord| ord.is_ne())
+        .unwrap_or(Ordering::Equal)
 }
 
 impl fmt::Display for VersionReq {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt_components(&self.0, f)
+        match self {
+            VersionReq::Pin(pin) => fmt_components(pin, f),
+            VersionReq::Floor(min) => write!(f, ">={min}"),
+        }
     }
 }
 
@@ -282,5 +315,73 @@ mod tests {
         assert_eq!(req("1.1").narrow(&req("1.1")), Some(req("1.1")));
         assert_eq!(req("1.1").narrow(&req("1.2")), None);
         assert_eq!(req("18").narrow(&req("20")), None);
+    }
+
+    #[test]
+    fn pins_of_different_length_are_different() {
+        assert_ne!(req("1.1"), req("1.1.0"));
+    }
+
+    #[test]
+    fn floor_matches_that_version_or_newer() {
+        assert!(req(">=20").matches(&v("20.0.0")));
+        assert!(req(">=20").matches(&v("24.22.1")));
+        assert!(!req(">=20").matches(&v("18.19.1")));
+        assert!(req(">= 1.37").matches(&v("1.37.0")));
+        assert!(req(">=1.37").matches(&v("2.0.0")));
+        assert!(!req(">=1.37").matches(&v("1.36.9")));
+    }
+
+    #[test]
+    fn other_operators_are_rejected() {
+        for text in [
+            ">20", "<20", "^20", "~20", "=20", "<=20", ">=", ">=latest", ">=>=20",
+        ] {
+            assert!(VersionReq::parse(text).is_none(), "{text}");
+        }
+    }
+
+    #[test]
+    fn no_version_is_past_a_floor() {
+        assert!(!req(">=20").is_below(&v("99.0")));
+        assert!(!req(">=20").is_below(&v("18.0")));
+    }
+
+    #[test]
+    fn floor_is_not_a_pin() {
+        assert_eq!(req(">=20").pin(), None);
+        assert_eq!(req("1.1.24").pin().as_deref(), Some("1.1.24"));
+    }
+
+    #[test]
+    fn floor_text_forms() {
+        assert_eq!(req(">= 20").to_string(), ">=20");
+        assert_eq!(req(">=20").label(), ">= 20");
+    }
+
+    #[test]
+    fn narrow_keeps_the_higher_floor() {
+        assert_eq!(req(">=20").narrow(&req(">=22")), Some(req(">=22")));
+        assert_eq!(req(">=22").narrow(&req(">=20")), Some(req(">=22")));
+        assert_eq!(req(">=0").narrow(&req(">=0")), Some(req(">=0")));
+    }
+
+    #[test]
+    fn narrow_drops_a_floor_the_pin_always_meets() {
+        assert_eq!(req("24").narrow(&req(">=20")), Some(req("24")));
+        assert_eq!(req(">=20").narrow(&req("20")), Some(req("20")));
+        assert_eq!(req(">=20.0").narrow(&req("20")), Some(req("20")));
+    }
+
+    #[test]
+    fn narrow_fails_when_the_pin_never_meets_the_floor() {
+        assert_eq!(req("18").narrow(&req(">=20")), None);
+        assert_eq!(req(">=1.2").narrow(&req("1.1.24")), None);
+    }
+
+    #[test]
+    fn narrow_fails_when_only_part_of_the_pin_meets_the_floor() {
+        assert_eq!(req("20").narrow(&req(">=20.8")), None);
+        assert_eq!(req(">=20.8").narrow(&req("20.9")), Some(req("20.9")));
     }
 }

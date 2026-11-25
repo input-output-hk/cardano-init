@@ -50,7 +50,7 @@ pub enum RegistryError {
 
     #[error(
         "tool '{file}' has an invalid version '{version}' for '{dep}' \
-         (expected dotted numbers, e.g. \"1.1.24\" or \"1.1\")"
+         (expected dotted numbers, e.g. \"1.1.24\" or \"1.1\", or a floor, e.g. \">=20\")"
     )]
     InvalidDepVersion {
         file: String,
@@ -121,8 +121,7 @@ struct CompatToml {
     self_contained_devnet: bool,
 }
 
-/// A `system_deps` entry: a bare dep id, or a single `{ dep = "version" }`
-/// pinning it.
+/// A `system_deps` entry: a bare dep id, or a single `{ dep = "version" }`.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum DepToml {
@@ -612,6 +611,12 @@ mod tests {
         assert!(tool.system_deps[0].version.is_none());
         assert_eq!(tool.system_deps[1].id, "ghc");
         assert_eq!(tool.system_deps[1].version, VersionReq::parse("9.8"));
+    }
+
+    #[test]
+    fn system_dep_accepts_a_floor() {
+        let tool = demo_tool(r#"system_deps = [{ node = ">=20" }]"#).unwrap();
+        assert_eq!(tool.system_deps[0].version, VersionReq::parse(">=20"));
     }
 
     #[test]

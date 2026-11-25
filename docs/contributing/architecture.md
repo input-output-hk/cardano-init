@@ -56,7 +56,7 @@ cardano-init/
 │   │   ├── loader.rs           # rust-embed → Registry (indexed by id and by role)
 │   │   ├── compat.rs           # off-chain ↔ provider (devnet+infra) seam compatibility
 │   │   ├── era.rs              # ledger era coherence across selected tools
-│   │   ├── version.rs          # dotted versions: tool pins (VersionReq) + parsing tool output
+│   │   ├── version.rs          # dotted versions: tool pins and floors (VersionReq) + parsing tool output
 │   │   └── view.rs             # read-only projections of the registry (for `list`)
 │   │
 │   ├── scaffold/               # Pure: project generation pipeline
@@ -224,7 +224,7 @@ description = "…newcomer-friendly explanation…"
 website = "https://aiken-lang.org"
 languages = ["aiken"]
 era = "conway"             # ledger era the template targets; mixing eras is gated (TECH_SPEC §3.2.3)
-system_deps = [{ aiken = "1.1.24" }]  # dep ids → registry/deps.toml (§8), bare or pinned (TECH_SPEC §9.7)
+system_deps = [{ aiken = "1.1.24" }]  # dep ids → registry/deps.toml (§8), bare or with a version (TECH_SPEC §9.7)
 nix_packages = ["aiken"]       # packages for the generated Nix dev shell
 
 [roles.on-chain]
@@ -314,14 +314,14 @@ To serve both humans and agents without scattering format branches:
 
 ## 8. Dependency doctor (`doctor/`)
 
-Scope (DX.02, implemented): the standalone **`cardano-init doctor`** command plus **check + advise** after generation. The doctor is a **dependency checker/advisor, not a project validator** — it reports presence and pinned versions and prints install plans; it never asserts a component actually builds (that's `just build`/`just test`, §7), and never offers alternative runtimes (templates fix their toolchain). Version checks are opt-in per dependency: a tool pins a `system_deps` entry (`{ aiken = "1.1.24" }`, prefix-exact) when its template is tied to that toolchain line, and only pinned deps are version-probed (TECH_SPEC §9.7). **Auto-install** (running the resolved plan with consent) is a later nice-to-have install command (DX.05); see ROADMAP and the scope note in TECH_SPEC §9. The dependency catalog is a small **graph**, split between code and data along the purity invariant:
+Scope (DX.02, implemented): the standalone **`cardano-init doctor`** command plus **check + advise** after generation. The doctor is a **dependency checker/advisor, not a project validator** — it reports presence and required versions and prints install plans; it never asserts a component actually builds (that's `just build`/`just test`, §7), and never offers alternative runtimes (templates fix their toolchain). Version checks are opt-in per dependency: a tool pins a `system_deps` entry (`{ aiken = "1.1.24" }`, prefix-exact) when its template is tied to that toolchain line, or sets a floor (`{ node = ">=20" }`) when it needs a minimum, and only those deps are version-probed (TECH_SPEC §9.7). **Auto-install** (running the resolved plan with consent) is a later nice-to-have install command (DX.05); see ROADMAP and the scope note in TECH_SPEC §9. The dependency catalog is a small **graph**, split between code and data along the purity invariant:
 
 ```
 doctor/
 ├── mod.rs         Pure: resolve(targets, catalog, env) -> Report   (recursive, cycle-safe)
 ├── installers.rs  Pure: the `Installer` id and its `InstallerDef` (detect binaries, `bootstrap` dep ids), loaded from registry/installers.toml
 ├── catalog.rs     Loads embedded registry/deps.toml + installers.toml -> DepCatalog (recipes + installers)
-└── probe.rs       Impure: detect OS + which installers are on PATH + pinned deps' versions -> Environment
+└── probe.rs       Impure: detect OS + which installers are on PATH + versions of deps with a requirement -> Environment
 ```
 
 - **Two-tier inputs.** The selection yields **required** deps = `{just}` (universal task runner) ∪ the `system_deps` of all selected tools (unioned, deduped); and **recommended** deps (soft notes, never blocking). The two-tier mechanism stands, but there is **currently no recommended dep**: the former `process-compose`/≥2-infra case existed only to smooth a multi-service top-level `just dev`, which no longer exists (the top level no longer aggregates `dev`; long-running services start per-component — TECH_SPEC §7.2/§9.1). `just` is a base/derived dep owned by no tool.
@@ -346,7 +346,7 @@ This split is the reversal of the earlier "in-code catalog": everything the doct
 [node]
 binaries = ["node"]
 docs     = "https://nodejs.org/en/download"
-install  = [ { brew = "brew install node" }, { apt = "sudo apt install -y nodejs" }, { nix = "nix profile install nixpkgs#nodejs" } ]
+install  = [ { brew = "brew install node" }, { nix = "nix profile install nixpkgs#nodejs" }, { apt = "sudo apt install -y nodejs" } ]
 upgrade  = [ { brew = "brew upgrade node" }, { nix = "nix profile upgrade nodejs" } ]
 
 [aikup]

@@ -202,20 +202,32 @@ pub fn print_incompatibility_warning(inc: &Incompatibility) {
     );
 }
 
-/// Warn that the selection mixes ledger eras. `allowed` when
-/// `--allow-mismatch-eras` already accepted it; otherwise a confirm or an error
-/// follows.
-pub fn print_era_mismatch_warning(mismatch: &crate::registry::era::EraMismatch, allowed: bool) {
-    let (title, detail) = if allowed {
-        (
-            "Mixed eras (allowed):",
-            "Scaffolding anyway (--allow-mismatch-eras); tools on different eras may not work together.",
-        )
-    } else {
-        (
+/// Why a mixed-era warning is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EraWarning {
+    NeedsConfirm,
+    Allowed,
+    AlreadyMixed,
+}
+
+/// Warn that the selection mixes ledger eras.
+pub fn print_era_mismatch_warning(
+    mismatch: &crate::registry::era::EraMismatch,
+    warning: EraWarning,
+) {
+    let (title, detail) = match warning {
+        EraWarning::NeedsConfirm => (
             "Mixed eras:",
             "Tools on different ledger eras may not work together across a hard fork.",
-        )
+        ),
+        EraWarning::Allowed => (
+            "Mixed eras (allowed):",
+            "Scaffolding anyway (--allow-mismatch-eras); tools on different eras may not work together.",
+        ),
+        EraWarning::AlreadyMixed => (
+            "Mixed eras:",
+            "This project already mixes eras; tools on different eras may not work together.",
+        ),
     };
     println!();
     println!(

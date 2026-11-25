@@ -77,6 +77,8 @@ Each tool's template targets one Cardano ledger era, such as Conway or Dijkstra.
 - Pass `--allow-mismatch-eras` to generate the project anyway. The error becomes a warning.
 - In interactive mode, you are asked to confirm. The default answer is **No**.
 
+`add` and `remove` run the same check, but only stop when the change brings in an era the project doesn't already have.
+
 `cardano-init list` shows the era of each tool.
 
 ## Networks

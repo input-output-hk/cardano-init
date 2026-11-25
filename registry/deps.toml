@@ -5,17 +5,20 @@
 #   docs      universal fallback when the resolver can't produce a plan
 #   install   ordered list of single-key { installer = "command" } methods
 #             (order = preference). The command is a MiniJinja template; `version`
-#             is the version a selected tool pins (tech-spec §9.7), or empty.
+#             is the version a selected tool pins (tech-spec §9.7), or empty (a
+#             floor such as `>=20` is empty too: the latest satisfies it).
 #             `{{ version | prefix('v') }}` renders `v1.1.24`, or nothing when
 #             unpinned.
 #   upgrade   optional { installer = "command" } overrides used when the
 #             installed version doesn't match the pin; an installer without one
-#             re-runs its install command.
-#   version   how to read the installed version, only when a tool pins this
-#             dep. Default: run the first present binary with `--version` and
-#             take the first dotted version it prints. Override with
-#             `{ args = [...] }`, or `{ npm = "<package>" }` to read the
-#             package.json behind the binary without running it.
+#             re-runs its install command, unless installers.toml marks it
+#             install_only.
+#   version   how to read the installed version, only when a tool needs a
+#             certain version of this dep. Default: run the first present
+#             binary with `--version` and take the first dotted version it
+#             prints. Override with `{ args = [...] }`, or
+#             `{ npm = "<package>" }` to read the package.json behind the binary
+#             without running it.
 #   after_upgrade  optional command chained onto every upgrade command, for
 #             deps that download their own components.
 #
@@ -29,16 +32,18 @@
 [just]
 binaries = ["just"]
 docs = "https://just.systems"
-install = [{ brew = "brew install just" }, { apt = "sudo apt install -y just" }, { cargo = "cargo install just" }, { nix = "nix profile install nixpkgs#just" }]
-upgrade = [{ brew = "brew upgrade just" }, { apt = "sudo apt install --only-upgrade -y just" }, { nix = "nix profile upgrade just" }]
+# apt last: Ubuntu 24.04 ships just 1.21, too old for the generated Justfiles.
+install = [{ brew = "brew install just" }, { cargo = "cargo install just" }, { nix = "nix profile install nixpkgs#just" }, { apt = "sudo apt install -y just" }]
+upgrade = [{ brew = "brew upgrade just" }, { nix = "nix profile upgrade just" }]
 
 # --- tool system_deps ---
 
 [node]
 binaries = ["node"]
 docs = "https://nodejs.org/en/download"
-install = [{ brew = "brew install node" }, { apt = "sudo apt install -y nodejs" }, { winget = "winget install OpenJS.NodeJS" }, { nix = "nix profile install nixpkgs#nodejs" }]
-upgrade = [{ brew = "brew upgrade node" }, { apt = "sudo apt install --only-upgrade -y nodejs" }, { winget = "winget upgrade OpenJS.NodeJS" }, { nix = "nix profile upgrade nodejs" }]
+# apt last: Ubuntu 24.04 ships Node 18, older than the templates need.
+install = [{ brew = "brew install node" }, { winget = "winget install OpenJS.NodeJS" }, { nix = "nix profile install nixpkgs#nodejs" }, { apt = "sudo apt install -y nodejs" }]
+upgrade = [{ brew = "brew upgrade node" }, { winget = "winget upgrade OpenJS.NodeJS" }, { nix = "nix profile upgrade nodejs" }]
 
 # uv also downloads the Python version a project needs. No apt: it isn't in the
 # stock Debian and Ubuntu repositories.
@@ -115,11 +120,11 @@ upgrade = [{ brew = "brew upgrade cabal-install" }, { apt = "sudo apt install --
 [ghc]
 binaries = ["ghc"]
 docs = "https://www.haskell.org/ghcup/"
-# Plinth targets GHC 9.6.x and Plutarch GHC 9.8.x; ghcup can install both side by side.
-# `ghc96` tracks the latest 9.6.x in nixpkgs; a patch attr like `ghc966` is removed
-# when nixpkgs moves to the next patch release.
-install = [{ brew = "brew install ghc" }, { apt = "sudo apt install -y ghc" }, { nix = "nix profile install nixpkgs#haskell.compiler.ghc96" }, { curl = "curl -sSfL https://get-ghcup.haskell.org | sh" }]
-upgrade = [{ brew = "brew upgrade ghc" }, { apt = "sudo apt install --only-upgrade -y ghc" }, { nix = "nix profile upgrade haskell.compiler.ghc96" }]
+# Only methods that can install a chosen line: brew and apt match neither Plinth's
+# 9.6 nor Plutarch's 9.8.
+install = [{ curl = "curl -sSfL https://get-ghcup.haskell.org | BOOTSTRAP_HASKELL_GHC_VERSION={{ version or 'recommended' }} sh" }, { nix = "nix profile install nixpkgs#haskell.compiler.ghc{{ version | replace('.', '') or '96' }}" }]
+# Nix won't install a GHC next to another one.
+upgrade = [{ nix = "nix profile remove ghc96 ghc98 && nix profile install nixpkgs#haskell.compiler.ghc{{ version | replace('.', '') or '96' }}" }]
 support = [
   { name = "Haskell Language Server", url = "https://haskell-language-server.readthedocs.io" },
   { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=haskell.haskell" },
@@ -152,7 +157,7 @@ binaries = ["cardano-up"]
 docs = "https://github.com/blinklabs-io/cardano-up"
 install = [{ go = "go install github.com/blinklabs-io/cardano-up/cmd/cardano-up@{{ version | prefix('v') or 'latest' }}" }]
 # No `--version` flag. A `go install` build reports `devel`, so its version is
-# unknown and the floor is not enforced (never blocks on a version it can't read).
+# unknown and the pin is not enforced (never blocks on a version it can't read).
 version = { args = ["version"] }
 
 # tx3up: the tx3 toolchain manager (provides the `tx3up` installer used by [tx3]).

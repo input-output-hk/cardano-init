@@ -77,8 +77,8 @@ pub struct InstallMethod {
 }
 
 impl InstallMethod {
-    /// The command for this method, with `version` filled in (empty when
-    /// unpinned).
+    /// The command for this method, with the pinned `version` filled in (empty
+    /// when unpinned or only floored).
     pub fn render(&self, version: Option<&VersionReq>) -> String {
         render(&self.template, version).expect("templates are validated at load")
     }
@@ -106,7 +106,7 @@ fn build_template_env() -> minijinja::Environment<'static> {
 }
 
 fn render(template: &str, version: Option<&VersionReq>) -> Result<String, minijinja::Error> {
-    let version = version.map(ToString::to_string).unwrap_or_default();
+    let version = version.and_then(VersionReq::pin).unwrap_or_default();
     let out = template_env().render_str(template, minijinja::context! { version })?;
     Ok(out.trim().to_string())
 }
@@ -119,7 +119,7 @@ fn embedded(file: &'static str) -> Result<String, CatalogError> {
 pub use crate::registry::types::Link as SupportLink;
 
 /// How to read an installed dep's version (tech-spec §9.7). Only run for deps
-/// a selected tool pins.
+/// a selected tool needs a certain version of.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VersionProbe {
@@ -334,6 +334,21 @@ impl DepCatalog {
         self.installers
             .get(installer)
             .map_or(&[][..], |def| &def.bootstrap)
+    }
+
+    /// `recipe`'s upgrade commands, for the installers that can upgrade.
+    pub fn upgrade_methods<'a>(&self, recipe: &'a DepRecipe) -> Vec<&'a InstallMethod> {
+        recipe
+            .install
+            .iter()
+            .filter(|m| {
+                !self
+                    .installers
+                    .get(&m.installer)
+                    .is_some_and(|def| def.install_only)
+            })
+            .map(|m| recipe.upgrade_method(m))
+            .collect()
     }
 
     /// Look up a recipe by dep id.

@@ -7,6 +7,9 @@
 #   bootstrap  dep ids (in registry/deps.toml) that provide the installer when
 #              it's missing, tried in order. Omitted ⇒ detect only, never
 #              installed by the doctor.
+#   install_only
+#              true when it can't move an installed dep to a newer version, so
+#              it's only suggested for a missing one. Default false.
 #
 # Checked at load: every installer a recipe uses is declared here, every one
 # declared here is used by a recipe, and every bootstrap id has a recipe.
@@ -14,8 +17,10 @@
 [brew]
 detect = ["brew"]
 
+# A distro release ships one version, so if it's too old, upgrading can't help.
 [apt]
 detect = ["apt"]
+install_only = true
 
 [winget]
 detect = ["winget"]

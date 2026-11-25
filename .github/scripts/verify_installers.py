@@ -4,8 +4,9 @@
 Given ONE installer key (e.g. "apt"), this reads `registry/deps.toml`, finds
 every dependency whose recipe offers a method for that installer, runs the
 rendered install command, and asserts the dep's declared `binaries` land on
-PATH afterwards. Exits non-zero if any recipe fails to install or leaves its
-binary unreachable.
+PATH afterwards, at the pinned version when the command installs one. Exits
+non-zero if any recipe fails to install, leaves its binary unreachable or
+installs another version.
 
 This is the real-world half of the two-tier installer gate: the PR gate
 (`cargo test`, via `src/doctor/catalog.rs`) proves every recipe parses, names
@@ -50,6 +51,7 @@ _EXPR = re.compile(
     \{\{\s*
     version
     (?:\s*\|\s*prefix\((?P<q1>['"])(?P<prefix>[^'"]*)(?P=q1)\))?
+    (?:\s*\|\s*replace\(['"](?P<old>[^'"]+)['"],\s*['"](?P<new>[^'"]*)['"]\))?
     (?:\s+or\s+(?P<q2>['"])(?P<fallback>[^'"]*)(?P=q2))?
     \s*\}\}
     """,
@@ -59,7 +61,7 @@ _EXPR = re.compile(
 _TARGET = {
     "brew": re.compile(r"^brew install (\S+)$"),
     "winget": re.compile(r"^winget install (\S+)$"),
-    "curl": re.compile(r"^curl -sSfL (\S+) \| sh$"),
+    "curl": re.compile(r"^curl -sSfL (\S+) \| (?:\w+=\S+ )*sh$"),
 }
 
 UBUNTU_HOST = {"runs-on": "ubuntu-latest", "platform": "Ubuntu (GitHub-hosted runner)"}
@@ -82,6 +84,13 @@ TESTED: dict[str, dict[str, str]] = {
 
 EXCLUDED: dict[str, str] = {}
 EXCLUDED_RECIPES: dict[tuple[str, str], str] = {}
+
+# Recipes whose binary can't report its version, so a pin can't be checked.
+UNREADABLE_VERSIONS: dict[tuple[str, str], str] = {
+    ("cardano-up", "go"): "a `go install` build reports `devel`",
+}
+
+VERSION_TIMEOUT = 30
 
 
 @dataclass(frozen=True)
@@ -126,6 +135,9 @@ class Method:
     installer: str
     command: str
     binaries: tuple[str, ...]
+    # The pin the command installs; empty when it installs no particular version.
+    pin: str = ""
+    probe: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -161,7 +173,10 @@ def render(template: str, version: str) -> str:
     def expr(m: re.Match) -> str:
         prefix = m.group("prefix") or ""
         fallback = m.group("fallback") or ""
-        return f"{prefix}{version}" if version else fallback
+        value = f"{prefix}{version}" if version else ""
+        if m.group("old"):
+            value = value.replace(m.group("old"), m.group("new"))
+        return value or fallback
 
     out = _EXPR.sub(expr, template)
     if "{{" in out or "{%" in out:
@@ -222,8 +237,18 @@ def all_methods(recipes: dict, pins: dict[str, list[str]] | None = None) -> list
         binaries = tuple(recipe.get("binaries", []))
         for entry in recipe.get("install", []):
             for installer, template in entry.items():
-                commands = dict.fromkeys(render(template, v) for v in pins.get(dep_id) or [""])
-                out.extend(Method(dep_id, installer, cmd, binaries) for cmd in commands)
+                commands = {render(template, v): v for v in pins.get(dep_id) or [""]}
+                out.extend(
+                    Method(
+                        dep_id,
+                        installer,
+                        cmd,
+                        binaries,
+                        pin=version if _EXPR.search(template) else "",
+                        probe=recipe.get("version", {}),
+                    )
+                    for cmd, version in commands.items()
+                )
     return out
 
 
@@ -261,6 +286,9 @@ def coverage_errors(
     for dep, key in EXCLUDED_RECIPES:
         if (dep, key) not in method_keys:
             errors.append(f"EXCLUDED_RECIPES names {dep} via {key}, which deps.toml doesn't offer")
+    pinned_keys = {(m.dep_id, m.installer) for m in methods_list if m.pin}
+    for dep, key in UNREADABLE_VERSIONS.keys() - pinned_keys:
+        errors.append(f"UNREADABLE_VERSIONS names {dep} via {key}, which installs no pinned version")
     for m in methods_list:
         try:
             target(m.installer, m.command)
@@ -313,11 +341,12 @@ def render_docs(recipes: dict, methods: list[Method] | None = None) -> str:
             reason = EXCLUDED_RECIPES.get((dep, installer))
             cells.append(f"{dep} (not tested: {reason})" if reason else dep)
         lines.append(f"| `{installer}` | {where} | {', '.join(cells)} |")
-    curl_commands = {target("curl", m.command): m.command for m in methods if m.installer == "curl"}
+    curl_commands = dict.fromkeys(m.command for m in methods if m.installer == "curl")
     notes = [
-        f"- `{curl_commands[url]}` is {u.note}."
+        f"- `{command}` is {u.note}."
         for url, u in UNATTENDED.items()
-        if url in curl_commands
+        for command in curl_commands
+        if target("curl", command) == url
     ]
     if notes:
         lines += [
@@ -515,14 +544,70 @@ def brew_bin_dir(formula: str) -> Path | None:
     return Path(out.stdout.strip()) / "bin" if out.returncode == 0 and out.stdout.strip() else None
 
 
+def _npm_version(binary: Path, package: str) -> str:
+    """Read `package`'s version from the `package.json` behind `binary`."""
+    modules = [binary.parent / "node_modules", binary.parent.parent / "lib" / "node_modules"]
+    manifests = [d / "package.json" for d in binary.resolve().parents]
+    manifests += [d / package / "package.json" for d in modules]
+    for manifest in manifests:
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("name") == package:
+            return str(data.get("version", ""))
+    return ""
+
+
+def installed_version(binary: Path, probe: dict) -> str:
+    """Read the version of `binary` as the doctor does; empty when unreadable."""
+    if "npm" in probe:
+        text = _npm_version(binary, probe["npm"])
+    else:
+        try:
+            out = subprocess.run(
+                [str(binary), *probe.get("args", ["--version"])],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=VERSION_TIMEOUT,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        text = f"{out.stdout}\n{out.stderr}"
+    m = re.search(r"\d+(?:\.\d+)+", text)
+    return m.group() if m else ""
+
+
+def check_version(method: Method, path: str, result: Result) -> None:
+    """Fail `result` unless the installed version proves `method.pin`."""
+    if not method.pin:
+        return
+    found = next(filter(None, (shutil.which(b, path=path) for b in method.binaries)), None)
+    version = installed_version(Path(found), method.probe) if found else ""
+    unreadable = UNREADABLE_VERSIONS.get((method.dep_id, method.installer))
+    if not version and unreadable:
+        result.detail = result.detail or f"version not checked: {unreadable}"
+        return
+    pin = method.pin.split(".")
+    if version.split(".")[: len(pin)] == pin:
+        print(f"  ✓ version {version} matches {method.pin}", flush=True)
+        return
+    result.status = "failed"
+    result.detail = f"installed version is {version or 'unreadable'}, expected {method.pin}"
+    print(f"  ✗ {result.detail}", flush=True)
+
+
 def verify_one(
     method: Method, p: Plan, cache: dict[str, int], preexisting: set[str]
 ) -> Result:
     """Run one install command and report whether its binaries are reachable.
 
     Success requires every declared binary to land on PATH (and in the recipe's
-    own install location for `nix`, `brew`, and `winget`). A non-zero install
-    exit code warns when all binaries are present, and fails when any is missing.
+    own install location for `nix`, `brew`, and `winget`), at the pinned version
+    when the command installs one. A non-zero install exit code warns when all
+    binaries are present, and fails when any is missing.
     """
     print(f"::group::{method.dep_id} via {p.command}", flush=True)
     before = preexisting & set(method.binaries)
@@ -577,6 +662,8 @@ def verify_one(
             "the recipe isn't proven",
             flush=True,
         )
+    if result.status != "failed":
+        check_version(method, str(own_dir) if own_dir else path, result)
     print("::endgroup::", flush=True)
     return result
 

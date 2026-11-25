@@ -9,6 +9,7 @@ use dialoguer::theme::{ColorfulTheme, Theme};
 use dialoguer::{Confirm, Input, MultiSelect, Select};
 
 use super::oneshot::validate_project_name;
+use super::output::EraWarning;
 use super::{CliError, output, theme};
 use crate::registry::loader::Registry;
 use crate::registry::types::{Network, Role, RoleAssignment, Selection, ToolDef};
@@ -520,10 +521,11 @@ fn confirm_era_mismatch(
     let Some(mismatch) = crate::registry::era::check(assignments, registry) else {
         return Ok(());
     };
-    output::print_era_mismatch_warning(&mismatch, allowed);
     if allowed {
+        output::print_era_mismatch_warning(&mismatch, EraWarning::Allowed);
         return Ok(());
     }
+    output::print_era_mismatch_warning(&mismatch, EraWarning::NeedsConfirm);
 
     let combine = Confirm::with_theme(theme)
         .with_prompt("Combine tools from different eras anyway?")

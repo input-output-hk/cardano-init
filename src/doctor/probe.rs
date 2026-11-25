@@ -49,13 +49,13 @@ pub struct Environment {
     pub installers: HashSet<Installer>,
     /// Dependency and installer binaries found on `PATH`.
     pub present_binaries: HashSet<String>,
-    /// Installed versions of the present pinned deps, keyed by dep id. A dep
-    /// whose version can't be read is absent.
+    /// Installed versions of the present deps with a version requirement, keyed
+    /// by dep id. A dep whose version can't be read is absent.
     pub versions: HashMap<String, Version>,
 }
 
 /// Detect the OS, available installers, which catalog/installer binaries are
-/// on `PATH`, and the installed version of each pinned `required` dep.
+/// on `PATH`, and the installed version of each `required` dep that needs one.
 pub fn detect_environment(catalog: &DepCatalog, required: &[Requirement]) -> Environment {
     let dep_binaries = catalog
         .dep_ids()
@@ -116,8 +116,8 @@ fn find_on_path(bin: &str) -> Option<PathBuf> {
 /// How long a dep's version command may run before it is given up on.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Read the installed version of every `required` dep that is pinned and on
-/// `PATH`, in parallel. Deps whose version can't be read are left out.
+/// Read the installed version of every `required` dep with a version requirement
+/// that is on `PATH`, in parallel. Deps whose version can't be read are left out.
 fn detect_versions(catalog: &DepCatalog, required: &[Requirement]) -> HashMap<String, Version> {
     let targets: Vec<(&str, PathBuf, &VersionProbe)> = required
         .iter()

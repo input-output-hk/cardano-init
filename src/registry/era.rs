@@ -30,6 +30,32 @@ pub fn check(assignments: &[RoleAssignment], registry: &Registry) -> Option<EraM
     (groups.len() > 1).then_some(EraMismatch { groups })
 }
 
+/// A change whose result mixes eras.
+#[derive(Debug)]
+pub enum EraChange {
+    NewEra(EraMismatch),
+    AlreadyMixed(EraMismatch),
+}
+
+/// Check changing `old` into `new`; `None` when `new` has a single era.
+pub fn check_change(
+    old: &[RoleAssignment],
+    new: &[RoleAssignment],
+    registry: &Registry,
+) -> Option<EraChange> {
+    let mismatch = check(new, registry)?;
+    let known = |era: &Era| {
+        old.iter()
+            .filter_map(|a| registry.get(&a.tool_id))
+            .any(|tool| tool.era == *era)
+    };
+    Some(if mismatch.groups.keys().all(known) {
+        EraChange::AlreadyMixed(mismatch)
+    } else {
+        EraChange::NewEra(mismatch)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +116,32 @@ mod tests {
         ];
         let mismatch = check(&sel, &reg).unwrap();
         assert_eq!(mismatch.groups[&Era::Dijkstra].len(), 1);
+    }
+
+    #[test]
+    fn change_tells_a_new_era_from_an_existing_mix() {
+        let reg = registry_with(&["aiken"]);
+        let aiken = a(Role::OnChain, "aiken");
+        let mesh = a(Role::OffChain, "meshjs");
+        let yaci = a(Role::Devnet, "yaci");
+        let conway = [mesh.clone()];
+        let mixed = [aiken.clone(), mesh.clone()];
+        let mixed_more = [aiken.clone(), mesh, yaci];
+
+        let change = |old: &[_], new: &[_]| check_change(old, new, &reg);
+        assert!(matches!(
+            change(&conway, &mixed),
+            Some(EraChange::NewEra(_))
+        ));
+        assert!(matches!(
+            change(&mixed, &mixed_more),
+            Some(EraChange::AlreadyMixed(_))
+        ));
+        assert!(matches!(
+            change(&mixed_more, &mixed),
+            Some(EraChange::AlreadyMixed(_))
+        ));
+        assert!(change(&mixed, &[aiken]).is_none());
     }
 
     #[test]

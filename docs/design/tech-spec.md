@@ -68,7 +68,7 @@ pair is what triggers the collapse into a single `protocol/` component (§3.2, �
 |------|---------|----------|
 | `0` | Success (incl. `--dry-run`, and interactive abort-by-choice) | generated |
 | `2` | **Usage / validation** error | bad flag, `unknown_tool`, `tool_role_mismatch`, `no_roles_selected`, `invalid_project_name`, `name_required` |
-| `1` | **Runtime** error | `dir_exists` (non-empty), registry load failure, render/IO error; `doctor` when a required dep is missing or doesn't match its pin (the full report is still printed, `ok: true` in JSON) |
+| `1` | **Runtime** error | `dir_exists` (non-empty), registry load failure, render/IO error; `doctor` when a required dep is missing or isn't at a required version (the full report is still printed, `ok: true` in JSON) |
 
 
 The fine-grained "what" is the JSON `error.code` (§2.5); exit code is only the category. Interactive **abort** (user declines the confirmation prompt) exits `0` with no error, and never occurs in `json`/non-interactive mode.
@@ -148,7 +148,7 @@ description = "…"              # required, newcomer-facing
 website      = "https://…"     # required
 languages    = ["aiken"]       # required, ≥1 — except infra tools, which may use [] (no user-facing language)
 era          = "conway"        # required; ledger era the template targets: conway | dijkstra (§3.2.3)
-system_deps  = [{ aiken = "1.1.24" }]  # required (may be []); dep ids → registry/deps.toml (§9), bare or pinned (§9.7)
+system_deps  = [{ aiken = "1.1.24" }]  # required (may be []); dep ids → registry/deps.toml (§9), bare or with a version (§9.7)
 nix_packages = ["aiken"]       # optional (default []); nixpkgs attrs for the dev shell
 nix_self_contained = false     # optional (default false); tool ships its own component flake (§4.1)
 experimental = false           # optional (default false); true = unstable and/or not build-green, gated (§3.2.1)
@@ -210,8 +210,8 @@ Seam vocabulary (`Seam` enum, closed like `Role`; unknown value → `RegistryErr
 load): `blockfrost`, `u5c`, `trp`, `ogmios`, `kupo`.
 
 `system_deps` is **per-tool, flat** (§9.1): it applies whenever the tool is selected for any role.
-Each entry is a bare dep id (`"node"`) or a single-key table pinning it (`{ aiken = "1.1.24" }`,
-§9.7). The `[tool]` table rejects unknown keys, so the removed `min_versions` is a load error.
+Each entry is a bare dep id (`"node"`) or a single-key table with a pin or a floor
+(`{ aiken = "1.1.24" }`, `{ node = ">=20" }`, §9.7). The `[tool]` table rejects unknown keys, so the removed `min_versions` is a load error.
 
 ```rust
 RoleConfig { template }
@@ -301,8 +301,10 @@ load): `conway`, `dijkstra`. Every shipped tool is currently `conway`.
 The gate (`registry::era::check`, pure) groups the selected tools by era; one era (or none) passes
 silently. More than one is gated like experimental tools (§3.2.1):
 
-- **One-shot / JSON**, and `add`/`remove` (§15.4): the usage error `era_mismatch` (§2.5), exit 2,
-  unless `--allow-mismatch-eras`, which downgrades it to a printed warning (human output only).
+- **One-shot / JSON**: the usage error `era_mismatch` (§2.5), exit 2, unless `--allow-mismatch-eras`,
+  which downgrades it to a printed warning (human output only).
+- **`add`/`remove`**: the same error, but only when the change brings in an era the project doesn't
+  already have (§15.4).
 - **Interactive**: an explicit confirm, default **No** ("Combine tools from different eras
   anyway?"). Declining stops with `era_mismatch`; `--allow-mismatch-eras` skips the confirm.
 
@@ -542,12 +544,11 @@ A component whose `dev` provisions a local endpoint (e.g. Yaci DevKit's devnet) 
 
 Implemented for DX.02: the standalone `cardano-init doctor` command plus check-and-advise after generation. Both run the same pure resolver (§9.4) over the same catalog (§9.2).
 
-**Scope — what the doctor *is*.** A **dependency checker and advisor**: it determines which required dependencies are present at the pinned version and, for missing ones, prints an OS-aware, ordered install plan (never just "go install it"); for mismatched ones, the commands that install the pinned version (§9.7). v1 prints the plan; v2 (DX.05) executes it with consent (same data, same resolver).
+**Scope — what the doctor *is*.** A **dependency checker and advisor**: it determines which required dependencies are present at the required version and, for missing ones, prints an OS-aware, ordered install plan (never just "go install it"); for mismatched ones, the commands that install a matching version (§9.7). v1 prints the plan; v2 (DX.05) executes it with consent (same data, same resolver).
 
 **Out of scope — what the doctor is *not*.**
 - **A project validator.** The doctor does not verify that a component actually builds, type-checks, or is otherwise viable — that is the job of each component's `just build` / `just test` (the interface contract requires those to work standalone, §7). A directory that *looks* like a tool (matching signatures, §9.6) but isn't wired up correctly will still pass the doctor; it will fail `just test`. Keeping these separate avoids duplicating the build system's job in a fragile heuristic.
 - **Alternative runtimes / package managers.** Each template fixes its toolchain (e.g. the MeshJS/Yaci components invoke `npm`/`node`/`npx` directly in their Justfiles), so `node` is the honest required dep. The doctor reflects what the template needs; it does not offer to satisfy that with `bun`/`deno`/etc. Making a component runtime-agnostic is a template decision, not a doctor feature (and cuts against the fixed-convention philosophy, ARCHITECTURE §3.1).
-- **Minimum versions (`>=`).** Pins are prefix-exact (§9.7): a floor would accept a newer release that may target another ledger era. A template that needs a floor on a general runtime (e.g. Plutarch's GHC 9.8) enforces it in its own `build`.
 
 ### 9.1 Dependency sets (required vs recommended)
 
@@ -556,7 +557,7 @@ Pure functions of the selection. Two tiers:
 ```
 required_deps    = {"just"}                                  // universal task runner
                  ∪ (tool.system_deps for each selected tool) // unioned, deduped
-                   each with its merged version pin          // §9.7
+                   each with its merged version requirement  // §9.7
 recommended_deps = {}                                        // see note
 ```
 
@@ -569,7 +570,7 @@ recommended_deps = {}                                        // see note
 
 The catalog is a small **graph**. An *installer* is itself a kind of dependency, so the two node types are installers and dep recipes, both data.
 
-**Installers (data, `registry/installers.toml`)**: keyed by installer id (the key a recipe method uses and the JSON `installer` value). Per installer: the `detect` binaries that mean "available" (at least one), and a `bootstrap` list of dep ids (**omitted/empty ⇒ terminal**, i.e. detect-only/never auto-installed; **non-empty ⇒ bootstrappable** by installing any one of those deps, tried in order). Unknown keys are a load error.
+**Installers (data, `registry/installers.toml`)**: keyed by installer id (the key a recipe method uses and the JSON `installer` value). Per installer: the `detect` binaries that mean "available" (at least one), and a `bootstrap` list of dep ids (**omitted/empty ⇒ terminal**, i.e. detect-only/never auto-installed; **non-empty ⇒ bootstrappable** by installing any one of those deps, tried in order). `install_only` (default false) is true for an installer that can't move an installed dep to a newer version: `apt`, because a distro release ships one version, so if it's too old, upgrading can't help. Unknown keys are a load error.
 
 ```toml
 [npm]
@@ -591,14 +592,14 @@ detect = ["powershell", "pwsh"]   # terminal: no bootstrap
 
 In code, `Installer` is the id (a string newtype) and `InstallerDef { detect, bootstrap }` its definition (`installers.rs`). Adding an installer is a data change: declare it here, then use it in a recipe. The commands it runs live in the recipes.
 
-**Recipes (data, `registry/deps.toml`)**: keyed by dep id; `install` is an ordered list of single-key `{ installer = "command" }` methods (order = preference). The command is a **MiniJinja template** rendered with one variable, `version`: the dep's merged pin (§9.7), or empty when unpinned. A `prefix(p)` filter prepends `p` only to a non-empty value, so `pkg{{ version | prefix('@') }}` never renders a dangling `@`. The optional `upgrade` list holds per-installer overrides used for a version mismatch; an installer without one re-runs its install command. Installer keys must be declared in `registry/installers.toml` (undeclared → load error), and every template is test-rendered at load (syntax error or unknown variable → load error):
+**Recipes (data, `registry/deps.toml`)**: keyed by dep id; `install` is an ordered list of single-key `{ installer = "command" }` methods (order = preference). The command is a **MiniJinja template** rendered with one variable, `version`: the dep's merged pin (§9.7), or empty when unpinned or only floored. A `prefix(p)` filter prepends `p` only to a non-empty value, so `pkg{{ version | prefix('@') }}` never renders a dangling `@`. The optional `upgrade` list holds per-installer overrides used for a version mismatch; an installer without one re-runs its install command. An `install_only` installer is only offered for a missing dep; an override for it is ignored. Installer keys must be declared in `registry/installers.toml` (undeclared → load error), and every template is test-rendered at load (syntax error or unknown variable → load error):
 
 ```toml
 [node]  
 binaries=["node"]
 docs="https://nodejs.org/en/download"
-install=[ {brew="brew install node"}, {apt="sudo apt install -y nodejs"}, {winget="winget install OpenJS.NodeJS"}, {nix="nix profile install nixpkgs#nodejs"} ]
-upgrade=[ {brew="brew upgrade node"}, {apt="sudo apt install --only-upgrade -y nodejs"}, {winget="winget upgrade OpenJS.NodeJS"}, {nix="nix profile upgrade nodejs"} ]
+install=[ {brew="brew install node"}, {winget="winget install OpenJS.NodeJS"}, {nix="nix profile install nixpkgs#nodejs"}, {apt="sudo apt install -y nodejs"} ]
+upgrade=[ {brew="brew upgrade node"}, {winget="winget upgrade OpenJS.NodeJS"}, {nix="nix profile upgrade nodejs"} ]
 
 [aikup] 
 binaries=["aikup"]
@@ -615,7 +616,7 @@ support=[ {name="VS Code extension", url="https://marketplace.visualstudio.com/i
 [just]
 binaries=["just"] 
 docs="https://just.systems"
-install=[ {brew="brew install just"}, {apt="sudo apt install -y just"}, {cargo="cargo install just"}, {nix="nix profile install nixpkgs#just"} ]
+install=[ {brew="brew install just"}, {cargo="cargo install just"}, {nix="nix profile install nixpkgs#just"}, {apt="sudo apt install -y just"} ]
 
 [process-compose]
 binaries=["process-compose"]
@@ -625,7 +626,7 @@ install=[ {brew="brew install f1bonacc1/tap/process-compose"}, {go="go install g
 
 ```rust
 struct Installer(String);                                         // id declared in registry/installers.toml
-struct InstallerDef { detect: Vec<String>, bootstrap: Vec<String> } // bootstrap [] ⇒ terminal
+struct InstallerDef { detect: Vec<String>, bootstrap: Vec<String>, install_only: bool } // bootstrap [] ⇒ terminal
 struct InstallMethod { installer: Installer, template: String, uses_version: bool }   // render(version) -> command
 struct DepRecipe { binaries: Vec<String>, docs: String, install: Vec<InstallMethod>, upgrade: Vec<InstallMethod>, support: Vec<SupportLink>, version: VersionProbe, after_upgrade: Option<String> } // ordered
 enum VersionProbe { Args(Vec<String>) /* default ["--version"] */, Npm(String) }   // §9.7
@@ -642,7 +643,7 @@ struct Environment { os: Os, installers: HashSet<Installer> /* detected present 
 enum Os { Linux, MacOs, Windows, Other }
 ```
 
-`probe.rs` detects the OS and which installers are present (installer available if one of its `detect` binaries is on `PATH`). A **dep** is present if one of its `binaries` is on `PATH`. The only process the probe runs is a dep's version probe, and only for required deps that are pinned (§9.7).
+`probe.rs` detects the OS and which installers are present (installer available if one of its `detect` binaries is on `PATH`). A **dep** is present if one of its `binaries` is on `PATH`. The only process the probe runs is a dep's version probe, and only for required deps with a version requirement (§9.7).
 
 ### 9.4 Resolver (pure, recursive) & Report
 
@@ -694,7 +695,7 @@ The two passes are what make a directly-usable installer win over bootstrapping 
 
 - `plan` = the ordered, possibly multi-step install sequence the resolver produced **for this host** (empty when present; omitted/empty with only `docs` when unresolved).
 - `alternatives` (additive) = the recipe's *other* install methods, so the user can pick a different installer. Each is `{ installer, command, available }` where `available` = that installer is present on this host now. Ordered available-first, then those needing their installer installed; the method already used by `plan` is excluded. Omitted when the dep is present or the recipe offers no other method. The presenter lists available ones as plain commands and tags the rest `requires <installer>`.
-- `version` / `required_version` / `version_mismatch` / `version_conflict` (§9.7): `required_version` is the merged pin when any selected tool sets one; `version` is the installed version when it was read; `version_mismatch` (omitted when false) means present but not matching the pin (older *or* newer). A mismatched dep is resolved like a missing one (same passes, same bootstrap chains) but over each method's **upgrade** command rendered with the pin (which installer put it there is unknown): the result is its `plan`, the remaining upgrade commands its `alternatives`, plus `docs`. When the installed version is **past** the pin, commands that install latest can't reach it, so they are dropped from both; if none remain, only `docs` is left. `unpinned` (on a `plan` step or an alternative; omitted when false) marks a command that ignores a pinned dep's version and installs the installer's latest. `version_conflict` (omitted when empty) lists every `{ tool, version }` pin when the selected tools' pins can't be merged; `required_version` is then absent and the conflict is reported as a warning, not a failure. **Breaking:** these replace the earlier `min_version` / `outdated` fields.
+- `version` / `required_version` / `version_mismatch` / `version_conflict` (§9.7): `required_version` is the merged requirement when any selected tool sets one (`"1.1.24"` or `">=20"`); `version` is the installed version when it was read; `version_mismatch` (omitted when false) means present but not matching it (for a pin, older *or* newer; for a floor, older). A mismatched dep is resolved like a missing one (same passes, same bootstrap chains) but over each method's **upgrade** command rendered with the pin (which installer put it there is unknown): the result is its `plan`, the remaining upgrade commands its `alternatives`, plus `docs`. When the installed version is **past** the pin, commands that install latest can't reach it, so they are dropped from both; if none remain, only `docs` is left. `unpinned` (on a `plan` step or an alternative; omitted when false) marks a command that ignores a pinned dep's version and installs the installer's latest. `version_conflict` (omitted when empty) lists every `{ tool, version }` pin when the selected tools' pins can't be merged; `required_version` is then absent and the conflict is reported as a warning, not a failure. **Breaking:** these replace the earlier `min_version` / `outdated` fields.
 - `required` distinguishes tiers; `all_required_present` (on `PATH`, any version) and `all_required_satisfied` (present and not mismatched) ignore recommended deps. The `DEPS OK` badge follows `all_required_satisfied`. The presenter shows missing required deps prominently and recommended ones as a soft note with `reason`. `docs` is always available so advice is never empty (FR-20).
 - `support` (additive) = the recipe's supporting tools (editor extensions, language servers, inspectors) as `{ name, url }`. Unlike `docs`, it is reported **whether or not** the dep is present (editor tooling matters after install too); omitted when the recipe declares none. It's advice only: never installed or probed. The human `doctor` keeps to dependency status: only with `--links` (a human-output flag; `--json` is unaffected) does it print the project's supporting tools under a "Supporting tools" heading and its components' help channels under "Get help". Without it, when there are any, it ends with one line offering `cardano-init doctor --links`. `list` shows them per tool (§8); generation-time advice does not.
 - Doctor output is **host-dependent by design** (it reflects detected installers) and is **not** part of the byte-identical generation contract (§11). v1 prints the plan; v2 executes it (same data, same resolver).
@@ -704,7 +705,7 @@ The two passes are what make a directly-usable installer win over bootstrapping 
 - Every `system_deps` id (plus the base dep `just`) has a `registry/deps.toml` entry.
 - Every installer named in any recipe is declared in `registry/installers.toml`, every declared installer is used by an `install` method, every `upgrade` installer also appears in the recipe's `install` list, every `bootstrap` id has a recipe, and every installer has a `detect` binary (all enforced at load).
 - The dep graph resolves without infinite recursion (the resolver's cycle guard is exercised by a test).
-- Every pinned `system_deps` entry is a single-key table whose value parses as a version (enforced at load).
+- Every versioned `system_deps` entry is a single-key table whose value parses as a version (enforced at load).
 - Every recipe command template renders, both pinned and unpinned (enforced at load).
 - The Aiken pin equals the compiler pinned in the template's `aiken.toml`.
 
@@ -736,13 +737,13 @@ detect = [{ file = "package.json", contains = "@meshsdk" }]
 
 The `contains` form is what keeps detection **honest without overreaching** (per the scope note above): a from-scratch JS project (e.g. Next.js) has a `package.json`, but without `@meshsdk` it is *not* identified as MeshJS — it falls into the "unrecognized" bucket. This sharpens the label and the structure check; it does **not** attempt to prove the component is viable (still `just test`'s job). Signatures are tool-author data (no Rust), consistent with the registry's extensibility promise.
 
-### 9.7 Version pins
+### 9.7 Version requirements
 
-A tool may pin a `system_deps` entry to the version line its template works with; the doctor reads the installed version and flags anything that doesn't match, and its install advice installs the pinned version. Pins are **per tool** because they are template facts, and they are how era-tied toolchains (§3.2.3) stay in step with the era a tool is parked on. Only era-tied toolchains are pinned (`aiken`, `yaci-devkit`, `cardano-up`); general runtimes (`node`, `ghc`, `jvm`, …) are bare entries with no version check. How to *read* a version is a property of the dep, so it lives in its recipe.
+A tool may give a `system_deps` entry the version its template works with, either a **pin** (`"1.1"`) or a **floor** (`">=20"`); the doctor reads the installed version and flags anything that doesn't match, and its install advice installs a matching version. Requirements are **per tool** because they are template facts, and pins are how era-tied toolchains (§3.2.3) stay in step with the era a tool is parked on. Era-tied toolchains (`aiken`, `yaci-devkit`, `cardano-up`) and compilers a template is tied to (`ghc`: Plinth 9.6, Plutarch 9.8) are pinned. General runtimes a template needs a minimum of have a floor (`node`; `just`). Others (`jvm`, `go`, …) are bare entries with no version check. How to *read* a version is a property of the dep, so it lives in its recipe.
 
 ```toml
 # registry/tools/yaci.toml
-system_deps = ["node", { yaci-devkit = "0.12" }]
+system_deps = [{ node = ">=20" }, { yaci-devkit = "0.12" }]
 
 # registry/deps.toml
 [yaci-devkit]
@@ -750,10 +751,11 @@ install = [{ npm = "npm install -g @bloxbean/yaci-devkit{{ version | prefix('@')
 version = { npm = "@bloxbean/yaci-devkit" }   # default: { args = ["--version"] }
 ```
 
-- **Prefix-exact matching** (`VersionReq`). The declared components must equal the installed version's leading components: `"1.1.24"` matches only 1.1.24, `"1.1"` matches 1.1.\*, `"1"` matches 1.\*. A newer version mismatches just like an older one. Values must be dotted numbers (load error otherwise). The base dep's pin is the code constant `BASE_DEP_VERSION` next to `BASE_DEP` (`just` `"1"`; the generated Justfiles need ≥ 1.37.0 for its terminal escape constants).
-- **Merging.** When several selected tools pin the same dep, the pins merge into the most specific one if one refines the other (`1.1` + `1.1.24` → `1.1.24`, `doctor::requirements`). Pins that can't merge (`1.1.24` vs `1.2`, typically tools on different eras) are kept as `version_conflict` and reported as a warning; no version is enforced for that dep.
-- **Probing (impure, `probe.rs`).** Only required deps that are pinned (or in conflict) and are present are probed, in parallel. `Args` runs the first present binary with those args (5 s timeout, stdin closed) and takes the first dotted version (`major.minor[.patch…]`) from stdout + stderr: `aiken v1.1.24+bacbeb3` → `1.1.24`, `go1.26.10` → `1.26.10`. `Npm` never runs the binary: it reads `version` from the named package's `package.json`, found by walking up from the binary's resolved path (or next to the bin dir for shims). Use it when running the binary has side effects: `yaci-devkit --version` boots the CLI, which kills a running devnet.
-- **Comparison.** Prefix-exact against the pin, missing installed components read as zero (`1.1` installed satisfies a `1.1.0` pin); pre-release and build suffixes are dropped (`0.12.0-beta5` reads as `0.12.0`).
+- **Pins are prefix-exact** (`VersionReq`). The declared components must equal the installed version's leading components: `"1.1.24"` matches only 1.1.24, `"1.1"` matches 1.1.\*, `"1"` matches 1.\*. A newer version mismatches just like an older one. Values must be dotted numbers (load error otherwise).
+- **Floors** (`">=20"`) accept that version or any newer one, including newer majors. No other operator is supported (load error). The base dep's requirement is the code constant `BASE_DEP_VERSION` next to `BASE_DEP` (`just` `">=1.37"`, for the terminal escape constants the generated Justfiles use). A floor renders an empty `version` in command templates, since the latest satisfies it, and never marks a method `unpinned`. Distro packages can be older than a floor (Ubuntu 24.04: just 1.21, node 18), so those recipes list `apt` last, and `apt` is never offered as an upgrade (§9.2).
+- **Merging.** When several selected tools constrain the same dep, the requirements merge into the tightest one (`doctor::requirements`): the more specific pin (`1.1` + `1.1.24` → `1.1.24`), the higher floor (`>=20` + `>=22` → `>=22`), or the pin when it always meets the floor (`24` + `>=20` → `24`). Requirements that can't merge (`1.1.24` vs `1.2`, typically tools on different eras, or `18` vs `>=20`, or `20` vs `>=20.8`) are kept as `version_conflict` and reported as a warning; no version is enforced for that dep.
+- **Probing (impure, `probe.rs`).** Only required deps that are present and have a version requirement (or a conflict) are probed, in parallel. `Args` runs the first present binary with those args (5 s timeout, stdin closed) and takes the first dotted version (`major.minor[.patch…]`) from stdout + stderr: `aiken v1.1.24+bacbeb3` → `1.1.24`, `go1.26.10` → `1.26.10`. `Npm` never runs the binary: it reads `version` from the named package's `package.json`, found by walking up from the binary's resolved path (or next to the bin dir for shims). Use it when running the binary has side effects: `yaci-devkit --version` boots the CLI, which kills a running devnet.
+- **Comparison.** Missing installed components read as zero (`1.1` installed satisfies a `1.1.0` pin or a `>=1.1` floor); pre-release and build suffixes are dropped (`0.12.0-beta5` reads as `0.12.0`).
 - **Unknown is not a failure.** When no version can be read (no output match, timeout, a `go install` build reporting `devel`), the dep counts as satisfied and `version` is omitted. The doctor never blocks on what it can't verify.
 - **Methods that ignore the pin.** A command whose template doesn't use `version` (e.g. `nix profile install nixpkgs#aiken`) installs whatever the installer's source has, so for a pinned dep it is flagged `unpinned` (`· installs latest` in human output). For a pinned dep, the resolver first considers only methods that install the pin, bootstrapping their installer if needed (with only `nix`: `nix profile install nixpkgs#nodejs` → `npm install -g @aiken-lang/aikup` → `aikup install v1.1.24`), and falls back to a method that ignores the pin only when none resolves; and alternatives list pin-honoring methods first within each availability group. Whether a template uses `version` is computed once at load.
 - **Upgrade advice.** A recipe's optional `after_upgrade` command is chained onto every upgrade command, for deps that download their own components (`yaci-devkit download --overwrite`: the CLI keeps the cardano-node it downloaded under `~/.yaci-cli` across upgrades, and a newer CLI fails to start a devnet with the old node). Upgrade commands come from the recipe's `upgrade` overrides (e.g. `brew upgrade node`), rendered with the pin; an installer without an override re-runs its install command, which for a pinned dep installs exactly the pinned version (`aikup install v1.1.24`) whether that's an upgrade or a downgrade.
@@ -910,13 +912,13 @@ Reconstruction is **never trusted silently**; this is what neutralizes detection
 
 ### 15.4 Validate the mutated selection
 
-The mutation produces `S_new`, run through **exactly the same gates as `init`** — no new validation logic:
+The mutation produces `S_new`, run through the same gates as `init`, in the same order (experimental, era, compatibility); only the era gate also looks at `S_old`:
 
 - **Role uniqueness** — one tool per non-infra role; infra repeatable and deduped keep-first (§3.4), so "add an infra provider already present" is an idempotent no-op.
 - **At least one role** — removing the last role is refused (`no_roles_selected`); a project is never left empty.
-- **Compatibility gate** — `registry::compat::check(S_new.assignments, registry)` (§3.2.2). The gate runs on the *result*, not the delta: adding Dolos to an Evolution project, or swapping MeshJS→Tx3 next to a Yaci devnet, must trip the same check a fresh scaffold would. Stops with `incompatible_tools` unless `--ignore-warning`.
 - **Experimental gate** — if `S_new` newly includes an experimental tool, require `--allow-experimental` / interactive confirm (§3.2.1; `experimental_not_allowed`).
-- **Era gate** — if `S_new` spans more than one ledger era, require `--allow-mismatch-eras` (§3.2.3; `era_mismatch`). Like the compatibility gate it runs on the result, so an already-mixed project needs the flag for any later `add`/`remove`.
+- **Era gate** — if `S_new` spans more than one ledger era and includes one `S_old` doesn't have, require `--allow-mismatch-eras` (§3.2.3; `era_mismatch`; `registry::era::check_change`). A project that already mixes eras can change within them without the flag; if it's still mixed afterwards, a warning is printed (human output only).
+- **Compatibility gate** — `registry::compat::check(S_new.assignments, registry)` (§3.2.2). The gate runs on the *result*, not the delta: adding Dolos to an Evolution project, or swapping MeshJS→Tx3 next to a Yaci devnet, must trip the same check a fresh scaffold would. Stops with `incompatible_tools` unless `--ignore-warning`.
 
 Because `Selection`-validity is by construction (ARCHITECTURE §3.3), a validated `S_new` is indistinguishable from one `init` would have built.
 
@@ -979,7 +981,8 @@ Error codes are defined in §2.5. This extends the init matrix (§12) for `add`/
 | 7 | Remove the last remaining role | Refused — `no_roles_selected`. |
 | 8 | Swap that breaks off-chain↔provider compat | `incompatible_tools` unless `--ignore-warning` (gate on `S_new`). |
 | 9 | Add/swap in an experimental tool | `experimental_not_allowed` unless `--allow-experimental`. |
-| 9a | Add/swap in a tool parked on another era | `era_mismatch` unless `--allow-mismatch-eras` (gate on `S_new`). |
+| 9a | Add/swap in a tool parked on an era the project doesn't have | `era_mismatch` unless `--allow-mismatch-eras`. |
+| 9b | Change an already-mixed project within its eras, or remove from it | Allowed; warns if still mixed. |
 | 10 | Two dirs → fullstack tool (fuse) | REMOVE `on-chain/`+`off-chain/`, CREATE `protocol/`. Full replace, git-recoverable; not a merge. |
 | 11 | `protocol/` → drop off-chain half | REPLACE `protocol/` with a user-named on-chain tool; no in-place split. |
 | 12 | Same tool on both roles, no `[fullstack]` | Two separate dirs (not fused); each removable independently. |
