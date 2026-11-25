@@ -15,11 +15,11 @@ that the recipe still works against the live world, so this script runs on a
 schedule and via `--check` in CI for coverage and docs drift.
 
 Usage:
-    verify_installers.py <installer-key> [--deps <path>]   run one installer's recipes
-    verify_installers.py --matrix                          print the workflow matrix (JSON)
-    verify_installers.py --docs                            regenerate the docs table
-    verify_installers.py --check                           coverage + docs drift check (CI)
-    verify_installers.py --scope                           write the run's scope to the job summary
+    verify_installers.py <installer-key>   run one installer's recipes
+    verify_installers.py --matrix          print the workflow matrix (JSON)
+    verify_installers.py --docs            regenerate the docs table
+    verify_installers.py --check           coverage + docs drift check (CI)
+    verify_installers.py --scope           write the run's scope to the job summary
 
 Requires Python 3.11+ (uses stdlib `tomllib`).
 """
@@ -58,10 +58,12 @@ _EXPR = re.compile(
     re.VERBOSE,
 )
 
+# The package or script URL a command acts on, per installer that needs it.
 _TARGET = {
     "brew": re.compile(r"^brew install (\S+)$"),
     "winget": re.compile(r"^winget install (\S+)$"),
     "curl": re.compile(r"^curl -sSfL (\S+) \| (?:\w+=\S+ )*sh$"),
+    "nix": re.compile(r"^nix profile install (\S+)$"),
 }
 
 UBUNTU_HOST = {"runs-on": "ubuntu-latest", "platform": "Ubuntu (GitHub-hosted runner)"}
@@ -85,9 +87,9 @@ TESTED: dict[str, dict[str, str]] = {
 EXCLUDED: dict[str, str] = {}
 EXCLUDED_RECIPES: dict[tuple[str, str], str] = {}
 
-# Recipes whose binary can't report its version, so a pin can't be checked.
+# Recipes whose binary can't report its version, so their pin isn't checked.
 UNREADABLE_VERSIONS: dict[tuple[str, str], str] = {
-    ("cardano-up", "go"): "a `go install` build reports `devel`",
+    ("cardano-up", "go"): "version not checked: a `go install` build reports `devel`",
 }
 
 VERSION_TIMEOUT = 30
@@ -129,54 +131,42 @@ EXTRA_BIN_DIRS = [
 
 @dataclass(frozen=True)
 class Method:
-    """A single rendered install method from `registry/deps.toml`."""
+    """One install command from `registry/deps.toml`, as `doctor` prints it."""
 
     dep_id: str
     installer: str
     command: str
     binaries: tuple[str, ...]
-    # The pin the command installs; empty when it installs no particular version.
-    pin: str = ""
-    probe: dict = field(default_factory=dict)
-
-
-@dataclass
-class Plan:
-    """Execution plan for one recipe method."""
-
-    command: str
-    extra_bin_dirs: list[Path]
-    own_bin_dir: Path | None = None
-    target: str = ""
-    unattended: Unattended | None = None
+    target: str
+    # The version the command must install; empty when it doesn't choose one.
+    pin: str
+    version_args: tuple[str, ...]
+    npm_package: str
 
 
 @dataclass
 class Result:
     """Verification outcome (`installed`, `unproven`, or `failed`)."""
 
-    dep_id: str
-    command: str
+    method: Method
     status: str
     detail: str = ""
 
 
-def load_installers(path: Path = INSTALLERS_FILE) -> set[str]:
-    """Return all installer keys declared in `registry/installers.toml`."""
+def load_toml(path: Path) -> dict:
+    """Parse a TOML file."""
     with path.open("rb") as f:
-        return set(tomllib.load(f))
+        return tomllib.load(f)
 
 
 def render(template: str, version: str) -> str:
-    """Render a MiniJinja command template subset with `version` (empty when unpinned)."""
+    """Render the MiniJinja subset recipes use with `version` (empty when unpinned)."""
 
     def expr(m: re.Match) -> str:
-        prefix = m.group("prefix") or ""
-        fallback = m.group("fallback") or ""
-        value = f"{prefix}{version}" if version else ""
-        if m.group("old"):
-            value = value.replace(m.group("old"), m.group("new"))
-        return value or fallback
+        value = version and (m["prefix"] or "") + version
+        if m["old"]:
+            value = value.replace(m["old"], m["new"])
+        return value or m["fallback"] or ""
 
     out = _EXPR.sub(expr, template)
     if "{{" in out or "{%" in out:
@@ -184,118 +174,74 @@ def render(template: str, version: str) -> str:
     return out.strip()
 
 
-def load_pins(tools_dir: Path = TOOLS_DIR) -> dict[str, list[str]]:
-    """Map dep id to every distinct version tools pin it to.
+def target(installer: str, command: str) -> str:
+    """Return what `command` installs; empty when the installer doesn't need it."""
+    if installer not in _TARGET:
+        return ""
+    m = _TARGET[installer].match(command)
+    if not m:
+        raise ValueError(f"unexpected {installer} command: {command!r}")
+    return m[1]
 
-    Pins merge like the doctor's `VersionReq::narrow` (`1.1` + `1.1.24` ->
-    `1.1.24`); non-merging pins are all kept so every variant is verified.
-    """
+
+def load_pins() -> dict[str, list[str]]:
+    """Map each dep id to the distinct versions tools pin it to, without `>=` floors."""
     pins: dict[str, list[str]] = {}
-    for path in sorted(tools_dir.glob("*.toml")):
-        with path.open("rb") as f:
-            deps = tomllib.load(f).get("tool", {}).get("system_deps", [])
-        for entry in deps:
-            if isinstance(entry, dict):
-                for dep, version in entry.items():
-                    pins[dep] = _merge_pin(pins.get(dep, []), version)
+    for path in sorted(TOOLS_DIR.glob("*.toml")):
+        for dep in load_toml(path)["tool"].get("system_deps", []):
+            if isinstance(dep, str):
+                continue
+            for dep_id, version in dep.items():
+                versions = pins.setdefault(dep_id, [])
+                if not version.startswith(">=") and version not in versions:
+                    versions.append(version)
     return pins
 
 
-def _merge_pin(pins: list[str], version: str) -> list[str]:
-    new = version.split(".")
-    for i, old in enumerate(pins):
-        parts = old.split(".")
-        if new[: len(parts)] == parts:
-            return pins[:i] + [version] + pins[i + 1 :]
-        if parts[: len(new)] == new:
-            return pins
-    return pins + [version]
-
-
-def target(installer: str, command: str) -> str:
-    """Extract the package or script URL a rendered command acts on."""
-    pattern = _TARGET.get(installer)
-    if not pattern:
-        return ""
-    m = pattern.match(command)
-    if not m:
-        raise ValueError(f"cannot extract {installer} target from {command!r}")
-    return m.group(1)
-
-
-def load_recipes(deps_path: Path = DEPS_FILE) -> dict:
-    """Parse `registry/deps.toml`."""
-    with deps_path.open("rb") as f:
-        return tomllib.load(f)
-
-
-def all_methods(recipes: dict, pins: dict[str, list[str]] | None = None) -> list[Method]:
-    """Return a `Method` for every distinct rendered install command in `recipes`."""
-    pins = load_pins() if pins is None else pins
-    out: list[Method] = []
-    for dep_id, recipe in recipes.items():
-        binaries = tuple(recipe.get("binaries", []))
-        for entry in recipe.get("install", []):
+def load_methods() -> list[Method]:
+    """Return every distinct install command, rendered once per pinned version."""
+    pins = load_pins()
+    methods: list[Method] = []
+    for dep_id, recipe in load_toml(DEPS_FILE).items():
+        probe = recipe.get("version", {})
+        for entry in recipe["install"]:
             for installer, template in entry.items():
-                commands = {render(template, v): v for v in pins.get(dep_id) or [""]}
-                out.extend(
-                    Method(
-                        dep_id,
-                        installer,
-                        cmd,
-                        binaries,
-                        pin=version if _EXPR.search(template) else "",
-                        probe=recipe.get("version", {}),
+                for version in pins.get(dep_id) or [""]:
+                    command = render(template, version)
+                    method = Method(
+                        dep_id=dep_id,
+                        installer=installer,
+                        command=command,
+                        binaries=tuple(recipe["binaries"]),
+                        target=target(installer, command),
+                        pin=version if "{{" in template else "",
+                        version_args=tuple(probe.get("args", ["--version"])),
+                        npm_package=probe.get("npm", ""),
                     )
-                    for cmd, version in commands.items()
-                )
-    return out
+                    if method not in methods:
+                        methods.append(method)
+    return methods
 
 
-def load_methods(deps_path: Path, installer: str) -> list[Method]:
-    """Return every `Method` in `deps_path` offering `installer`."""
-    return [m for m in all_methods(load_recipes(deps_path)) if m.installer == installer]
-
-
-def coverage_errors(
-    recipes: dict,
-    methods: list[Method] | None = None,
-    installers: set[str] | None = None,
-) -> list[str]:
-    """Validate installer coverage, template rendering, and command shapes."""
-    installers = load_installers() if installers is None else installers
+def coverage_errors(methods: list[Method]) -> list[str]:
+    """Check that every installer and exclusion is accounted for."""
     errors: list[str] = []
     both = TESTED.keys() & EXCLUDED.keys()
     if both:
         errors.append(f"installer(s) both tested and excluded: {', '.join(sorted(both))}")
-    for name in TESTED.keys() | EXCLUDED.keys():
-        if name not in installers:
-            errors.append(f"unknown installer '{name}' in TESTED/EXCLUDED")
-    try:
-        methods_list = all_methods(recipes) if methods is None else methods
-    except ValueError as e:
-        return errors + [str(e)]
-    used = {m.installer for m in methods_list}
+    for name in (TESTED.keys() | EXCLUDED.keys()) - load_toml(INSTALLERS_FILE).keys():
+        errors.append(f"unknown installer '{name}' in TESTED/EXCLUDED")
+    used = {m.installer for m in methods}
     for name in sorted(used - TESTED.keys() - EXCLUDED.keys()):
         errors.append(
             f"deps.toml uses installer '{name}', which is neither in TESTED nor in "
             "EXCLUDED in .github/scripts/verify_installers.py; add a workflow row "
             "or an exclusion with its reason"
         )
-    method_keys = {(m.dep_id, m.installer) for m in methods_list}
-    for dep, key in EXCLUDED_RECIPES:
-        if (dep, key) not in method_keys:
-            errors.append(f"EXCLUDED_RECIPES names {dep} via {key}, which deps.toml doesn't offer")
-    pinned_keys = {(m.dep_id, m.installer) for m in methods_list if m.pin}
-    for dep, key in UNREADABLE_VERSIONS.keys() - pinned_keys:
-        errors.append(f"UNREADABLE_VERSIONS names {dep} via {key}, which installs no pinned version")
-    for m in methods_list:
-        try:
-            target(m.installer, m.command)
-        except ValueError as e:
-            errors.append(str(e))
-        if m.installer == "nix" and "nix profile install " not in m.command:
-            errors.append(f"unexpected nix install command for '{m.dep_id}': {m.command!r}")
+    for dep, name in EXCLUDED_RECIPES.keys() - {(m.dep_id, m.installer) for m in methods}:
+        errors.append(f"EXCLUDED_RECIPES names {dep} via {name}, which deps.toml doesn't offer")
+    for dep, name in UNREADABLE_VERSIONS.keys() - {(m.dep_id, m.installer) for m in methods if m.pin}:
+        errors.append(f"UNREADABLE_VERSIONS names {dep} via {name}, which installs no pinned version")
     return errors
 
 
@@ -322,9 +268,8 @@ def installer_deps(methods: list[Method]) -> dict[str, list[str]]:
     return by_installer
 
 
-def render_docs(recipes: dict, methods: list[Method] | None = None) -> str:
+def render_docs(methods: list[Method]) -> str:
     """Render the Markdown installer coverage table and unattended notes."""
-    methods = all_methods(recipes) if methods is None else methods
     by_installer = installer_deps(methods)
     lines = [
         "| Installer | Tested on | Dependencies |",
@@ -341,25 +286,24 @@ def render_docs(recipes: dict, methods: list[Method] | None = None) -> str:
             reason = EXCLUDED_RECIPES.get((dep, installer))
             cells.append(f"{dep} (not tested: {reason})" if reason else dep)
         lines.append(f"| `{installer}` | {where} | {', '.join(cells)} |")
-    curl_commands = dict.fromkeys(m.command for m in methods if m.installer == "curl")
-    notes = [
-        f"- `{command}` is {u.note}."
+    notes = dict.fromkeys(
+        f"- `{m.command}` is {u.note}."
         for url, u in UNATTENDED.items()
-        for command in curl_commands
-        if target("curl", command) == url
-    ]
+        for m in methods
+        if m.target == url
+    )
     if notes:
         lines += [
             "",
             "Some install scripts ask a question before they install anything. "
             "CI runs these commands unchanged and answers as follows:",
             "",
+            *notes,
         ]
-        lines += notes
     return "\n".join(lines)
 
 
-def update_docs(check: bool, recipes: dict, methods: list[Method] | None = None) -> int:
+def update_docs(check: bool, methods: list[Method]) -> int:
     """Check or regenerate the tested-install-commands table in `docs/user-guide/commands.md`."""
     doc = DOC_FILE.read_text()
     try:
@@ -368,7 +312,7 @@ def update_docs(check: bool, recipes: dict, methods: list[Method] | None = None)
     except ValueError:
         print(f"{DOC_FILE.relative_to(ROOT)}: missing installer-coverage markers", file=sys.stderr)
         return 1
-    updated = f"{head}{DOC_START}\n{render_docs(recipes, methods)}\n{DOC_END}{tail}"
+    updated = f"{head}{DOC_START}\n{render_docs(methods)}\n{DOC_END}{tail}"
     if check:
         if updated != doc:
             print(
@@ -392,9 +336,8 @@ def write_summary(text: str) -> None:
         print(text)
 
 
-def scope_summary(recipes: dict, methods: list[Method] | None = None) -> str:
+def scope_summary(methods: list[Method]) -> str:
     """Summarize what a green workflow run covers and what is excluded."""
-    methods = all_methods(recipes) if methods is None else methods
     by_installer = installer_deps(methods)
     total = sum(len(v) for v in by_installer.values())
     untested = [
@@ -410,7 +353,7 @@ def scope_summary(recipes: dict, methods: list[Method] | None = None) -> str:
         f"`registry/deps.toml` has {total} install recipes. This run covers "
         f"{total - len(untested)} of them. Each installer is tested on one platform only.",
         "",
-        render_docs(recipes, methods),
+        render_docs(methods),
     ]
     if untested:
         lines += ["", "**Not covered by this run:**", ""]
@@ -447,47 +390,17 @@ def _windows_registry_path() -> list[str]:
     return parts
 
 
-def lookup_path(extra: list[Path] | None = None) -> str:
+def lookup_path() -> str:
     """Return PATH augmented with tool-managed bin directories."""
     parts = os.environ.get("PATH", "").split(os.pathsep)
     parts += _windows_registry_path()
     parts += [str(d) for d in EXTRA_BIN_DIRS if _is_dir(d)]
-    parts += [str(d) for d in (extra or []) if _is_dir(d)]
     return os.pathsep.join(parts)
 
 
-def build_command(installer: str, command: str) -> tuple[str, list[Path]]:
-    """Prepare `command` for execution and return any extra bin dirs to probe.
-
-    Redirects `nix profile install` into a per-recipe profile so unrelated
-    packages do not collide in one environment and installed binaries are
-    verified in that profile's `bin/`.
-    """
-    extra: list[Path] = []
-    if installer == "nix":
-        if "nix profile install " not in command:
-            raise ValueError(f"unexpected nix install command: {command!r}")
-        profile = Path(tempfile.mkdtemp(prefix="nixprof-")) / "profile"
-        command = command.replace(
-            "nix profile install ",
-            f"nix profile install --profile {profile} ",
-            1,
-        )
-        extra.append(profile / "bin")
-    return command, extra
-
-
-def plan(method: Method) -> Plan:
-    """Build an execution `Plan` for `method`."""
-    command, extra = build_command(method.installer, method.command)
-    tgt = target(method.installer, method.command)
-    return Plan(
-        command=command,
-        extra_bin_dirs=extra,
-        own_bin_dir=extra[0] if method.installer == "nix" else None,
-        target=tgt,
-        unattended=UNATTENDED.get(tgt) if method.installer == "curl" else None,
-    )
+def missing_binaries(method: Method, path: str) -> str:
+    """List the method's binaries that aren't on `path`; empty when all are."""
+    return ", ".join(b for b in method.binaries if not shutil.which(b, path=path))
 
 
 def run_on_pty(command: str, env: dict[str, str], answers: tuple[tuple[str, str], ...]) -> int:
@@ -518,15 +431,16 @@ def run_on_pty(command: str, env: dict[str, str], answers: tuple[tuple[str, str]
     return os.waitstatus_to_exitcode(status)
 
 
-def run(p: Plan) -> int:
-    """Execute `p.command`, applying unattended settings when configured."""
+def run(method: Method, command: str) -> int:
+    """Execute `command`, applying the method's unattended settings."""
     env = dict(os.environ)
-    if p.unattended:
-        env.update(p.unattended.env)
-        print(f"  (unattended: {p.unattended.note})", flush=True)
-        if p.unattended.answers:
-            return run_on_pty(p.command, env, p.unattended.answers)
-    return subprocess.run(p.command, shell=True, env=env).returncode
+    unattended = UNATTENDED.get(method.target)
+    if unattended:
+        env.update(unattended.env)
+        print(f"  (unattended: {unattended.note})", flush=True)
+        if unattended.answers:
+            return run_on_pty(command, env, unattended.answers)
+    return subprocess.run(command, shell=True, env=env).returncode
 
 
 def winget_lists(arg: str) -> bool:
@@ -538,147 +452,97 @@ def winget_lists(arg: str) -> bool:
     return rc == 0
 
 
-def brew_bin_dir(formula: str) -> Path | None:
-    """Return the formula's own `bin/` directory, linked or keg-only."""
+def brew_bin_dir(formula: str) -> str:
+    """Return the formula's own `bin/` directory; empty when there is none."""
     out = subprocess.run(["brew", "--prefix", formula], capture_output=True, text=True)
-    return Path(out.stdout.strip()) / "bin" if out.returncode == 0 and out.stdout.strip() else None
+    return f"{out.stdout.strip()}/bin" if out.returncode == 0 else ""
 
 
-def _npm_version(binary: Path, package: str) -> str:
-    """Read `package`'s version from the `package.json` behind `binary`."""
-    modules = [binary.parent / "node_modules", binary.parent.parent / "lib" / "node_modules"]
-    manifests = [d / "package.json" for d in binary.resolve().parents]
-    manifests += [d / package / "package.json" for d in modules]
-    for manifest in manifests:
-        try:
-            data = json.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(data, dict) and data.get("name") == package:
-            return str(data.get("version", ""))
-    return ""
-
-
-def installed_version(binary: Path, probe: dict) -> str:
-    """Read the version of `binary` as the doctor does; empty when unreadable."""
-    if "npm" in probe:
-        text = _npm_version(binary, probe["npm"])
+def installed_version(method: Method, path: str) -> str:
+    """Read the installed version; empty when it can't be read."""
+    prefix = ""
+    if method.npm_package:
+        command = ["npm", "ls", "--global", method.npm_package]
+        prefix = f"{method.npm_package}@"
     else:
-        try:
-            out = subprocess.run(
-                [str(binary), *probe.get("args", ["--version"])],
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=VERSION_TIMEOUT,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return ""
-        text = f"{out.stdout}\n{out.stderr}"
-    m = re.search(r"\d+(?:\.\d+)+", text)
-    return m.group() if m else ""
-
-
-def check_version(method: Method, path: str, result: Result) -> None:
-    """Fail `result` unless the installed version proves `method.pin`."""
-    if not method.pin:
-        return
-    found = next(filter(None, (shutil.which(b, path=path) for b in method.binaries)), None)
-    version = installed_version(Path(found), method.probe) if found else ""
-    unreadable = UNREADABLE_VERSIONS.get((method.dep_id, method.installer))
-    if not version and unreadable:
-        result.detail = result.detail or f"version not checked: {unreadable}"
-        return
-    pin = method.pin.split(".")
-    if version.split(".")[: len(pin)] == pin:
-        print(f"  ✓ version {version} matches {method.pin}", flush=True)
-        return
-    result.status = "failed"
-    result.detail = f"installed version is {version or 'unreadable'}, expected {method.pin}"
-    print(f"  ✗ {result.detail}", flush=True)
-
-
-def verify_one(
-    method: Method, p: Plan, cache: dict[str, int], preexisting: set[str]
-) -> Result:
-    """Run one install command and report whether its binaries are reachable.
-
-    Success requires every declared binary to land on PATH (and in the recipe's
-    own install location for `nix`, `brew`, and `winget`), at the pinned version
-    when the command installs one. A non-zero install exit code warns when all
-    binaries are present, and fails when any is missing.
-    """
-    print(f"::group::{method.dep_id} via {p.command}", flush=True)
-    before = preexisting & set(method.binaries)
-
-    if p.command in cache:
-        install_rc = cache[p.command]
-        print("  (same command already ran in this job; checking binaries only)", flush=True)
-    else:
-        install_rc = run(p)
-        cache[p.command] = install_rc
-
-    path = lookup_path(p.extra_bin_dirs)
-    missing = []
-    for binary in method.binaries:
-        if shutil.which(binary, path=path):
-            print(f"  ✓ {binary} on PATH", flush=True)
-        else:
-            print(f"  ✗ {binary} NOT found after install", flush=True)
-            missing.append(binary)
-
-    if install_rc != 0:
-        if missing:
-            print(f"  ✗ install command exited {install_rc}", flush=True)
-        else:
-            print(
-                f"  ! install command exited {install_rc}, but binaries are "
-                f"present — treating as OK",
-                flush=True,
-            )
-
-    own_dir = p.own_bin_dir or (brew_bin_dir(p.target) if method.installer == "brew" else None)
-    result = Result(method.dep_id, p.command, "installed")
-    if missing:
-        result.status = "failed"
-        result.detail = f"not found after install: {', '.join(missing)}"
-    elif method.installer in ("nix", "brew"):
-        not_own = [
-            b for b in method.binaries if own_dir is None or not shutil.which(b, path=str(own_dir))
-        ]
-        if not_own:
-            result.status = "failed"
-            result.detail = f"the recipe doesn't provide: {', '.join(not_own)}"
-    elif method.installer == "winget":
-        if not winget_lists(p.target):
-            result.status = "failed"
-            result.detail = "`winget list` doesn't show the package"
-    elif before:
-        result.status = "unproven"
-        result.detail = f"already on PATH before install: {', '.join(sorted(before))}"
-        print(
-            f"::warning::{method.dep_id} via {method.installer}: {result.detail}; "
-            "the recipe isn't proven",
-            flush=True,
+        command = [shutil.which(method.binaries[0], path=path), *method.version_args]
+    try:
+        out = subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=VERSION_TIMEOUT,
         )
-    if result.status != "failed":
-        check_version(method, str(own_dir) if own_dir else path, result)
-    print("::endgroup::", flush=True)
-    return result
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    m = re.search(re.escape(prefix) + r"(\d+(?:\.\d+)+)", out.stdout + out.stderr)
+    return m[1] if m else ""
 
 
-def verify(installer: str, deps_path: Path) -> int:
-    """Verify every recipe offering `installer` in `deps_path`."""
-    methods = load_methods(deps_path, installer)
+def version_problem(method: Method, path: str) -> str:
+    """Say why the installed version isn't the pinned one; empty when it is."""
+    if not method.pin or (method.dep_id, method.installer) in UNREADABLE_VERSIONS:
+        return ""
+    version = installed_version(method, path)
+    if f"{version}.".startswith(f"{method.pin}."):
+        return ""
+    return f"installed version is {version or 'unreadable'}, expected {method.pin}"
+
+
+def verify_one(method: Method, ran: dict[str, int], preexisting: set[str]) -> Result:
+    """Run one install command and check what it installed.
+
+    Every binary must land on PATH, at the pinned version when the command
+    installs one. `nix` and `brew` binaries must come from the package itself,
+    and `winget` must list it. The exit code only warns, because some installers
+    fail after installing.
+    """
+    command = method.command
+    path = ""
+    if method.installer == "nix":
+        # Its own profile, so packages that ship the same file don't collide.
+        profile = Path(tempfile.mkdtemp(prefix="nixprof-")) / "profile"
+        command = f"nix profile install --profile {profile} {method.target}"
+        path = str(profile / "bin")
+
+    # Recipes can share a command (rust and rustup), so run it once.
+    if command not in ran:
+        ran[command] = run(method, command)
+    if ran[command] != 0:
+        print(f"  ! install command exited {ran[command]}", flush=True)
+
+    path = path or lookup_path()
+    if missing := missing_binaries(method, path):
+        return Result(method, "failed", f"not found after install: {missing}")
+    if method.installer == "brew":
+        path = brew_bin_dir(method.target)
+        if missing := missing_binaries(method, path):
+            return Result(method, "failed", f"the recipe doesn't provide: {missing}")
+    if method.installer == "winget" and not winget_lists(method.target):
+        return Result(method, "failed", "`winget list` doesn't show the package")
+    if problem := version_problem(method, path):
+        return Result(method, "failed", problem)
+
+    already = ", ".join(sorted(preexisting & set(method.binaries)))
+    if already and method.installer not in ("nix", "brew", "winget"):
+        return Result(method, "unproven", f"already on PATH before install: {already}")
+    return Result(method, "installed", UNREADABLE_VERSIONS.get((method.dep_id, method.installer), ""))
+
+
+def verify(installer: str, methods: list[Method]) -> int:
+    """Run and check every method of `installer`."""
+    methods = [m for m in methods if m.installer == installer]
     if not methods:
         print(f"no recipes use '{installer}' — nothing to verify.")
         return 0
 
     print(f"verifying {len(methods)} recipe(s) for '{installer}':\n")
+    icon = {"installed": "✅ installed", "unproven": "⚠️ not proven", "failed": "❌ failed"}
     results: list[Result] = []
     skipped: list[tuple[str, str]] = []
-    cache: dict[str, int] = {}
+    ran: dict[str, int] = {}
     path = lookup_path()
     preexisting = {b for m in methods for b in m.binaries if shutil.which(b, path=path)}
     for m in methods:
@@ -687,9 +551,14 @@ def verify(installer: str, deps_path: Path) -> int:
             print(f"skipping {m.dep_id}: {reason}")
             skipped.append((m.dep_id, reason))
             continue
-        results.append(verify_one(m, plan(m), cache, preexisting))
+        print(f"::group::{m.dep_id} via {m.command}", flush=True)
+        result = verify_one(m, ran, preexisting)
+        print(f"  {icon[result.status]} {result.detail}", flush=True)
+        print("::endgroup::", flush=True)
+        if result.status == "unproven":
+            print(f"::warning::{m.dep_id} via {installer}: {result.detail}; the recipe isn't proven")
+        results.append(result)
 
-    icon = {"installed": "✅ installed", "unproven": "⚠️ not proven", "failed": "❌ failed"}
     summary = [
         f"## `{installer}` recipes ({TESTED.get(installer, {}).get('platform', 'local run')})",
         "",
@@ -698,18 +567,18 @@ def verify(installer: str, deps_path: Path) -> int:
     ]
     for r in results:
         detail = f": {r.detail}" if r.detail else ""
-        command = r.command.replace("|", "\\|")
-        summary.append(f"| {r.dep_id} | `{command}` | {icon[r.status]}{detail} |")
+        command = r.method.command.replace("|", "\\|")
+        summary.append(f"| {r.method.dep_id} | `{command}` | {icon[r.status]}{detail} |")
     for dep_id, reason in skipped:
         summary.append(f"| {dep_id} | — | not tested: {reason} |")
     write_summary("\n".join(summary))
 
-    failures = [r.dep_id for r in results if r.status == "failed"]
+    failures = [r.method.dep_id for r in results if r.status == "failed"]
     print()
     if failures:
         print(f"FAILED for '{installer}': {', '.join(failures)}")
         return 1
-    unproven = [r.dep_id for r in results if r.status == "unproven"]
+    unproven = [r.method.dep_id for r in results if r.status == "unproven"]
     if unproven:
         print(f"OK, but not proven (binary was already on PATH): {', '.join(unproven)}")
     else:
@@ -725,7 +594,6 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("installer", nargs="?", help="installer key, e.g. apt, brew, nix")
-    parser.add_argument("--deps", type=Path, default=DEPS_FILE, help="path to registry/deps.toml")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--matrix", action="store_true", help="print the workflow matrix as JSON")
     mode.add_argument("--docs", action="store_true", help="regenerate the docs coverage table")
@@ -736,28 +604,29 @@ def main() -> int:
     if args.matrix:
         print(json.dumps(matrix()))
         return 0
+
+    try:
+        methods = load_methods()
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 1
     if args.docs or args.check or args.scope:
-        recipes = load_recipes(args.deps)
-        try:
-            methods = all_methods(recipes)
-        except ValueError:
-            methods = None
-        errors = coverage_errors(recipes, methods)
+        errors = coverage_errors(methods)
         for e in errors:
             print(e, file=sys.stderr)
         if errors:
             return 1
         if args.scope:
-            write_summary(scope_summary(recipes, methods))
+            write_summary(scope_summary(methods))
             return 0
-        return update_docs(args.check, recipes, methods)
+        return update_docs(args.check, methods)
 
     if not args.installer:
         parser.error("give an installer key, or one of --matrix/--docs/--check/--scope")
-    if args.installer not in load_installers():
+    if args.installer not in load_toml(INSTALLERS_FILE):
         print(f"unknown installer '{args.installer}'", file=sys.stderr)
         return 2
-    return verify(args.installer, args.deps)
+    return verify(args.installer, methods)
 
 
 if __name__ == "__main__":
