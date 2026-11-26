@@ -65,8 +65,10 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/input-output-hk/cardano
 Windows:
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/input-output-hk/cardano-init/releases/latest/download/cardano-init-installer.ps1 | iex
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/input-output-hk/cardano-init/releases/latest/download/cardano-init-installer.ps1 | iex"
 ```
+
+`-ExecutionPolicy Bypass` applies only to this install and doesn't change your PowerShell settings. Open a new terminal afterwards so `cardano-init` is on your `PATH`.
 
 Prefer a specific version or a manual download? Grab it from the [Releases page](https://github.com/input-output-hk/cardano-init/releases).
 
