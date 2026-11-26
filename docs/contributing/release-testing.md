@@ -34,7 +34,11 @@ curl --proto '=https' --tlsv1.2 -LsSf \
 cardano-init --version
 ```
 
-On Windows, use `cardano-init-installer.ps1` from the same release with `irm … | iex`.
+On Windows, run this in PowerShell, then open a new terminal before running `cardano-init --version`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/input-output-hk/cardano-init/releases/download/vX.Y.Z-rc.N/cardano-init-installer.ps1 | iex"
+```
 
 **Expect:** the installer finishes without errors, and `--version` prints `cardano-init X.Y.Z-rc.N`.
 
