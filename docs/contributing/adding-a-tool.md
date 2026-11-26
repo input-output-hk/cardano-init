@@ -26,8 +26,8 @@ community   = [                        # Optional: official help channels, shown
   { name = "GitHub Discussions", url = "https://github.com/acme/mytool/discussions" },
 ]
 languages   = ["typescript"]           # Languages the generated project uses
-system_deps = ["mytool-cli"]           # What the user needs installed (drives `doctor`; each id needs a registry/deps.toml entry)
-min_versions = { mytool-cli = "2.1" }  # Optional: the oldest version of a system_dep your template works with (see below)
+era         = "conway"                 # The ledger era your template targets: conway | dijkstra (see below)
+system_deps = [{ node = ">=20" }, { mytool-cli = "2.1" }]  # What the user needs installed (drives `doctor`; each id needs a registry/deps.toml entry). Pin era-tied toolchains (see below)
 nix_packages = ["mytool"]              # Nix package name(s), if available (omit if none)
 # nix_self_contained = true            # optional; set if the template ships its own component flake (keeps nix_packages out of the top-level shell — see The manifest)
 detect      = ["mytool.config.js"]     # How `doctor` recognizes this tool in a scanned project (see below)
@@ -45,9 +45,23 @@ detect = [{ file = "package.json", contains = "mytool" }]  # generic filename �
 
 Only tools that declare a role are tested against that role's directory, so signatures only need to disambiguate *within* a role. A directory that matches nothing is reported as "unrecognized" — `doctor` checks dependencies, it does not validate that the component builds (that's `just test`).
 
-**Minimum versions.** If your template needs a feature that older releases of a dep lack, set `min_versions` for that dep. Use the oldest version you know works, and say why in a one-line comment. Keys must be in `system_deps`; values are dotted numbers (`"0.12.0"`, `"9.8"`). `doctor` then reads the installed version and flags anything older, with the upgrade command. A floor is per tool: when two selected tools need the same dep, the higher floor wins.
+**Era.** Every tool is parked on the ledger era its template targets (`conway` or `dijkstra`). Around a hard fork, tools move to the new era at different times, and `cardano-init` refuses to combine tools from different eras unless the user passes `--allow-mismatch-eras` (interactive mode asks). Move your tool to the new era once its template and toolchain support it, usually in the same change that updates its version pin.
 
-`doctor` reads the version by running the dep's binary with `--version` and taking the first dotted version it prints. If that doesn't work for your dep, set `version` in its `registry/deps.toml` entry:
+**Version requirements.** If your template is tied to a specific toolchain line (a compiler, a devnet CLI, anything that changes with the ledger era), pin it in `system_deps` as `{ dep = "version" }`. Matching is prefix-exact: `"1.1.24"` means exactly 1.1.24, `"1.1"` means any 1.1.x, `"1"` any 1.x. A newer version mismatches just like an older one. `doctor` reads the installed version, flags a mismatch, and prints the command that installs the pinned version. For a general runtime with a minimum version, use a floor instead: `{ node = ">=20" }` accepts 20 and anything newer (`>=` is the only operator). Don't pin a runtime: a pin there would refuse versions that work and block combining with tools that pin another line. Leave it bare if any version works. When two selected tools constrain the same dep, the tighter requirement wins (`1.1` + `1.1.24` → `1.1.24`, `>=20` + `>=22` → `>=22`); requirements that disagree are reported as a conflict.
+
+**Install commands.** Each `registry/deps.toml` method is `{ installer = "command" }`, where the key is an installer declared in `registry/installers.toml` and the command is exactly what `doctor` prints. If your dep needs an installer that isn't there yet, add it: its `detect` binaries and, if a dep can provide it, a `bootstrap` list (e.g. `[pipx]` `detect = ["pipx"]`, `bootstrap = ["pipx"]`), then add it to `TESTED` or `EXCLUDED` in `.github/scripts/verify_installers.py`. Commands are MiniJinja templates with one variable, `version`: the pin, or empty when no selected tool pins the dep (a floor counts as unpinned). Use the `prefix` filter so an empty version renders nothing:
+
+```toml
+[mytool-cli]
+binaries = ["mytool"]
+docs     = "https://mytool.dev/install"
+install  = [{ npm = "npm install -g mytool-cli{{ version | prefix('@') }}" }, { brew = "brew install mytool" }]
+upgrade  = [{ brew = "brew upgrade mytool" }]   # optional; an installer without one re-runs its install command (never for apt: installers.toml says it can't upgrade)
+```
+
+A broken template, or one using a variable other than `version`, fails at load.
+
+`doctor` reads the version of a pinned or floored dep by running the dep's binary with `--version` and taking the first dotted version it prints. If that doesn't work for your dep, set `version` in its `registry/deps.toml` entry:
 
 ```toml
 [cardano-up]
@@ -58,7 +72,7 @@ version = { npm = "@bloxbean/yaci-devkit" }    # read the npm package.json, don'
 
 Use `npm` when running the binary has side effects (`yaci-devkit --version` starts the CLI, which stops a running devnet). When `doctor` can't read a version, it treats the dep as satisfied rather than block on something it can't check.
 
-**Install recipes are tested weekly.** The `installer-recipes` workflow runs every `install` entry in `registry/deps.toml` and checks that the dep's `binaries` end up on `PATH`. After adding or changing an entry, run `.github/scripts/verify_installers.py --docs` to regenerate the [tested install commands](../user-guide/commands.md#tested-install-commands) table; CI fails if it is out of date. If you use an installer no recipe used before, add it to `TESTED` in that script (with a runner where it is native) or to `EXCLUDED` with the reason it can't be tested. CI fails until you do one or the other. If your install script asks a question before installing, add its unattended mode to `UNATTENDED` rather than changing the command `doctor` prints.
+**Install recipes are tested weekly.** The `installer-recipes` workflow runs every `install` entry in `registry/deps.toml` and checks that the dep's `binaries` end up on `PATH`, at the pinned version when the command installs one. If a pinned dep's binary can't report its version, list it in `UNREADABLE_VERSIONS` in `.github/scripts/verify_installers.py` with the reason. After adding or changing an entry, run `.github/scripts/verify_installers.py --docs` to regenerate the [tested install commands](../user-guide/commands.md#tested-install-commands) table; CI fails if it is out of date. If you use an installer no recipe used before, add it to `TESTED` in that script (with a runner where it is native) or to `EXCLUDED` with the reason it can't be tested. CI fails until you do one or the other. If your install script asks a question before installing, add its unattended mode to `UNATTENDED` rather than changing the command `doctor` prints.
 
 If your dep downloads its own components that an upgrade leaves behind, add `after_upgrade = "<command>"` to its entry; `doctor` chains it onto every upgrade command it suggests.
 
@@ -68,7 +82,7 @@ If your dep downloads its own components that an upgrade leaves behind, add `aft
 [mytool-cli]
 binaries = ["mytool"]
 docs = "https://mytool.dev/install"
-install = [{ npm = "mytool-cli" }]
+install = [{ npm = "npm install -g mytool-cli" }]
 support = [
   { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=acme.mytool" },
   { name = "Neovim plugin", url = "https://github.com/acme/mytool.nvim" },
@@ -322,7 +336,8 @@ name = "Dolos"
 description = "…"
 website = "https://…"
 languages = []                       # infra providers have no user-facing language
-system_deps = ["docker", "cardano-up"]
+era = "conway"
+system_deps = ["docker", { cardano-up = "0.15" }]
 detect = []                          # infra is scanned by a driver marker, not per-tool
 
 [roles.infrastructure]
@@ -413,7 +428,8 @@ name        = "MyTool"
 description = "A TypeScript SDK for building Cardano transactions."
 website     = "https://mytool.dev"
 languages   = ["typescript"]
-system_deps = ["node"]
+era         = "conway"
+system_deps = [{ node = ">=20" }]
 nix_packages = ["nodejs_20"]
 detect      = [{ file = "package.json", contains = "mytool" }]
 

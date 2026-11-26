@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::version::Version;
+use super::version::VersionReq;
 use crate::contract;
 
 /// The functional roles a tool can fill within a Cardano protocol project.
@@ -83,6 +83,62 @@ impl fmt::Display for Role {
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("unknown role: '{0}'")]
 pub struct UnknownRoleError(pub String);
+
+/// The ledger era a tool's template targets. Tools move to a new era at
+/// different times around a hard fork, so each is parked on one; mixing eras in
+/// a selection needs an explicit opt-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Era {
+    Conway,
+    Dijkstra,
+}
+
+impl Era {
+    pub const ALL: &[Era] = &[Era::Conway, Era::Dijkstra];
+
+    /// Parse from the kebab-case string used in TOML registry files.
+    pub fn from_kebab(s: &str) -> Result<Self, UnknownEraError> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|e| e.as_kebab() == s)
+            .ok_or_else(|| UnknownEraError(s.to_string()))
+    }
+
+    pub fn as_kebab(self) -> &'static str {
+        match self {
+            Era::Conway => "conway",
+            Era::Dijkstra => "dijkstra",
+        }
+    }
+}
+
+impl fmt::Display for Era {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Era::Conway => "Conway",
+            Era::Dijkstra => "Dijkstra",
+        })
+    }
+}
+
+impl Serialize for Era {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_kebab())
+    }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("unknown era: '{0}'")]
+pub struct UnknownEraError(pub String);
+
+/// A dependency a tool requires, optionally at a pinned or minimum version
+/// (tech-spec §9.7). The id has a `registry/deps.toml` entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemDep {
+    pub id: String,
+    pub version: Option<VersionReq>,
+}
 
 /// A connection seam: a wire protocol an off-chain tool speaks to reach a chain
 /// endpoint, and that a devnet or infra tool serves. See
@@ -201,11 +257,9 @@ pub struct ToolDef {
     pub website: String,
     pub community: Vec<Link>,
     pub languages: Vec<String>,
-    /// Dependency ids this tool requires; each has a `registry/deps.toml` entry.
-    pub system_deps: Vec<String>,
-    /// The lowest version of a `system_deps` entry this tool's template works
-    /// with (tech-spec §9.7). Keys are validated against `system_deps` at load.
-    pub min_versions: BTreeMap<String, Version>,
+    /// The ledger era this tool's template targets.
+    pub era: Era,
+    pub system_deps: Vec<SystemDep>,
     pub nix_packages: Vec<String>,
     /// The tool ships its own component-local Nix flake. Its `nix_packages` are
     /// then not added to the top-level shell as nixpkgs attrs (a plain `mkShell`
@@ -327,6 +381,14 @@ mod tests {
         assert_eq!(Role::Infrastructure.to_string(), "Infrastructure");
         assert_eq!(Role::Devnet.to_string(), "Devnet");
         assert_eq!(Role::FormalMethods.to_string(), "Formal methods");
+    }
+
+    #[test]
+    fn era_kebab_round_trip() {
+        for era in Era::ALL {
+            assert_eq!(Era::from_kebab(era.as_kebab()).unwrap(), *era);
+        }
+        assert!(Era::from_kebab("babbage").is_err());
     }
 
     #[test]

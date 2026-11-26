@@ -4,10 +4,10 @@ use rust_embed::RustEmbed;
 use serde::Deserialize;
 
 use super::types::{
-    CompatConfig, DetectSignature, InfraConfig, Link, Role, RoleConfig, Seam, ToolDef,
-    UnknownRoleError, UnknownSeamError,
+    CompatConfig, DetectSignature, Era, InfraConfig, Link, Role, RoleConfig, Seam, SystemDep,
+    ToolDef, UnknownEraError, UnknownRoleError, UnknownSeamError,
 };
-use super::version::Version;
+use super::version::VersionReq;
 
 #[derive(RustEmbed)]
 #[folder = "registry/"]
@@ -35,14 +35,24 @@ pub enum RegistryError {
         source: UnknownSeamError,
     },
 
-    #[error("tool '{file}' sets a minimum version for '{dep}', which is not in its system_deps")]
-    MinVersionForUnknownDep { file: String, dep: String },
+    #[error("unknown era '{era}' in tool file '{file}': {source}")]
+    UnknownEra {
+        file: String,
+        era: String,
+        source: UnknownEraError,
+    },
 
     #[error(
-        "tool '{file}' has an invalid minimum version '{version}' for '{dep}' \
-         (expected dotted numbers, e.g. \"0.12.0\")"
+        "tool '{file}' has a malformed system_deps entry \
+         (expected \"dep\" or a single {{ dep = \"version\" }})"
     )]
-    InvalidMinVersion {
+    MalformedSystemDep { file: String },
+
+    #[error(
+        "tool '{file}' has an invalid version '{version}' for '{dep}' \
+         (expected dotted numbers, e.g. \"1.1.24\" or \"1.1\", or a floor, e.g. \">=20\")"
+    )]
+    InvalidDepVersion {
         file: String,
         dep: String,
         version: String,
@@ -79,6 +89,7 @@ struct ToolFileToml {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ToolMetaToml {
     id: String,
     name: String,
@@ -87,10 +98,9 @@ struct ToolMetaToml {
     #[serde(default)]
     community: Vec<Link>,
     languages: Vec<String>,
+    era: String,
     #[serde(default)]
-    system_deps: Vec<String>,
-    #[serde(default)]
-    min_versions: BTreeMap<String, String>,
+    system_deps: Vec<DepToml>,
     #[serde(default)]
     nix_packages: Vec<String>,
     #[serde(default)]
@@ -109,6 +119,14 @@ struct CompatToml {
     serves: Vec<String>,
     #[serde(default)]
     self_contained_devnet: bool,
+}
+
+/// A `system_deps` entry: a bare dep id, or a single `{ dep = "version" }`.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum DepToml {
+    Bare(String),
+    Pinned(BTreeMap<String, String>),
 }
 
 /// A `detect` entry is either a bare path (existence check) or a table with an
@@ -178,14 +196,22 @@ fn to_tool_def(file_name: &str, raw: ToolFileToml) -> Result<ToolDef, RegistryEr
         website,
         community,
         languages,
+        era,
         system_deps,
-        min_versions,
         nix_packages,
         nix_self_contained,
         detect,
         experimental,
     } = raw.tool;
-    let min_versions = parse_min_versions(file_name, &system_deps, min_versions)?;
+    let era = Era::from_kebab(&era).map_err(|source| RegistryError::UnknownEra {
+        file: file_name.to_string(),
+        era,
+        source,
+    })?;
+    let system_deps = system_deps
+        .into_iter()
+        .map(|dep| parse_system_dep(file_name, dep))
+        .collect::<Result<_, _>>()?;
 
     Ok(ToolDef {
         id,
@@ -194,8 +220,8 @@ fn to_tool_def(file_name: &str, raw: ToolFileToml) -> Result<ToolDef, RegistryEr
         website,
         community,
         languages,
+        era,
         system_deps,
-        min_versions,
         nix_packages,
         nix_self_contained,
         detect: detect.into_iter().map(DetectSignature::from).collect(),
@@ -207,31 +233,27 @@ fn to_tool_def(file_name: &str, raw: ToolFileToml) -> Result<ToolDef, RegistryEr
     })
 }
 
-/// Validate `min_versions`: each key must be one of the tool's `system_deps`
-/// and each value a dotted version.
-fn parse_min_versions(
-    file_name: &str,
-    system_deps: &[String],
-    raw: BTreeMap<String, String>,
-) -> Result<BTreeMap<String, Version>, RegistryError> {
-    raw.into_iter()
-        .map(|(dep, version)| {
-            if !system_deps.contains(&dep) {
-                return Err(RegistryError::MinVersionForUnknownDep {
-                    file: file_name.to_string(),
-                    dep,
-                });
-            }
-            match Version::parse(&version) {
-                Some(parsed) => Ok((dep, parsed)),
-                None => Err(RegistryError::InvalidMinVersion {
-                    file: file_name.to_string(),
-                    dep,
-                    version,
-                }),
-            }
-        })
-        .collect()
+fn parse_system_dep(file_name: &str, raw: DepToml) -> Result<SystemDep, RegistryError> {
+    let (id, version) = match raw {
+        DepToml::Bare(id) => return Ok(SystemDep { id, version: None }),
+        DepToml::Pinned(table) if table.len() == 1 => table.into_iter().next().unwrap(),
+        DepToml::Pinned(_) => {
+            return Err(RegistryError::MalformedSystemDep {
+                file: file_name.to_string(),
+            });
+        }
+    };
+    match VersionReq::parse(&version) {
+        Some(req) => Ok(SystemDep {
+            id,
+            version: Some(req),
+        }),
+        None => Err(RegistryError::InvalidDepVersion {
+            file: file_name.to_string(),
+            dep: id,
+            version,
+        }),
+    }
 }
 
 fn parse_roles(
@@ -324,6 +346,14 @@ impl Registry {
     pub fn all_tools(&self) -> &[ToolDef] {
         &self.tools
     }
+
+    /// Re-park a tool on another era, for tests of mixed-era selections (the
+    /// shipped registry has a single era).
+    #[cfg(test)]
+    pub(crate) fn set_era_for_test(&mut self, id: &str, era: Era) {
+        let idx = self.by_id[id];
+        self.tools[idx].era = era;
+    }
 }
 
 #[cfg(test)]
@@ -354,6 +384,7 @@ mod tests {
             description = "d"
             website = "https://x"
             languages = ["scala"]
+            era = "conway"
             {tables}
             "#
         );
@@ -574,40 +605,80 @@ mod tests {
     }
 
     #[test]
-    fn min_versions_parse_for_declared_deps() {
-        let tool = demo_tool(
-            r#"system_deps = ["node", "ghc"]
-            min_versions = { ghc = "9.8" }"#,
-        )
-        .unwrap();
-        assert_eq!(tool.min_versions["ghc"].to_string(), "9.8");
-        assert!(!tool.min_versions.contains_key("node"));
+    fn system_deps_parse_bare_and_pinned() {
+        let tool = demo_tool(r#"system_deps = ["node", { ghc = "9.8" }]"#).unwrap();
+        assert_eq!(tool.system_deps[0].id, "node");
+        assert!(tool.system_deps[0].version.is_none());
+        assert_eq!(tool.system_deps[1].id, "ghc");
+        assert_eq!(tool.system_deps[1].version, VersionReq::parse("9.8"));
     }
 
     #[test]
-    fn min_version_for_undeclared_dep_is_error() {
-        let err = demo_tool(
-            r#"system_deps = ["node"]
-            min_versions = { ghc = "9.8" }"#,
-        )
-        .unwrap_err();
-        assert!(matches!(err, RegistryError::MinVersionForUnknownDep { .. }));
+    fn system_dep_accepts_a_floor() {
+        let tool = demo_tool(r#"system_deps = [{ node = ">=20" }]"#).unwrap();
+        assert_eq!(tool.system_deps[0].version, VersionReq::parse(">=20"));
     }
 
     #[test]
-    fn malformed_min_version_is_error() {
-        let err = demo_tool(
-            r#"system_deps = ["node"]
-            min_versions = { node = "latest" }"#,
-        )
-        .unwrap_err();
-        assert!(matches!(err, RegistryError::InvalidMinVersion { .. }));
+    fn multi_key_system_dep_is_error() {
+        let err = demo_tool(r#"system_deps = [{ node = "18", ghc = "9.8" }]"#).unwrap_err();
+        assert!(matches!(err, RegistryError::MalformedSystemDep { .. }));
     }
 
     #[test]
-    fn aiken_floor_matches_template_compiler_pin() {
-        // The aiken template pins `compiler = "vX.Y.Z"` in aiken.toml; the
-        // doctor's floor must move with it.
+    fn malformed_dep_version_is_error() {
+        let err = demo_tool(r#"system_deps = [{ node = "latest" }]"#).unwrap_err();
+        assert!(matches!(err, RegistryError::InvalidDepVersion { .. }));
+    }
+
+    #[test]
+    fn removed_min_versions_key_is_rejected() {
+        let toml = r#"
+            [tool]
+            id = "demo"
+            name = "Demo"
+            description = "d"
+            website = "https://x"
+            languages = ["scala"]
+            era = "conway"
+            min_versions = { node = "18" }
+        "#;
+        assert!(toml::from_str::<ToolFileToml>(toml).is_err());
+    }
+
+    #[test]
+    fn missing_era_is_rejected() {
+        let toml = r#"
+            [tool]
+            id = "demo"
+            name = "Demo"
+            description = "d"
+            website = "https://x"
+            languages = ["scala"]
+        "#;
+        assert!(toml::from_str::<ToolFileToml>(toml).is_err());
+    }
+
+    #[test]
+    fn unknown_era_is_error() {
+        let toml = r#"
+            [tool]
+            id = "demo"
+            name = "Demo"
+            description = "d"
+            website = "https://x"
+            languages = ["scala"]
+            era = "babbage"
+        "#;
+        let raw: ToolFileToml = toml::from_str(toml).unwrap();
+        assert!(matches!(
+            to_tool_def("demo.toml", raw),
+            Err(RegistryError::UnknownEra { .. })
+        ));
+    }
+
+    #[test]
+    fn aiken_pin_matches_template_compiler_pin() {
         let template = include_str!("../../templates/aiken/on-chain/aiken.toml.jinja");
         let pin = template
             .lines()
@@ -615,7 +686,8 @@ mod tests {
             .expect("aiken.toml pins a compiler")
             .trim_matches('"');
         let registry = registry();
-        let floor = &registry.get("aiken").unwrap().min_versions["aiken"];
-        assert_eq!(Some(floor), Version::parse(pin).as_ref());
+        let aiken = &registry.get("aiken").unwrap().system_deps;
+        let dep = aiken.iter().find(|d| d.id == "aiken").unwrap();
+        assert_eq!(dep.version, VersionReq::parse(pin));
     }
 }

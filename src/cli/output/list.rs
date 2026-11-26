@@ -102,7 +102,7 @@ fn print_role_rule(role: Role) {
 fn tool_support_links(tool: &ToolDef, catalog: &DepCatalog) -> Vec<Link> {
     let mut links: Vec<Link> = Vec::new();
     for dep in &tool.system_deps {
-        for link in catalog.get(dep).map_or(&[][..], |r| &r.support) {
+        for link in catalog.get(&dep.id).map_or(&[][..], |r| &r.support) {
             if !links.iter().any(|l| l.url == link.url) {
                 links.push(link.clone());
             }
@@ -135,6 +135,7 @@ fn format_tool(out: &mut String, tool: &ToolDef, support: &[Link]) {
     if !tool.languages.is_empty() {
         write_field(out, "Languages", &tool.languages.join(", "));
     }
+    write_field(out, "Era", &tool.era.to_string());
     write_field(out, "Website", &tool.website);
 
     // Link names line up across both groups.

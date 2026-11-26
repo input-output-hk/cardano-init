@@ -3,41 +3,55 @@
 # Keyed by dep id. Each recipe has:
 #   binaries  presence check — the dep is present if any of these is on PATH
 #   docs      universal fallback when the resolver can't produce a plan
-#   install   ordered list of single-key { installer = arg } methods (order = preference)
-#   version   how to read the installed version, only when a tool sets a
-#             minimum for this dep (tech-spec §9.7). Default: run the first
-#             present binary with `--version` and take the first dotted
-#             version it prints. Override with `{ args = [...] }`, or
-#             `{ npm = "<package>" }` to read the package.json behind the
-#             binary without running it.
+#   install   ordered list of single-key { installer = "command" } methods
+#             (order = preference). The command is a MiniJinja template; `version`
+#             is the version a selected tool pins (tech-spec §9.7), or empty (a
+#             floor such as `>=20` is empty too: the latest satisfies it).
+#             `{{ version | prefix('v') }}` renders `v1.1.24`, or nothing when
+#             unpinned.
+#   upgrade   optional { installer = "command" } overrides used when the
+#             installed version doesn't match the pin; an installer without one
+#             re-runs its install command, unless installers.toml marks it
+#             install_only.
+#   version   how to read the installed version, only when a tool needs a
+#             certain version of this dep. Default: run the first present
+#             binary with `--version` and take the first dotted version it
+#             prints. Override with `{ args = [...] }`, or
+#             `{ npm = "<package>" }` to read the package.json behind the binary
+#             without running it.
 #   after_upgrade  optional command chained onto every upgrade command, for
 #             deps that download their own components.
 #
-# Installer keys are validated against the closed `Installer` enum in
-# src/doctor/installers.rs at load (unknown installer → load error). Recipes are
-# data; installers are code. Shared deps (node, jvm) are defined once and
-# referenced by many tools' `system_deps`.
+# Installer keys must be declared in registry/installers.toml (undeclared →
+# load error), which says how each installer is detected and bootstrapped.
+# Shared deps (node, jvm) are defined once and referenced by many tools'
+# `system_deps`.
 
 # --- base / derived dep (owned by no tool) ---
 
 [just]
 binaries = ["just"]
 docs = "https://just.systems"
-install = [{ brew = "just" }, { apt = "just" }, { cargo = "just" }, { nix = "just" }]
+# apt last: Ubuntu 24.04 ships just 1.21, too old for the generated Justfiles.
+install = [{ brew = "brew install just" }, { cargo = "cargo install just" }, { nix = "nix profile install nixpkgs#just" }, { apt = "sudo apt install -y just" }]
+upgrade = [{ brew = "brew upgrade just" }, { nix = "nix profile upgrade just" }]
 
 # --- tool system_deps ---
 
 [node]
 binaries = ["node"]
 docs = "https://nodejs.org/en/download"
-install = [{ brew = "node" }, { apt = "nodejs" }, { winget = "OpenJS.NodeJS" }, { nix = "nodejs" }]
+# apt last: Ubuntu 24.04 ships Node 18, older than the templates need.
+install = [{ brew = "brew install node" }, { winget = "winget install OpenJS.NodeJS" }, { nix = "nix profile install nixpkgs#nodejs" }, { apt = "sudo apt install -y nodejs" }]
+upgrade = [{ brew = "brew upgrade node" }, { winget = "winget upgrade OpenJS.NodeJS" }, { nix = "nix profile upgrade nodejs" }]
 
 # uv also downloads the Python version a project needs. No apt: it isn't in the
 # stock Debian and Ubuntu repositories.
 [uv]
 binaries = ["uv"]
 docs = "https://docs.astral.sh/uv/getting-started/installation/"
-install = [{ brew = "uv" }, { winget = "astral-sh.uv" }, { nix = "uv" }, { curl = "https://astral.sh/uv/install.sh" }]
+install = [{ brew = "brew install uv" }, { winget = "winget install astral-sh.uv" }, { nix = "nix profile install nixpkgs#uv" }, { curl = "curl -sSfL https://astral.sh/uv/install.sh | sh" }]
+upgrade = [{ brew = "brew upgrade uv" }, { winget = "winget upgrade astral-sh.uv" }, { nix = "nix profile upgrade uv" }]
 support = [
   { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=ms-python.python" },
   { name = "Pyright (language server)", url = "https://github.com/microsoft/pyright" },
@@ -50,7 +64,7 @@ support = [
 [tx3]
 binaries = ["trix"]
 docs = "https://docs.txpipe.io/tx3/installation"
-install = [{ tx3up = "" }]
+install = [{ tx3up = "tx3up install" }]
 support = [
   { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=TxPipe.tx3" },
   { name = "Language server", url = "https://github.com/tx3-lang/tx3-lsp" },
@@ -59,7 +73,8 @@ support = [
 [aiken]
 binaries = ["aiken"]
 docs = "https://aiken-lang.org/installation-instructions"
-install = [{ aikup = "" }, { nix = "aiken" }]
+install = [{ aikup = "aikup install {{ version | prefix('v') }}" }, { nix = "nix profile install nixpkgs#aiken" }]
+upgrade = [{ nix = "nix profile upgrade aiken" }]
 support = [
   { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=TxPipe.aiken" },
   { name = "Neovim plugin", url = "https://github.com/aiken-lang/editor-integration-nvim" },
@@ -74,7 +89,8 @@ binaries = ["sbt"]
 docs = "https://www.scala-sbt.org/download.html"
 # No stock `apt` package: sbt ships only via its own scala-sbt apt repo, which a
 # single-package recipe can't add — so apt is deliberately omitted (use brew/nix).
-install = [{ brew = "sbt" }, { nix = "sbt" }]
+install = [{ brew = "brew install sbt" }, { nix = "nix profile install nixpkgs#sbt" }]
+upgrade = [{ brew = "brew upgrade sbt" }, { nix = "nix profile upgrade sbt" }]
 support = [
   { name = "Metals (Scala language server)", url = "https://scalameta.org/metals/" },
   { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=scalameta.metals" },
@@ -85,26 +101,30 @@ support = [
 [jvm]
 binaries = ["java"]
 docs = "https://adoptium.net/installation"
-install = [{ brew = "openjdk" }, { apt = "default-jdk" }, { winget = "EclipseAdoptium.Temurin.21.JDK" }, { nix = "jdk" }]
+install = [{ brew = "brew install openjdk" }, { apt = "sudo apt install -y default-jdk" }, { winget = "winget install EclipseAdoptium.Temurin.21.JDK" }, { nix = "nix profile install nixpkgs#jdk" }]
+upgrade = [{ brew = "brew upgrade openjdk" }, { apt = "sudo apt install --only-upgrade -y default-jdk" }, { winget = "winget upgrade EclipseAdoptium.Temurin.21.JDK" }, { nix = "nix profile upgrade jdk" }]
 
 [docker]
 binaries = ["docker"]
 docs = "https://docs.docker.com/get-docker/"
-install = [{ brew = "docker" }, { apt = "docker.io" }, { winget = "Docker.DockerDesktop" }, { nix = "docker" }]
+install = [{ brew = "brew install docker" }, { apt = "sudo apt install -y docker.io" }, { winget = "winget install Docker.DockerDesktop" }, { nix = "nix profile install nixpkgs#docker" }]
+upgrade = [{ brew = "brew upgrade docker" }, { apt = "sudo apt install --only-upgrade -y docker.io" }, { winget = "winget upgrade Docker.DockerDesktop" }, { nix = "nix profile upgrade docker" }]
 
 [cabal]
 binaries = ["cabal"]
 docs = "https://www.haskell.org/ghcup/"
 # ghcup (via curl) is IOG's recommended way to get a matching GHC + Cabal.
-install = [{ brew = "cabal-install" }, { apt = "cabal-install" }, { nix = "cabal-install" }, { curl = "https://get-ghcup.haskell.org" }]
+install = [{ brew = "brew install cabal-install" }, { apt = "sudo apt install -y cabal-install" }, { nix = "nix profile install nixpkgs#cabal-install" }, { curl = "curl -sSfL https://get-ghcup.haskell.org | sh" }]
+upgrade = [{ brew = "brew upgrade cabal-install" }, { apt = "sudo apt install --only-upgrade -y cabal-install" }, { nix = "nix profile upgrade cabal-install" }]
 
 [ghc]
 binaries = ["ghc"]
 docs = "https://www.haskell.org/ghcup/"
-# Plinth targets GHC 9.6.x and Plutarch GHC 9.8.x; ghcup can install both side by side.
-# `ghc96` tracks the latest 9.6.x in nixpkgs; a patch attr like `ghc966` is removed
-# when nixpkgs moves to the next patch release.
-install = [{ brew = "ghc" }, { apt = "ghc" }, { nix = "haskell.compiler.ghc96" }, { curl = "https://get-ghcup.haskell.org" }]
+# Only methods that can install a chosen line: brew and apt match neither Plinth's
+# 9.6 nor Plutarch's 9.8.
+install = [{ curl = "curl -sSfL https://get-ghcup.haskell.org | BOOTSTRAP_HASKELL_GHC_VERSION={{ version or 'recommended' }} sh" }, { nix = "nix profile install nixpkgs#haskell.compiler.ghc{{ version | replace('.', '') or '96' }}" }]
+# Nix won't install a GHC next to another one.
+upgrade = [{ nix = "nix profile remove ghc96 ghc98 && nix profile install nixpkgs#haskell.compiler.ghc{{ version | replace('.', '') or '96' }}" }]
 support = [
   { name = "Haskell Language Server", url = "https://haskell-language-server.readthedocs.io" },
   { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=haskell.haskell" },
@@ -117,7 +137,8 @@ support = [
 [yaci-devkit]
 binaries = ["yaci-devkit"]
 docs = "https://devkit.yaci.xyz"
-install = [{ npm = "@bloxbean/yaci-devkit" }]
+install = [{ npm = "npm install -g @bloxbean/yaci-devkit{{ version | prefix('@') }}" }]
+upgrade = [{ npm = "npm install -g @bloxbean/yaci-devkit{{ version | prefix('@') or '@latest' }}" }]
 version = { npm = "@bloxbean/yaci-devkit" }
 # The CLI caches cardano-node, yaci-store, etc. under ~/.yaci-cli and keeps
 # them across upgrades; a newer CLI with the old node fails to start a devnet.
@@ -128,14 +149,15 @@ after_upgrade = "yaci-devkit download --overwrite"
 [aikup]
 binaries = ["aikup"]
 docs = "https://aiken-lang.org/installation-instructions"
-install = [{ npm = "@aiken-lang/aikup" }, { curl = "https://install.aiken-lang.org" }, { powershell = "https://windows.aiken-lang.org" }]
+install = [{ npm = "npm install -g @aiken-lang/aikup" }, { curl = "curl -sSfL https://install.aiken-lang.org | sh" }, { powershell = "powershell -c \"irm https://windows.aiken-lang.org | iex\"" }]
+upgrade = [{ npm = "npm install -g @aiken-lang/aikup@latest" }]
 
 [cardano-up]
 binaries = ["cardano-up"]
 docs = "https://github.com/blinklabs-io/cardano-up"
-install = [{ go = "github.com/blinklabs-io/cardano-up/cmd/cardano-up@latest" }]
+install = [{ go = "go install github.com/blinklabs-io/cardano-up/cmd/cardano-up@{{ version | prefix('v') or 'latest' }}" }]
 # No `--version` flag. A `go install` build reports `devel`, so its version is
-# unknown and the floor is not enforced (never blocks on a version it can't read).
+# unknown and the pin is not enforced (never blocks on a version it can't read).
 version = { args = ["version"] }
 
 # tx3up: the tx3 toolchain manager (provides the `tx3up` installer used by [tx3]).
@@ -145,24 +167,27 @@ version = { args = ["version"] }
 [tx3up]
 binaries = ["tx3up"]
 docs = "https://docs.txpipe.io/tx3/installation"
-install = [{ brew = "txpipe/tap/tx3up" }, { curl = "https://github.com/tx3-lang/tx3up/releases/latest/download/tx3up-installer.sh" }]
+install = [{ brew = "brew install txpipe/tap/tx3up" }, { curl = "curl -sSfL https://github.com/tx3-lang/tx3up/releases/latest/download/tx3up-installer.sh | sh" }]
+upgrade = [{ brew = "brew upgrade txpipe/tap/tx3up" }]
 
 [rustup]
 binaries = ["rustup"]
 docs = "https://www.rust-lang.org/tools/install"
-install = [{ brew = "rustup" }, { curl = "https://sh.rustup.rs" }, { nix = "rustup" }]
+install = [{ brew = "brew install rustup" }, { curl = "curl -sSfL https://sh.rustup.rs | sh" }, { nix = "nix profile install nixpkgs#rustup" }]
+upgrade = [{ brew = "brew upgrade rustup" }, { nix = "nix profile upgrade rustup" }]
 
 [rust]
 binaries = ["cargo", "rustc"]
 docs = "https://www.rust-lang.org/tools/install"
 # No nix method: nixpkgs#cargo ships cargo without rustc. On nix, the [rustup]
 # recipe (nixpkgs#rustup) provides both.
-install = [{ curl = "https://sh.rustup.rs" }]
+install = [{ curl = "curl -sSfL https://sh.rustup.rs | sh" }]
 
 [go]
 binaries = ["go"]
 docs = "https://go.dev/doc/install"
-install = [{ brew = "go" }, { apt = "golang" }, { winget = "GoLang.Go" }, { nix = "go" }]
+install = [{ brew = "brew install go" }, { apt = "sudo apt install -y golang" }, { winget = "winget install GoLang.Go" }, { nix = "nix profile install nixpkgs#go" }]
+upgrade = [{ brew = "brew upgrade go" }, { apt = "sudo apt install --only-upgrade -y golang" }, { winget = "winget upgrade GoLang.Go" }, { nix = "nix profile upgrade go" }]
 support = [
   { name = "gopls (Go language server)", url = "https://go.dev/gopls/" },
   { name = "VS Code extension", url = "https://marketplace.visualstudio.com/items?itemName=golang.go" },
@@ -175,4 +200,5 @@ binaries = ["process-compose"]
 docs = "https://f1bonacc1.github.io/process-compose/"
 # process-compose is not in homebrew-core; it lives in the maintainer's tap.
 # `brew install` auto-taps a tap-qualified formula.
-install = [{ brew = "f1bonacc1/tap/process-compose" }, { go = "github.com/f1bonacc1/process-compose@latest" }, { nix = "process-compose" }]
+install = [{ brew = "brew install f1bonacc1/tap/process-compose" }, { go = "go install github.com/f1bonacc1/process-compose@latest" }, { nix = "nix profile install nixpkgs#process-compose" }]
+upgrade = [{ brew = "brew upgrade f1bonacc1/tap/process-compose" }, { nix = "nix profile upgrade process-compose" }]

@@ -51,7 +51,7 @@ The codebase is a single Rust crate. The module structure is as follows (see `do
 
 ### Registry and templates
 
-Tool definitions live in `registry/tools/<tool>.toml`. Templates live in `templates/<tool>/<role>/` with a `manifest.toml` listing files. Both are embedded into the binary at compile time via **rust-embed** (`#[folder = "…"]`). There is **no `build.rs`**. (Dependency install recipes live in `registry/deps.toml`, consumed by `doctor`, see `docs/design/tech-spec.md` §9.)
+Tool definitions live in `registry/tools/<tool>.toml`. Templates live in `templates/<tool>/<role>/` with a `manifest.toml` listing files. Both are embedded into the binary at compile time via **rust-embed** (`#[folder = "…"]`). There is **no `build.rs`**. (Dependency install recipes live in `registry/deps.toml` and the installers they use in `registry/installers.toml`, both consumed by `doctor`, see `docs/design/tech-spec.md` §9.)
 
 The **interface contract** (`contract.rs`) is what enables any on-chain tool to compose with any off-chain tool without per-pair logic:
 - On-chain templates must produce `blueprint/plutus.json` during `build`.

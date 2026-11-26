@@ -10,7 +10,9 @@ compiler is an npm package pinned in the project. Its scripts use protocol \
 version 11 features, so they need a chain at PV11 or later."""
 website = "https://github.com/HarmonicLabs/pebble"
 languages = ["pebble"]
-system_deps = ["node"]
+era = "conway"
+# The template's package.json and pebble-cli need Node 22.
+system_deps = [{ node = ">=22" }]
 nix_packages = ["nodejs"]
 # The compiler is a per-project npm dependency, so package.json identifies it.
 detect = [{ file = "package.json", contains = "@harmoniclabs/pebble-cli" }]

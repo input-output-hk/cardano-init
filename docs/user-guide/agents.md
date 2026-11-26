@@ -56,6 +56,7 @@ A `--json` response has one of two shapes:
 | `fullstack_unsupported` | 2 | `{ tool_id, valid_tools }` | The tool has no fullstack template. |
 | `no_roles_selected` | 2 | `{}` | No role flag was given. |
 | `experimental_not_allowed` | 2 | `{ tools, remedy }` | An experimental tool was selected without `--allow-experimental`. |
+| `era_mismatch` | 2 | `{ eras, remedy }` | The selected tools target different ledger eras; pass `--allow-mismatch-eras` to combine them. |
 | `incompatible_tools` | 2 | `{ tools, reason, compatible_providers, compatible_off_chain, remedy }` | The off-chain tool can't reach any selected provider. |
 | `project_unrecognized` | 2 | `{ dirs }` | `add` / `remove` couldn't identify a component directory. |
 | `slot_occupied` | 2 | `{ role, dir }` | A target directory exists and isn't the recognized component. |

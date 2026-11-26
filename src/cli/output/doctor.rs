@@ -11,7 +11,7 @@ use super::layout::{borderless_table, print_dim_rule, print_panel, print_table};
 use crate::cli::theme;
 use crate::doctor::installers::Installer;
 use crate::doctor::probe::{Environment, ScanResult};
-use crate::doctor::{DepStatus, Report};
+use crate::doctor::{self, DepStatus, Report};
 use crate::registry::loader::Registry;
 use crate::registry::types::Link;
 
@@ -87,13 +87,8 @@ pub fn print_doctor(
 }
 
 /// Sorted installer keys detected on this host.
-fn detected_installers(env: &Environment) -> Vec<&'static str> {
-    let mut keys: Vec<&'static str> = Installer::ALL
-        .iter()
-        .filter(|i| env.installers.contains(i))
-        .copied()
-        .map(Installer::key)
-        .collect();
+fn detected_installers(env: &Environment) -> Vec<&str> {
+    let mut keys: Vec<&str> = env.installers.iter().map(Installer::key).collect();
     keys.sort_unstable();
     keys
 }
@@ -138,25 +133,23 @@ fn print_components(scan: &ScanResult, report: &Report, registry: &Registry) {
     for comp in &scan.components {
         let tool = registry.get(&comp.tool_id);
         let name = tool.map_or(comp.tool_id.as_str(), |t| t.name.as_str());
-        let tool_deps: Vec<&DepStatus> = tool
-            .map(|t| {
-                t.system_deps
-                    .iter()
-                    .filter_map(|d| deps.get(d.as_str()).copied())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut tool_deps: Vec<&DepStatus> = doctor::component_deps(&comp.tool_id, registry)
+            .into_iter()
+            .filter_map(|(_, d)| deps.get(d.id.as_str()).copied())
+            .collect();
+        tool_deps.sort_by_key(|d| d.id.as_str());
+        tool_deps.dedup_by_key(|d| d.id.as_str());
         let missing: Vec<&str> = tool_deps
             .iter()
             .filter(|d| !d.present)
             .map(|d| d.id.as_str())
             .collect();
         // The versions are in the advice below; here just flag it.
-        let outdated = tool_deps.iter().any(|d| d.outdated);
+        let mismatch = tool_deps.iter().any(|d| d.version_mismatch);
 
         let problems: Vec<String> = [
             (!missing.is_empty()).then(|| format!("missing: {}", missing.join(", "))),
-            outdated.then(|| "outdated".to_string()),
+            mismatch.then(|| "wrong version".to_string()),
         ]
         .into_iter()
         .flatten()
@@ -231,20 +224,26 @@ fn print_link_table<'a>(title: &str, groups: impl Iterator<Item = (&'a str, &'a 
 }
 
 /// Print the dependency status badge and, when required deps are missing or
-/// too old, how to install or upgrade each of them.
+/// at another version, how to install each of them.
 pub(super) fn print_dep_advice(report: &Report) {
     println!();
+    let conflicts = print_version_conflicts(report);
     if report.all_required_satisfied {
+        let note = if conflicts {
+            " (version requirements conflict, see above)"
+        } else {
+            ""
+        };
         println!(
-            "  {}  all required dependencies present",
+            "  {}  all required dependencies present{note}",
             theme::badge_ok("DEPS OK")
         );
         return;
     }
 
     let (badge, lead_in) = if report.all_required_present {
-        ("DEPS OUTDATED", "upgrade the dependencies below")
-    } else if report.deps.iter().any(|d| d.outdated) {
+        ("DEPS MISMATCH", "install the required versions below")
+    } else if report.deps.iter().any(|d| d.version_mismatch) {
         ("DEPS MISSING", "install or upgrade the dependencies below")
     } else {
         ("DEPS MISSING", "install the required dependencies below")
@@ -255,18 +254,62 @@ pub(super) fn print_dep_advice(report: &Report) {
     }
 }
 
+/// Deps whose selected tools need versions no single install satisfies —
+/// typically tools parked on different eras. Returns whether any was printed.
+fn print_version_conflicts(report: &Report) -> bool {
+    let mut any = false;
+    for dep in report
+        .deps
+        .iter()
+        .filter(|d| !d.version_conflict.is_empty())
+    {
+        any = true;
+        let needs = dep
+            .version_conflict
+            .iter()
+            .map(|p| format!("{} needs {}", p.tool, p.version.label()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!(
+            "  {} {}  {}",
+            theme::caution(),
+            theme::strong(&dep.id),
+            theme::warn(format!("conflicting version requirements: {needs}"))
+        );
+    }
+    any
+}
+
+/// Mark a command that installs the installer's latest instead of the pin.
+fn with_unpinned_note(status: String, unpinned: bool) -> String {
+    if unpinned {
+        format!("{status} {}", theme::dim("· installs latest"))
+    } else {
+        status
+    }
+}
+
 /// Indent for a dependency's detail lines, one level under its header.
 const DEP_INDENT: &str = "      ";
 
-/// One missing or outdated dependency: a header, an aligned `command  status`
+/// One missing or mismatched dependency: a header, an aligned `command  status`
 /// table (the recommended path, then the alternatives), and the docs link.
 fn print_unsatisfied_dep(dep: &DepStatus) {
     println!();
 
     let has_methods = !dep.plan.is_empty() || !dep.alternatives.is_empty();
-    let lead_in = match (dep.outdated, &dep.version, &dep.min_version) {
-        (true, Some(version), Some(min)) => {
-            format!("{version} installed, needs {min} or newer — upgrade with any of:")
+    let lead_in = match (dep.version_mismatch, &dep.version, &dep.required_version) {
+        (true, Some(version), Some(want)) if has_methods => {
+            format!(
+                "{version} installed, needs {} — install it with any of:",
+                want.label()
+            )
+        }
+        (true, Some(version), Some(want)) => {
+            format!(
+                "{version} installed, needs {} — no automatic install method for this system",
+                want.label()
+            )
         }
         _ if has_methods => "not installed — install with any of:".to_string(),
         _ => "not installed — no automatic install method for this system".to_string(),
@@ -291,9 +334,10 @@ fn print_unsatisfied_dep(dep: &DepStatus) {
                 .map(|s| s.command.as_str())
                 .collect::<Vec<_>>()
                 .join(" && ");
+            let unpinned = dep.plan.last().is_some_and(|s| s.unpinned);
             table.add_row(vec![
                 theme::command(command).to_string(),
-                theme::good("recommended").to_string(),
+                with_unpinned_note(theme::good("recommended").to_string(), unpinned),
             ]);
         }
         for alt in &dep.alternatives {
@@ -302,7 +346,10 @@ fn print_unsatisfied_dep(dep: &DepStatus) {
             } else {
                 theme::warn(format!("requires {}", alt.installer)).to_string()
             };
-            table.add_row(vec![theme::command(&alt.command).to_string(), status]);
+            table.add_row(vec![
+                theme::command(&alt.command).to_string(),
+                with_unpinned_note(status, alt.unpinned),
+            ]);
         }
         print_table(table, DEP_INDENT);
     }

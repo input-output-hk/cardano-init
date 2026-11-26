@@ -3,7 +3,8 @@
 # Purpose: prove the `cardano-init doctor` install recipes in
 # `registry/deps.toml` still WORK against the live world. For each installer,
 # this runs every recipe that offers it (in an environment where that installer
-# is native) and checks the dep's declared binaries end up on PATH.
+# is native) and checks the dep's declared binaries end up on PATH, at the pinned
+# version when the command installs one.
 #
 # Two-tier design (the other tier is the PR gate in ci.yml → `cargo test`):
 #   • PR gate      — `src/doctor/catalog.rs` tests prove every recipe PARSES and
@@ -118,14 +119,14 @@ jobs:
         with:
           go-version: stable
 
-      # aikup is itself a bootstrappable installer (Installer::bootstrap ⇒ node
-      # → npm → @aiken-lang/aikup). Install it so its own recipes can run.
+      # aikup is itself a bootstrappable installer (`registry/installers.toml`
+      # bootstrap ⇒ aikup ← npm ← node). Install it so its own recipes can run.
       - name: Bootstrap aikup
         if: matrix.installer == 'aikup'
         run: npm install -g @aiken-lang/aikup
 
-      # tx3up is likewise a bootstrappable installer (Installer::bootstrap ⇒
-      # tx3up). Install the manager via its own installer script, then put it on
+      # tx3up is likewise a bootstrappable installer (`registry/installers.toml`
+      # bootstrap ⇒ tx3up). Install the manager via its own installer script, then put it on
       # PATH so its recipe (`tx3up install` → the toolchain) can run.
       - name: Bootstrap tx3up
         if: matrix.installer == 'tx3up'

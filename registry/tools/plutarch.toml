@@ -11,9 +11,9 @@ community = [
   { name = "GitHub Discussions", url = "https://github.com/Plutonomicon/plutarch-plutus/discussions" },
 ]
 languages = ["haskell"]
-system_deps = ["cabal", "ghc"]
+era = "conway"
+system_deps = ["cabal", { ghc = "9.8" }]
 # Plutarch 1.15 is built and tested upstream with GHC 9.8.
-min_versions = { ghc = "9.8" }
 nix_packages = ["cabal-install", "haskell.compiler.ghc984", "pkg-config", "libsodium", "secp256k1", "blst"]
 # Like Plinth, Plutarch ships its own component-local haskell.nix flake under
 # `--nix` (a plain nixpkgs shell cannot build its CHaP/Plutus dependencies).

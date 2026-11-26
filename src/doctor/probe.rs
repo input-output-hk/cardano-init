@@ -49,21 +49,21 @@ pub struct Environment {
     pub installers: HashSet<Installer>,
     /// Dependency and installer binaries found on `PATH`.
     pub present_binaries: HashSet<String>,
-    /// Installed versions of the present deps that have a minimum version,
-    /// keyed by dep id. A dep whose version can't be read is absent.
+    /// Installed versions of the present deps with a version requirement, keyed
+    /// by dep id. A dep whose version can't be read is absent.
     pub versions: HashMap<String, Version>,
 }
 
 /// Detect the OS, available installers, which catalog/installer binaries are
-/// on `PATH`, and the installed version of each `required` dep with a floor.
+/// on `PATH`, and the installed version of each `required` dep that needs one.
 pub fn detect_environment(catalog: &DepCatalog, required: &[Requirement]) -> Environment {
     let dep_binaries = catalog
         .dep_ids()
         .filter_map(|id| catalog.get(id))
         .flat_map(|recipe| recipe.binaries.iter().map(String::as_str));
-    let installer_binaries = Installer::ALL
-        .iter()
-        .flat_map(|i| i.detect().iter().copied());
+    let installer_binaries = catalog
+        .installers()
+        .flat_map(|(_, def)| def.detect.iter().map(String::as_str));
     let candidates: HashSet<&str> = dep_binaries.chain(installer_binaries).collect();
 
     let present_binaries: HashSet<String> = candidates
@@ -72,10 +72,10 @@ pub fn detect_environment(catalog: &DepCatalog, required: &[Requirement]) -> Env
         .map(str::to_string)
         .collect();
 
-    let installers = Installer::ALL
-        .iter()
-        .copied()
-        .filter(|inst| inst.detect().iter().any(|b| present_binaries.contains(*b)))
+    let installers = catalog
+        .installers()
+        .filter(|(_, def)| def.detect.iter().any(|b| present_binaries.contains(b)))
+        .map(|(installer, _)| installer.clone())
         .collect();
 
     Environment {
@@ -116,12 +116,12 @@ fn find_on_path(bin: &str) -> Option<PathBuf> {
 /// How long a dep's version command may run before it is given up on.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Read the installed version of every `required` dep that has a floor and is
-/// on `PATH`, in parallel. Deps whose version can't be read are left out.
+/// Read the installed version of every `required` dep with a version requirement
+/// that is on `PATH`, in parallel. Deps whose version can't be read are left out.
 fn detect_versions(catalog: &DepCatalog, required: &[Requirement]) -> HashMap<String, Version> {
     let targets: Vec<(&str, PathBuf, &VersionProbe)> = required
         .iter()
-        .filter(|req| req.min_version.is_some())
+        .filter(|req| req.version.is_some() || !req.conflicts.is_empty())
         .filter_map(|req| {
             let recipe = catalog.get(&req.id)?;
             let bin = recipe.binaries.iter().find_map(|b| find_on_path(b))?;

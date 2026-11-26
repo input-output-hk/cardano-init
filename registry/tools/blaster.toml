@@ -7,6 +7,7 @@ Blaster provides a specification language and automated verification \
 engine for proving properties of on-chain validators."""
 website = "https://example.com/blaster"
 languages = ["blaster-spec"]
+era = "conway"
 system_deps = []
 nix_packages = []
 detect = ["spec/example.spec"]

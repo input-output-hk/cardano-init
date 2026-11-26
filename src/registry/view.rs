@@ -4,7 +4,7 @@
 use serde::Serialize;
 
 use super::loader::Registry;
-use super::types::{Link, Role};
+use super::types::{Era, Link, Role};
 
 /// A role, as exposed to consumers.
 #[derive(Debug, Clone, Serialize)]
@@ -26,6 +26,9 @@ pub struct ToolView {
     pub community: Vec<Link>,
     pub languages: Vec<String>,
     pub roles: Vec<String>,
+    /// The ledger era the tool's template targets; mixing eras requires
+    /// `--allow-mismatch-eras`.
+    pub era: Era,
     /// The tool declares a `[fullstack]` template. A capability, not a role, so
     /// it never appears in `roles`.
     pub fullstack: bool,
@@ -66,6 +69,7 @@ pub fn tool_views(registry: &Registry) -> Vec<ToolView> {
                 community: tool.community.clone(),
                 languages: tool.languages.clone(),
                 roles,
+                era: tool.era,
                 fullstack: tool.fullstack.is_some(),
                 experimental: tool.experimental,
             }
@@ -150,5 +154,13 @@ mod tests {
         assert!(blaster.experimental);
         let aiken = views.iter().find(|t| t.id == "aiken").unwrap();
         assert!(!aiken.experimental);
+    }
+
+    #[test]
+    fn tool_views_serialize_era_as_kebab() {
+        let views = tool_views(&registry());
+        let aiken = views.iter().find(|t| t.id == "aiken").unwrap();
+        let value = serde_json::to_value(aiken).unwrap();
+        assert_eq!(value["era"], "conway");
     }
 }

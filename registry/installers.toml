@@ -1,0 +1,55 @@
+# Installers `doctor` can recommend (tech-spec §9.2).
+#
+# Keyed by installer id: the key a `registry/deps.toml` method uses
+# (`{ npm = "npm install -g …" }`) and the JSON `installer` value. Each has:
+#   detect     binaries whose presence on PATH means the installer is available
+#              (at least one)
+#   bootstrap  dep ids (in registry/deps.toml) that provide the installer when
+#              it's missing, tried in order. Omitted ⇒ detect only, never
+#              installed by the doctor.
+#   install_only
+#              true when it can't move an installed dep to a newer version, so
+#              it's only suggested for a missing one. Default false.
+#
+# Checked at load: every installer a recipe uses is declared here, every one
+# declared here is used by a recipe, and every bootstrap id has a recipe.
+
+[brew]
+detect = ["brew"]
+
+# A distro release ships one version, so if it's too old, upgrading can't help.
+[apt]
+detect = ["apt"]
+install_only = true
+
+[winget]
+detect = ["winget"]
+
+[nix]
+detect = ["nix"]
+
+[curl]
+detect = ["curl"]
+
+[powershell]
+detect = ["powershell", "pwsh"]
+
+[go]
+detect = ["go"]
+bootstrap = ["go"]
+
+[cargo]
+detect = ["cargo"]
+bootstrap = ["rustup", "rust"]
+
+[npm]
+detect = ["npm"]
+bootstrap = ["node"]
+
+[aikup]
+detect = ["aikup"]
+bootstrap = ["aikup"]
+
+[tx3up]
+detect = ["tx3up"]
+bootstrap = ["tx3up"]

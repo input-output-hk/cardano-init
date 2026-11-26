@@ -5,7 +5,7 @@
 - `cardano-init` decides which tools the project uses and how they connect.
 - `aikup`, `cardano-up`, and similar installers install and manage those tools.
 
-They meet in the [`doctor`](commands.md#doctor) command. When a toolchain is missing, `doctor` tells you which installer to use, for example `aikup` for Aiken and `cardano-up` for the infrastructure role. When a toolchain is older than a template needs, `doctor` prints the upgrade command.
+They meet in the [`doctor`](commands.md#doctor) command. When a toolchain is missing, `doctor` tells you which installer to use, for example `aikup` for Aiken and `cardano-up` for the infrastructure role. When a toolchain isn't at a version a template supports, `doctor` prints the command that installs one that is.
 
 `cardano-init` does not:
 
